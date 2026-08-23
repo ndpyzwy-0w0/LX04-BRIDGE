@@ -1,0 +1,72 @@
+plugins {
+    id "com.android.application"
+}
+
+android {
+    namespace "com.lx04.pcbridge"
+    compileSdk 34
+
+    defaultConfig {
+        applicationId "com.lx04.pcbridge"
+        minSdk 26
+        targetSdk 28
+        versionCode 1
+        versionName "1.0.0"
+    }
+
+    androidResources {
+        localeFilters += ["zh", "en"]
+    }
+
+    buildTypes {
+        debug {
+            minifyEnabled false
+        }
+        release {
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+    }
+
+    packaging {
+        resources {
+            excludes += [
+                    "META-INF/DEPENDENCIES",
+                    "META-INF/LICENSE*",
+                    "META-INF/NOTICE*",
+                    "META-INF/*.kotlin_module"
+            ]
+        }
+    }
+}
+
+tasks.register("checkApkSize") {
+    doLast {
+        def apks = fileTree(dir: "build/outputs/apk", include: "**/*.apk")
+        if (apks.isEmpty()) {
+            logger.warn("No APK found yet. Build the app first.")
+            return
+        }
+        long limit = 300L * 1024L * 1024L
+        apks.each { apk ->
+            logger.lifecycle("APK ${apk.name}: ${apk.length()} bytes (limit 300MB)")
+            if (apk.length() > limit) {
+                throw new GradleException("APK ${apk.name} is ${apk.length()} bytes, exceeds the 300MB limit")
+            }
+        }
+    }
+}
+
+tasks.matching { it.name.startsWith("assemble") }.configureEach {
+    finalizedBy("checkApkSize")
+}
+
+dependencies {
+    // Keep the APK tiny: Android 8.1+ APIs only, no AndroidX / Play services.
+}

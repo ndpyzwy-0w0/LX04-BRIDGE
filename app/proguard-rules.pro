@@ -1,0 +1,3 @@
+-keep class com.lx04.pcbridge.** { *; }
+-keepclassmembers class com.lx04.pcbridge.** { *; }
+-dontwarn com.lx04.pcbridge.**
