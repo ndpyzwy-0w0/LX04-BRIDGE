@@ -1,0 +1,75 @@
+# LX04 PC Bridge 协议（USB 数据线）
+
+二进制小端帧，走 TCP。默认端口 **17890**。
+
+电脑用 USB 连音箱后，上位机执行：
+
+```text
+adb forward tcp:17890 tcp:17890
+```
+
+然后连接 `127.0.0.1:17890`。整条音频和状态都走 USB 上的 ADB 隧道，不依赖 Wi-Fi。
+
+## 帧头 16 字节
+
+| 偏移 | 类型 | 说明 |
+|------|------|------|
+| 0 | 4s | 魔数 `LXB1` |
+| 4 | u8 | 消息类型 |
+| 5 | u8 | 标志（bit0=静音） |
+| 6 | u16 | 序号 |
+| 8 | u32 | 设备 `elapsedRealtime` 毫秒 |
+| 12 | u32 | payload 长度 |
+
+## 类型
+
+| 值 | 名称 | 方向 | payload |
+|----|------|------|---------|
+| 0x01 | HELLO | 音箱→电脑 | UTF-8 JSON |
+| 0x02 | HELLO_ACK | 电脑→音箱 | UTF-8 JSON |
+| 0x03 | AUDIO | 音箱→电脑 | PCM S16LE |
+| 0x04 | STATUS | 音箱→电脑 | UTF-8 JSON |
+| 0x05 | CONTROL | 电脑→音箱 | UTF-8 JSON |
+| 0x06 | PING | 双向 | 空 |
+| 0x07 | PONG | 双向 | 空 |
+
+## HELLO JSON
+
+```json
+{
+  "device": "LX04",
+  "model": "Xiaomi LX04",
+  "android": "8.1.0",
+  "sampleRate": 48000,
+  "channels": 1,
+  "bits": 16,
+  "encoding": "pcm_s16le",
+  "port": 17890
+}
+```
+
+## STATUS JSON
+
+```json
+{
+  "usbConnected": true,
+  "usbAdb": true,
+  "recording": true,
+  "muted": false,
+  "level": 0.42,
+  "frames": 1200,
+  "dropped": 0,
+  "sampleRate": 48000,
+  "channels": 1
+}
+```
+
+## CONTROL JSON
+
+```json
+{"cmd": "mute"}
+{"cmd": "unmute"}
+{"cmd": "ping"}
+```
+
+音频块约 20ms。电脑侧应优先丢旧帧保实时，不要为了可靠传输堆缓冲。

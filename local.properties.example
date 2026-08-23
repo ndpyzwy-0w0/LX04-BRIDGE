@@ -1,0 +1,3 @@
+# Copy this file to local.properties and set your SDK path if Gradle cannot find it.
+# Android Studio usually writes this file automatically.
+# sdk.dir=C:\\Users\\YOU\\AppData\\Local\\Android\\Sdk
