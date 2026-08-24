@@ -1,0 +1,11 @@
+VB-CABLE is a product of VB-Audio (Vincent Burel).
+
+Origin: https://www.vb-cable.com/
+Official package: VBCABLE_Driver_Pack45.zip (unmodified)
+
+VB-CABLE is donationware. All participations are welcome:
+https://vb-audio.com/Cable/
+
+This folder only redistributes the official package as-is.
+LX04 PC Bridge launches VBCABLE_Setup_x64.exe; it does not replace
+the VB-Audio installer and does not modify driver files.
