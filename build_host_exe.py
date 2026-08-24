@@ -130,7 +130,10 @@ def main() -> int:
     latest.write_bytes(exe_path.read_bytes())
     print("Wrote", exe_path)
     print("Wrote", latest)
-    _commit_usable_version(version)
+    _commit_usable_version(
+        version,
+        "skip digital-silent Android mics; preroll CABLE Input; do not restart inject on every HELLO",
+    )
     return 0
 
 
@@ -148,7 +151,7 @@ COMMIT_PATHS = [
 ]
 
 
-def _commit_usable_version(version: int) -> None:
+def _commit_usable_version(version: int, summary: str = "") -> None:
     """Snapshot source + current EXE after a usable pack. Historical vN.exe stay gitignored."""
     git_dir = ROOT / ".git"
     if not git_dir.exists():
@@ -162,8 +165,9 @@ def _commit_usable_version(version: int) -> None:
         ).strip()
         if not staged:
             return
+        why = summary or "snapshot source and current host EXE"
         message = (
-            f"Release v{version}: snapshot source and current host EXE.\n"
+            f"Release v{version}: {why}\n"
             "\n"
             "Keep versioned dist/LX04-PC-Bridge-Host-vN.exe on disk only."
         )
