@@ -150,6 +150,7 @@ class HostApp:
         self.adb = adb_usb.find_adb()
         self.devices: list[str] = []
         self.connected = False
+        self._serial = ""
         self._gain_sent_at = 0.0
         self._build()
         self.refresh_devices()
@@ -377,14 +378,21 @@ class HostApp:
             gadget = adb_usb.enable_usb_microphone(self.adb, serial)
             if gadget:
                 self._log("USB 功能: " + " ".join(gadget.split()))
+            mic = adb_usb.take_speaker_mic(self.adb, serial)
+            self._log(mic)
             adb_usb.usb_forward(self.adb, serial)
             self.client.connect("127.0.0.1", protocol.PORT)
             self.connected = True
+            self._serial = serial
             self._on_gain()
             self.client.send_control("gain", gain=round(self.sink.gain, 3))
             self.headline.configure(text="USB 已连接")
         except Exception as exc:
             self.connected = False
+            try:
+                adb_usb.release_speaker_mic(self.adb, serial)
+            except Exception:
+                pass
             messagebox.showerror("LX04", str(exc))
             self._log("连接失败: " + str(exc))
 
@@ -392,6 +400,11 @@ class HostApp:
         self.client.close()
         self.sink.stop()
         self.connected = False
+        if self.adb and self._serial:
+            try:
+                self._log(adb_usb.release_speaker_mic(self.adb, self._serial))
+            except Exception as exc:
+                self._log("恢复小爱麦失败: " + str(exc))
         self.headline.configure(text="已断开")
         self.detail.configure(text="可以重新点连接。")
         self._draw_meter(0)

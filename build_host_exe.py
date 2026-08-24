@@ -132,7 +132,7 @@ def main() -> int:
     print("Wrote", latest)
     _commit_usable_version(
         version,
-        "show APK version on the speaker screen so each install is visible",
+        "pause XiaoAi VPM so the dual mics reach the APK instead of digital silence",
     )
     return 0
 
