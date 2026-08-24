@@ -93,10 +93,25 @@ def present() -> bool:
         devices = list(sd.query_devices())
     except Exception:
         return False
-    names = [str(info.get("name") or "").lower() for info in devices]
-    has_in = any("cable input" in name for name in names)
-    has_out = any("cable output" in name for name in names)
+    names = [str(info.get("name") or "") for info in devices]
+    has_in = any(_is_vb_cable_input(name) for name in names)
+    has_out = any(_is_vb_cable_output(name) for name in names)
     return has_in and has_out
+
+
+def _is_hifi(name: str) -> bool:
+    lowered = (name or "").lower()
+    return "hi-fi" in lowered or "hifi" in lowered
+
+
+def _is_vb_cable_input(name: str) -> bool:
+    lowered = (name or "").lower()
+    return "cable input" in lowered and not _is_hifi(name) and "16ch" not in lowered and "16 ch" not in lowered
+
+
+def _is_vb_cable_output(name: str) -> bool:
+    lowered = (name or "").lower()
+    return "cable output" in lowered and not _is_hifi(name)
 
 
 def run_official_setup() -> str:
