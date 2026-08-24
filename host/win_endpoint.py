@@ -243,29 +243,23 @@ def _disable_endpoint_fx(flow: str, device_id: str) -> bool:
         winreg.CloseKey(key)
 
 
-def _iter_devices(data_flow: int):
+def _iter_devices(data_flow: int, device_state: int | None = None):
     try:
         from pycaw.constants import DEVICE_STATE
         from pycaw.pycaw import AudioUtilities
     except Exception:
         return []
+    state = DEVICE_STATE.ACTIVE.value if device_state is None else device_state
     try:
         return list(
             AudioUtilities.GetAllDevices(
                 data_flow=data_flow,
-                device_state=DEVICE_STATE.ACTIVE.value,
+                device_state=state,
             )
         )
     except Exception:
         try:
-            active = DEVICE_STATE.ACTIVE.value
-            out = []
-            for device in AudioUtilities.GetAllDevices():
-                state = getattr(device, "state", None)
-                value = getattr(state, "value", state)
-                if int(value) == int(active):
-                    out.append(device)
-            return out
+            return list(AudioUtilities.GetAllDevices())
         except Exception:
             return []
 
@@ -286,38 +280,44 @@ def _unmute(device: Any) -> None:
         pass
 
 
-def _hide_16ch_cable_endpoints() -> list[str]:
+def _restore_cable_endpoints() -> list[str]:
+    """Show 16-channel VB-CABLE endpoints again. Hiding them left WeChat holding a dead mic."""
     try:
-        from pycaw.constants import EDataFlow
+        from pycaw.constants import DEVICE_STATE, EDataFlow
     except Exception:
         return []
-    hidden: list[str] = []
+    restored: list[str] = []
     try:
         policy = _policy_config()
     except Exception:
         return []
+    mask = DEVICE_STATE.MASK_ALL.value
     for flow in (EDataFlow.eCapture.value, EDataFlow.eRender.value):
-        for device in _iter_devices(flow):
+        for device in _iter_devices(flow, mask):
             name = device.FriendlyName or ""
             lowered = name.lower()
-            if not (_is_16ch_cable(name) or "vb-audio point" in lowered):
+            if "cable" not in lowered and "vb-audio" not in lowered:
                 continue
             try:
-                hr = policy.SetEndpointVisibility(device.id, 0)
+                hr = policy.SetEndpointVisibility(device.id, 1)
                 if hr == 0 or hr is None:
-                    hidden.append(name)
+                    restored.append(name)
             except Exception:
                 pass
-    return hidden
+    return restored
+
+
+def _hide_16ch_cable_endpoints() -> list[str]:
+    return []
 
 
 def prepare_vb_cable() -> dict[str, Any]:
-    """Lock both VB-CABLE ends to 48 kHz stereo and hide 16-channel endpoints."""
+    """Unmute both VB-CABLE ends, make CABLE Output the default mic, keep 48 kHz stereo."""
     result: dict[str, Any] = {"capture": None, "render": None, "logs": []}
     logs: list[str] = result["logs"]
-    hidden = _hide_16ch_cable_endpoints()
-    if hidden:
-        logs.append("已隐藏 16 声道虚拟线: " + "、".join(hidden))
+    restored = _restore_cable_endpoints()
+    if restored:
+        logs.append("已重新显示 CABLE 设备，请完全退出微信后再选「CABLE Output」")
     try:
         from pycaw.constants import EDataFlow, ERole
         from pycaw.pycaw import AudioUtilities
