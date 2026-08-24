@@ -41,14 +41,19 @@ class AudioSink:
         return sd is not None
 
     def list_inject_outputs(self) -> list[tuple[int, str]]:
-        ranked = self._ranked_outputs()
-        return [(index, name) for index, name, _score in ranked if _score > 0]
+        return self.list_playback_devices(preferred_only=True)
+
+    def list_playback_devices(self, preferred_only: bool = False) -> list[tuple[int, str]]:
+        ranked = self._ranked_outputs(include_zero=not preferred_only)
+        if preferred_only:
+            return [(index, name) for index, name, score in ranked if score > 0]
+        return [(index, name) for index, name, _score in ranked]
 
     def preferred_device(self) -> int | None:
-        ranked = self._ranked_outputs()
+        ranked = self._ranked_outputs(include_zero=False)
         return ranked[0][0] if ranked and ranked[0][2] > 0 else None
 
-    def _ranked_outputs(self) -> list[tuple[int, str, int]]:
+    def _ranked_outputs(self, include_zero: bool = False) -> list[tuple[int, str, int]]:
         if sd is None:
             return []
         try:
@@ -65,10 +70,13 @@ class AudioSink:
             api_index = int(info.get("hostapi") or 0)
             if 0 <= api_index < len(hostapis):
                 api = str(hostapis[api_index].get("name") or "")
+            if "WDM-KS" in api or ("WDM" in api and "KS" in api):
+                continue
             score = _score_inject_output(name, api, max_out)
-            if score > 0:
-                ranked.append((index, f"{name}  [{api}]", score))
-        ranked.sort(key=lambda item: item[2], reverse=True)
+            if score <= 0 and not include_zero:
+                continue
+            ranked.append((index, f"{name}  [{api}]", score))
+        ranked.sort(key=lambda item: (-item[2], item[1].lower()))
         return ranked
 
     def configure(self, sample_rate: int, channels: int) -> None:

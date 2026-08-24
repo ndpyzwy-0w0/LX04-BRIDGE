@@ -35,4 +35,4 @@ host/lx04mic/
 # Official VB-Audio Hi-Fi Cable installer (download on demand / local cache).
 host/hificable.zip
 host/hificable/*.zip
-host/hificable/pack/
+host/audio_routes.json
