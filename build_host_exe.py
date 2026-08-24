@@ -132,7 +132,7 @@ def main() -> int:
     print("Wrote", latest)
     _commit_usable_version(
         version,
-        "skip digital-silent Android mics; preroll CABLE Input; do not restart inject on every HELLO",
+        "show APK version on the speaker screen so each install is visible",
     )
     return 0
 

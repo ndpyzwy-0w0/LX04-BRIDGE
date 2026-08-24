@@ -223,6 +223,7 @@ final class TcpBridgeServer {
             o.put("sampleRate", state.sampleRate);
             o.put("channels", state.channels);
             o.put("audioSource", state.audioSource);
+            o.put("apkVersion", state.apkVersion);
             o.put("bits", 16);
             o.put("encoding", "pcm_s16le");
             o.put("port", Protocol.PORT);

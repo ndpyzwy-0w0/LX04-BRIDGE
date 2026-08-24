@@ -25,6 +25,7 @@ public class BridgeService extends Service {
     public void onCreate() {
         super.onCreate();
         STATE.androidRelease = android.os.Build.VERSION.RELEASE;
+        STATE.apkVersion = AppVersion.read(this);
         startAsForeground();
         PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
         if (pm != null) {
@@ -214,7 +215,7 @@ public class BridgeService extends Service {
         PendingIntent pi = PendingIntent.getActivity(this, 0, launch,
                 PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
         Notification notification = new Notification.Builder(this, "bridge")
-                .setContentTitle(getString(R.string.app_name))
+                .setContentTitle(getString(R.string.app_name) + " " + AppVersion.label(STATE.apkVersion))
                 .setContentText("麦克风桥接运行中")
                 .setSmallIcon(android.R.drawable.ic_btn_speak_now)
                 .setContentIntent(pi)

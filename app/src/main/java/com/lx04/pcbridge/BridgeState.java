@@ -16,6 +16,7 @@ final class BridgeState {
     volatile String audioSource = "";
     volatile String androidRelease = "";
     volatile String pcName = "";
+    volatile String apkVersion = "";
     volatile String headline = "等待 USB";
     volatile String detail = "请用数据线连接电脑并打开 USB 调试";
 
