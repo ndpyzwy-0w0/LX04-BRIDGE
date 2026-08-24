@@ -156,7 +156,7 @@ def main() -> int:
     print("Wrote", latest)
     _commit_usable_version(
         version,
-        "keep mic inject on VB-CABLE, not Hi-Fi Cable",
+        "selectable mic and speaker audio routes",
     )
     return 0
 

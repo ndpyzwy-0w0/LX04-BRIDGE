@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import array
+import json
 import math
 import socket
 import sys
@@ -19,6 +20,7 @@ def _host_dir() -> Path:
 
 
 HOST_DIR = _host_dir()
+ROUTES_FILE = HOST_DIR / "audio_routes.json"
 if not getattr(sys, "frozen", False) and str(HOST_DIR) not in sys.path:
     sys.path.insert(0, str(HOST_DIR))
 
@@ -168,16 +170,26 @@ class HostApp:
         self._gain_sent_at = 0.0
         self._prev_render: tuple[str, str] | None = None
         self.play_peak = 0.0
+        self.mic_enabled = tk.BooleanVar(value=True)
+        self.spk_enabled = tk.BooleanVar(value=False)
+        self.set_default_spk = tk.BooleanVar(value=True)
+        self.inject_var = tk.StringVar()
+        self.spk_dev_var = tk.StringVar()
+        self._inject_devices: list[tuple[int, str]] = []
+        self._spk_devices: list[tuple[str, str]] = []
+        self._routes_ready = False
         self._build()
+        self._load_routes()
         self.refresh_devices()
-        self.refresh_mic_status()
+        self.refresh_audio_devices()
+        self._routes_ready = True
         self.root.after(400, self._tick)
 
     def _build(self) -> None:
         self.root.title("LX04 上位机")
         self.root.configure(bg=BG)
-        self.root.geometry("780x680")
-        self.root.minsize(700, 560)
+        self.root.geometry("860x760")
+        self.root.minsize(760, 640)
 
         style = ttk.Style()
         try:
@@ -220,7 +232,7 @@ class HostApp:
         ttk.Label(self.root, text="LX04 PC Bridge", style="Title.TLabel").pack(anchor="w", padx=20, pady=(16, 4))
         ttk.Label(
             self.root,
-            text="USB 数据线连接小爱触屏音箱 LX04。语音软件请选麦克风「CABLE Output」。系统播放会走到音箱喇叭。",
+            text="USB 连接小爱触屏音箱 LX04。下面两条通路可单独开关、自选设备。",
             style="Dim.TLabel",
         ).pack(anchor="w", padx=20)
 
@@ -237,15 +249,68 @@ class HostApp:
         ttk.Button(row, text="连接", command=self.connect).pack(side="left", padx=6)
         ttk.Button(row, text="断开", command=self.disconnect).pack(side="left")
 
+        mic_row = ttk.Frame(card, style="Card.TFrame")
+        mic_row.pack(fill="x", padx=16, pady=(0, 8))
+        tk.Checkbutton(
+            mic_row,
+            text="麦克风 → 电脑",
+            variable=self.mic_enabled,
+            command=self._on_mic_route_change,
+            bg=PANEL,
+            fg=TEXT,
+            selectcolor="#1E2A44",
+            activebackground=PANEL,
+            activeforeground=TEXT,
+            highlightthickness=0,
+            font=("Segoe UI", 10),
+        ).pack(side="left")
+        self.inject_combo = ttk.Combobox(mic_row, textvariable=self.inject_var, width=52, state="readonly")
+        self.inject_combo.pack(side="left", padx=8, fill="x", expand=True)
+        self.inject_combo.bind("<<ComboboxSelected>>", lambda _e: self._on_mic_route_change())
+
+        spk_row = ttk.Frame(card, style="Card.TFrame")
+        spk_row.pack(fill="x", padx=16, pady=(0, 8))
+        tk.Checkbutton(
+            spk_row,
+            text="电脑 → 音箱",
+            variable=self.spk_enabled,
+            command=self._on_spk_route_change,
+            bg=PANEL,
+            fg=TEXT,
+            selectcolor="#1E2A44",
+            activebackground=PANEL,
+            activeforeground=TEXT,
+            highlightthickness=0,
+            font=("Segoe UI", 10),
+        ).pack(side="left")
+        self.spk_combo = ttk.Combobox(spk_row, textvariable=self.spk_dev_var, width=36, state="readonly")
+        self.spk_combo.pack(side="left", padx=8, fill="x", expand=True)
+        self.spk_combo.bind("<<ComboboxSelected>>", lambda _e: self._on_spk_route_change())
+        tk.Checkbutton(
+            spk_row,
+            text="设为默认播放",
+            variable=self.set_default_spk,
+            command=self._on_spk_route_change,
+            bg=PANEL,
+            fg=TEXT,
+            selectcolor="#1E2A44",
+            activebackground=PANEL,
+            activeforeground=TEXT,
+            highlightthickness=0,
+            font=("Segoe UI", 10),
+        ).pack(side="left")
+
         row2 = ttk.Frame(card, style="Card.TFrame")
         row2.pack(fill="x", padx=16, pady=(0, 8))
         ttk.Button(row2, text="试音", command=self._on_test_tone).pack(side="left")
         ttk.Button(row2, text="音箱试音", command=self._on_speaker_test_tone).pack(side="left", padx=6)
         ttk.Button(row2, text="静音切换", command=lambda: self.client.send_control("toggle_mute")).pack(side="left", padx=6)
+        ttk.Button(row2, text="安装 VB-CABLE", command=self._install_vb).pack(side="right")
+        ttk.Button(row2, text="安装 Hi-Fi Cable", command=self._install_hifi).pack(side="right", padx=6)
 
         row3 = ttk.Frame(card, style="Card.TFrame")
         row3.pack(fill="x", padx=16, pady=(0, 12))
-        ttk.Label(row3, text="电脑麦克风", style="Card.TLabel").pack(side="left")
+        ttk.Label(row3, text="微信请选麦克风", style="Card.TLabel").pack(side="left")
         self.mic_var = tk.StringVar(value="尚未识别")
         ttk.Label(row3, textvariable=self.mic_var, style="Card.TLabel").pack(side="left", padx=8)
 
@@ -295,74 +360,186 @@ class HostApp:
             font=("Consolas", 10),
         )
         self.log.pack(fill="both", expand=True, padx=20, pady=(0, 8))
-        hint = "连接后：微信麦克风选「CABLE Output」；电脑声音从音箱喇叭出。不要把 CABLE Input 设成系统扬声器。"
+        hint = "麦克风通路请选 CABLE Input，微信里选 CABLE Output。扬声器通路请选 Hi-Fi Cable Input。两条线不要选成同一个设备。"
         ttk.Label(self.root, text=hint, style="Dim.TLabel").pack(anchor="w", padx=20, pady=(0, 16))
         self._log("adb: " + (self.adb or "未找到内置 adb"))
-        if vb_cable.present():
-            self._log("已检测到 VB-CABLE，语音软件请选「CABLE Output」。")
-        else:
-            self._log("未检测到 VB-CABLE。连接时会打开官方安装程序（www.vb-cable.com，捐赠软件）。")
         if not self.sink.available():
             self._log("音频库未安装：在 host 目录执行  pip install -r requirements.txt")
-        if hifi_cable.present():
-            self._log("已检测到 Hi-Fi Cable，连接后会把系统播放接到音箱喇叭。")
-        else:
-            self._log("未检测到 Hi-Fi Cable。连接时可选装（要把电脑音乐接到音箱才需要）。")
+
+    def _selected_inject(self) -> tuple[int, str] | None:
+        label = self.inject_var.get()
+        for index, name in self._inject_devices:
+            if name == label:
+                return index, name
+        if self._inject_devices:
+            return self._inject_devices[0]
+        return None
+
+    def _selected_speaker(self) -> tuple[str, str] | None:
+        label = self.spk_dev_var.get()
+        for device_id, name in self._spk_devices:
+            if name == label:
+                return device_id, name
+        if self._spk_devices:
+            return self._spk_devices[0]
+        return None
+
+    def _load_routes(self) -> None:
+        try:
+            data = json.loads(ROUTES_FILE.read_text(encoding="utf-8"))
+        except Exception:
+            data = {}
+        self.mic_enabled.set(bool(data.get("mic_enabled", True)))
+        self.spk_enabled.set(bool(data.get("spk_enabled", False)))
+        self.set_default_spk.set(bool(data.get("set_default_spk", True)))
+        self._saved_inject = str(data.get("inject") or "")
+        self._saved_spk = str(data.get("speaker") or "")
+
+    def _save_routes(self) -> None:
+        payload = {
+            "mic_enabled": bool(self.mic_enabled.get()),
+            "spk_enabled": bool(self.spk_enabled.get()),
+            "set_default_spk": bool(self.set_default_spk.get()),
+            "inject": self.inject_var.get(),
+            "speaker": self.spk_dev_var.get(),
+        }
+        try:
+            ROUTES_FILE.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        except Exception:
+            pass
+
+    def refresh_audio_devices(self, log: bool = True) -> None:
+        previous_inject = self.inject_var.get() or getattr(self, "_saved_inject", "")
+        previous_spk = self.spk_dev_var.get() or getattr(self, "_saved_spk", "")
+        self._inject_devices = self.sink.list_playback_devices()
+        inject_labels = [name for _index, name in self._inject_devices]
+        self.inject_combo["values"] = inject_labels
+        preferred = None
+        pref_index = self.sink.preferred_device()
+        for index, name in self._inject_devices:
+            if index == pref_index:
+                preferred = name
+                break
+        chosen = _pick_label(inject_labels, previous_inject, preferred)
+        if chosen:
+            self.inject_var.set(chosen)
+        self._spk_devices = win_endpoint.list_render_endpoints()
+        spk_labels = [name for _device_id, name in self._spk_devices]
+        self.spk_combo["values"] = spk_labels
+        hifi = next((name for _device_id, name in self._spk_devices if hifi_cable.is_hifi_render(name)), None)
+        chosen_spk = _pick_label(spk_labels, previous_spk, hifi)
+        if chosen_spk:
+            self.spk_dev_var.set(chosen_spk)
+        if log:
+            if vb_cable.present():
+                self._log("麦克风建议：CABLE Input（VB-Audio Virtual Cable），微信选 CABLE Output。")
+            if hifi_cable.present():
+                self._log("扬声器建议：Hi-Fi Cable Input。")
+
+    def _on_mic_route_change(self) -> None:
+        if not self._routes_ready:
+            return
+        self._save_routes()
+        if not self.connected:
+            return
+        try:
+            self._apply_mic_route()
+        except Exception as exc:
+            self._log("切换麦克风通路失败: " + str(exc))
+
+    def _on_spk_route_change(self) -> None:
+        if not self._routes_ready:
+            return
+        self._save_routes()
+        if not self.connected:
+            return
+        try:
+            self._apply_speaker_route()
+        except Exception as exc:
+            self._log("切换扬声器通路失败: " + str(exc))
+
+    def _apply_mic_route(self) -> None:
+        if not self.mic_enabled.get():
+            self.hw.stop(self.adb, self._serial)
+            self.sink.stop()
+            self._log("已关闭麦克风通路")
+            return
+        self.sink.configure(48000, 1)
+        self._start_inject()
+        if self.adb and self._serial and not self.hw.running():
+            try:
+                self.hw.start(self.adb, self._serial, self.sink)
+                self._log("已从音箱数字麦直采：48kHz 单声道（tinycap pcmC0D1c）")
+                self.client.send_control("stop_mic")
+            except Exception as exc:
+                self._log("硬件直采失败，回退 APK 麦克风: " + str(exc))
+                self.client.send_control("start_mic")
+
+    def _apply_speaker_route(self) -> None:
+        if not self.spk_enabled.get():
+            self._restore_render()
+            self._log("已关闭扬声器通路")
+            return
+        self._start_speaker()
+
+    def _install_vb(self) -> None:
+        if not messagebox.askokcancel("LX04", vb_cable.DONATE_TEXT):
+            return
+        self._log(vb_cable.run_official_setup())
+        self.refresh_audio_devices()
+
+    def _install_hifi(self) -> None:
+        if not messagebox.askokcancel("LX04", hifi_cable.DONATE_TEXT):
+            return
+        self._log(hifi_cable.run_official_setup())
+        self.refresh_audio_devices()
 
     def _start_inject(self) -> None:
-        if not vb_cable.present():
-            if not messagebox.askokcancel("LX04", vb_cable.DONATE_TEXT):
-                raise RuntimeError("未安装 VB-CABLE，无法把音箱声音送给微信。")
-            result = vb_cable.run_official_setup()
-            self._log(result)
-            if not vb_cable.present():
-                raise RuntimeError(result)
-        prepared = win_endpoint.prepare_vb_cable()
-        for line in prepared.get("logs") or []:
-            self._log(line)
-        device = self.sink.preferred_device()
-        if device is None:
-            raise RuntimeError("找不到 CABLE Input。若刚装完 VB-CABLE，请先重启电脑再打开本程序。")
+        selected = self._selected_inject()
+        if selected is None:
+            raise RuntimeError("没有可用的播放设备。请先点刷新，或安装 VB-CABLE。")
+        device, label = selected
+        if win_endpoint.is_cable_render(label):
+            prepared = win_endpoint.prepare_vb_cable()
+            for line in prepared.get("logs") or []:
+                self._log(line)
         self.sink.start(device)
         rec = win_mic.matching_recording_device(self.sink.device_name)
-        rec_name = rec[1] if rec else (prepared.get("capture") or "CABLE Output")
+        rec_name = rec[1] if rec else "CABLE Output"
         self.mic_var.set("请选择： " + rec_name)
-        self._log("已把音箱声音送入: " + self.sink.device_name)
+        self._log("麦克风已送入: " + self.sink.device_name + "  /  " + label)
         self._log(
             f"注入格式: {self.sink.out_rate}Hz / {self.sink._dtype} / {self.sink.out_channels}ch"
         )
-        self._log("语音软件请选择麦克风: " + rec_name + "（不要选 CABLE Input）")
-        self._log("若微信里仍无声：完全退出微信（托盘也退出），再打开并只选 CABLE Output。")
-        if prepared.get("capture"):
-            self._log("已设为系统默认麦克风: " + str(prepared["capture"]))
+        self._log("语音软件请选择: " + rec_name)
+        self._save_routes()
 
     def _start_speaker(self) -> None:
-        if not hifi_cable.present():
-            if messagebox.askokcancel("LX04", hifi_cable.DONATE_TEXT):
-                result = hifi_cable.run_official_setup()
-                self._log(result)
-            if not hifi_cable.present():
-                self._log("音箱可以先点「音箱试音」。要把电脑音乐接到音箱，请装完 Hi-Fi Cable 后重启。")
-                return
-        prepared = win_endpoint.prepare_hifi_cable()
+        selected = self._selected_speaker()
+        if selected is None:
+            self._log("没有可环回的播放设备，扬声器通路未打开。可用「音箱试音」检查喇叭。")
+            return
+        device_id, name = selected
+        inject = self._selected_inject()
+        if self.mic_enabled.get() and inject is not None and win_endpoint.is_cable_render(name) and win_endpoint.is_cable_render(inject[1]):
+            self._log("警告：扬声器和麦克风都选了 VB-CABLE，微信里会串进系统声音。")
+        self.loopback.stop()
+        self.play_peak = 0.0
+        prepared = win_endpoint.prepare_render_device(device_id)
         for line in prepared.get("logs") or []:
             self._log(line)
-        device_id = prepared.get("device_id")
-        if not device_id:
-            return
-        current = win_endpoint.get_default_render()
-        if current and current[0] != device_id:
-            self._prev_render = current
-        if not win_endpoint.set_default_render(device_id):
-            self._log("未能把系统播放切到 Hi-Fi Cable Input。")
-            return
-        self._log("已把系统播放切到: " + str(prepared.get("render")))
-        self._log("微信麦克风仍选 CABLE Output。若某软件还走原来的扬声器，请关掉再打开该软件。")
-        self.loopback.start(
-            device_id,
-            str(prepared.get("render") or "Hi-Fi Cable Input"),
-            self._on_loopback_pcm,
-        )
+        device_id = prepared.get("device_id") or device_id
+        if self.set_default_spk.get():
+            current = win_endpoint.get_default_render()
+            if current and current[0] != device_id and self._prev_render is None:
+                self._prev_render = current
+            if win_endpoint.set_default_render(device_id):
+                self._log("已把系统播放切到: " + name)
+            else:
+                self._log("未能把系统播放切到选中的设备。")
+        self.loopback.start(device_id, name, self._on_loopback_pcm)
+        self._log("扬声器环回: " + name)
+        self._save_routes()
 
     def _on_loopback_pcm(self, pcm: bytes, muted: bool) -> None:
         self.play_peak = self.loopback.peak
@@ -415,6 +592,9 @@ class HostApp:
         self._log("已向音箱送出试音。应能从音箱喇叭听到「嘀」。")
 
     def _on_test_tone(self) -> None:
+        if not self.mic_enabled.get():
+            messagebox.showerror("LX04", "请先勾选「麦克风 → 电脑」，并选好 CABLE Input。")
+            return
         try:
             if not self.sink.running():
                 self.sink.configure(48000, 1)
@@ -453,21 +633,7 @@ class HostApp:
         self.device_combo["values"] = labels
         self.device_var.set(labels[0])
         self._log("USB 设备: " + (", ".join(self.devices) if self.devices else "无"))
-
-    def refresh_mic_status(self) -> None:
-        found = win_mic.find_usb_microphone()
-        if found:
-            self.mic_var.set("已识别： " + found[1])
-            self._log("电脑麦克风: " + found[1])
-            return
-        inputs = win_mic.list_inputs()
-        if inputs:
-            names = "、".join(name for _, name in inputs[:6])
-            self.mic_var.set("未出现 LX04，当前输入: " + names)
-            self._log("电脑录音设备: " + names)
-        else:
-            self.mic_var.set("未识别到录音设备")
-            self._log("电脑录音设备: 无")
+        self.refresh_audio_devices(log=False)
 
     def connect(self) -> None:
         if not self.adb:
@@ -484,23 +650,19 @@ class HostApp:
             mic = adb_usb.take_speaker_mic(self.adb, serial)
             self._log(mic)
             adb_usb.usb_forward(self.adb, serial)
-            self.sink.configure(48000, 1)
-            self._start_inject()
-            try:
-                self.hw.start(self.adb, serial, self.sink)
-                self._log("已从音箱数字麦直采：48kHz 单声道（tinycap pcmC0D1c）")
-                hw_ok = True
-            except Exception as exc:
-                hw_ok = False
-                self._log("硬件直采失败，回退 APK 麦克风: " + str(exc))
             self.client.connect("127.0.0.1", protocol.PORT)
             self.connected = True
             self._serial = serial
-            if not hw_ok:
-                self.client.send_control("start_mic")
+            if self.mic_enabled.get():
+                self._apply_mic_route()
+            else:
+                self._log("麦克风通路已关闭。")
             self._on_gain()
             self.client.send_control("gain", gain=round(self.sink.gain, 3))
-            self._start_speaker()
+            if self.spk_enabled.get():
+                self._apply_speaker_route()
+            else:
+                self._log("扬声器通路已关闭。可用「音箱试音」检查喇叭。")
             self.headline.configure(text="USB 已连接")
         except Exception as exc:
             self.connected = False
@@ -542,7 +704,7 @@ class HostApp:
     def _handle_event(self, kind: str, data) -> None:
         if kind == "hello":
             rate = int(data.get("sampleRate") or 48000)
-            if not self.hw.running():
+            if not self.hw.running() and self.mic_enabled.get():
                 self.sink.configure(rate, 1)
                 if not self.sink.running():
                     try:
@@ -647,6 +809,21 @@ class HostApp:
     def _log(self, line: str) -> None:
         self.log.insert("end", line + "\n")
         self.log.see("end")
+
+
+def _pick_label(labels: list[str], saved: str, fallback: str | None) -> str:
+    if saved and saved in labels:
+        return saved
+    if saved:
+        key = saved.split("  [")[0].strip().lower()
+        for label in labels:
+            if label.split("  [")[0].strip().lower() == key:
+                return label
+            if key and key in label.lower():
+                return label
+    if fallback and fallback in labels:
+        return fallback
+    return labels[0] if labels else ""
 
 
 def main() -> None:

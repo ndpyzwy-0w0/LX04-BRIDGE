@@ -110,6 +110,51 @@ def set_default_render(device_id: str) -> bool:
         return False
 
 
+def list_render_endpoints() -> list[tuple[str, str]]:
+    try:
+        from pycaw.constants import DEVICE_STATE, EDataFlow
+    except Exception:
+        return []
+    items: list[tuple[str, str]] = []
+    for device in _iter_devices(EDataFlow.eRender.value, DEVICE_STATE.ACTIVE.value):
+        name = device.FriendlyName or ""
+        if is_steam_speakers(name):
+            continue
+        items.append((device.id, name))
+    items.sort(
+        key=lambda item: (
+            0 if is_hifi_render(item[1]) else 1 if is_cable_render(item[1]) else 2,
+            item[1].lower(),
+        )
+    )
+    return items
+
+
+def prepare_render_device(device_id: str) -> dict[str, Any]:
+    result: dict[str, Any] = {"render": None, "device_id": None, "logs": []}
+    logs: list[str] = result["logs"]
+    try:
+        from pycaw.constants import DEVICE_STATE, EDataFlow
+    except Exception:
+        logs.append("未安装 pycaw，无法打开播放设备。")
+        return result
+    device = None
+    for candidate in _iter_devices(EDataFlow.eRender.value, DEVICE_STATE.ACTIVE.value):
+        if candidate.id == device_id:
+            device = candidate
+            break
+    if device is None:
+        logs.append("找不到选中的播放设备。")
+        return result
+    _unmute(device)
+    ok = set_capture_app_format(device.id, channels=CABLE_CHANNELS, rate=CABLE_RATE)
+    set_shared_mode(device.id)
+    result["render"] = device.FriendlyName
+    result["device_id"] = device.id
+    logs.append(("已准备" if ok else "已打开") + " 播放设备: " + (device.FriendlyName or device_id))
+    return result
+
+
 def find_hifi_render() -> Any | None:
     try:
         from pycaw.constants import EDataFlow
