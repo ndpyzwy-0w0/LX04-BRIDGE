@@ -409,6 +409,9 @@ class HostApp:
             pass
 
     def refresh_audio_devices(self, log: bool = True) -> None:
+        hidden = win_endpoint.tidy_cable_endpoints()
+        if log and hidden:
+            self._log("已隐藏 16 声道 CABLE：" + "、".join(hidden))
         previous_inject = self.inject_var.get() or getattr(self, "_saved_inject", "")
         previous_spk = self.spk_dev_var.get() or getattr(self, "_saved_spk", "")
         self._inject_devices = self.sink.list_playback_devices()

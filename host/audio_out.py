@@ -72,6 +72,9 @@ class AudioSink:
                 api = str(hostapis[api_index].get("name") or "")
             if "WDM-KS" in api or ("WDM" in api and "KS" in api):
                 continue
+            lowered = name.lower()
+            if "16ch" in lowered or "16 ch" in lowered or "vb-audio point" in lowered:
+                continue
             score = _score_inject_output(name, api, max_out)
             if score <= 0 and not include_zero:
                 continue

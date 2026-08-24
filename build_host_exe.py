@@ -156,7 +156,7 @@ def main() -> int:
     print("Wrote", latest)
     _commit_usable_version(
         version,
-        "selectable mic and speaker audio routes",
+        "hide unused 16-channel VB-CABLE endpoints",
     )
     return 0
 
