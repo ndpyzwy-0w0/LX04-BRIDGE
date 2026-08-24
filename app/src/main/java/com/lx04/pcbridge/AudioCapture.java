@@ -19,8 +19,8 @@ final class AudioCapture {
     private AudioRecord record;
     private int sampleRate = 48000;
     private int channels = 1;
+    private int captureChannels = 1;
     private String sourceName = "mic";
-    private boolean lastOpenWasSilent;
 
     AudioCapture(Listener listener) {
         this.listener = listener;
@@ -40,30 +40,25 @@ final class AudioCapture {
 
     synchronized boolean start() {
         stop();
-        int[] rates = new int[] {48000, 44100, 16000};
-        // XiaoAi often opens VOICE_RECOGNITION first and returns silence for normal speech.
         int[] sources = new int[] {
-                MediaRecorder.AudioSource.UNPROCESSED,
+                MediaRecorder.AudioSource.VOICE_RECOGNITION,
                 MediaRecorder.AudioSource.MIC,
                 MediaRecorder.AudioSource.CAMCORDER,
                 MediaRecorder.AudioSource.DEFAULT,
-                MediaRecorder.AudioSource.VOICE_RECOGNITION
+                MediaRecorder.AudioSource.VOICE_COMMUNICATION,
+                MediaRecorder.AudioSource.UNPROCESSED
         };
+        int[] rates = new int[] {16000, 48000, 44100};
+        int[] masks = new int[] {AudioFormat.CHANNEL_IN_STEREO, AudioFormat.CHANNEL_IN_MONO};
         for (int source : sources) {
             for (int rate : rates) {
-                record = tryOpen(source, rate, AudioFormat.CHANNEL_IN_MONO, true);
-                if (record != null) {
-                    return beginCapture(source, rate);
-                }
-                if (lastOpenWasSilent) {
-                    break;
+                for (int mask : masks) {
+                    record = tryOpen(source, rate, mask);
+                    if (record != null) {
+                        return beginCapture(source, rate, mask);
+                    }
                 }
             }
-        }
-        record = tryOpen(MediaRecorder.AudioSource.MIC, 48000, AudioFormat.CHANNEL_IN_MONO, false);
-        if (record != null) {
-            Log.w("lx04-mic", "all sources were digital-silent; keeping MIC anyway");
-            return beginCapture(MediaRecorder.AudioSource.MIC, 48000);
         }
         return false;
     }
@@ -89,23 +84,25 @@ final class AudioCapture {
         }
     }
 
-    private boolean beginCapture(int source, int rate) {
+    private boolean beginCapture(int source, int rate, int mask) {
         sampleRate = rate;
+        captureChannels = mask == AudioFormat.CHANNEL_IN_STEREO ? 2 : 1;
         channels = 1;
-        sourceName = sourceLabel(source);
+        sourceName = sourceLabel(source) + (captureChannels == 2 ? "-stereo" : "");
         running = true;
         thread = new Thread(this::loop, "lx04-mic");
         thread.start();
+        Log.i("lx04-mic", "using " + sourceName + " @ " + rate);
         return true;
     }
 
-    private AudioRecord tryOpen(int source, int rate, int channelMask, boolean requireSignal) {
-        lastOpenWasSilent = false;
+    private AudioRecord tryOpen(int source, int rate, int channelMask) {
         int min = AudioRecord.getMinBufferSize(rate, channelMask, AudioFormat.ENCODING_PCM_16BIT);
         if (min <= 0) {
             return null;
         }
-        int buffer = Math.max(min, rate / 50 * 2 * 8);
+        int ch = channelMask == AudioFormat.CHANNEL_IN_STEREO ? 2 : 1;
+        int buffer = Math.max(min, rate / 50 * 2 * ch * 8);
         try {
             AudioRecord rec = new AudioRecord(source, rate, channelMask,
                     AudioFormat.ENCODING_PCM_16BIT, buffer);
@@ -116,23 +113,20 @@ final class AudioCapture {
             rec.startRecording();
             if (rec.getRecordingState() != AudioRecord.RECORDSTATE_RECORDING) {
                 rec.release();
-                lastOpenWasSilent = false;
                 return null;
             }
-            if (requireSignal && !hasDigitalSignal(rec, rate)) {
-                Log.w("lx04-mic", "skip silent source " + sourceLabel(source) + " @ " + rate);
+            if (!hasRealSignal(rec, rate, ch)) {
+                Log.w("lx04-mic", "skip empty " + sourceLabel(source)
+                        + (ch == 2 ? "-stereo" : "") + " @ " + rate);
                 try {
                     rec.stop();
                 } catch (Exception ignored) {
                 }
                 rec.release();
-                lastOpenWasSilent = true;
                 return null;
             }
-            lastOpenWasSilent = false;
             return rec;
         } catch (Exception e) {
-            lastOpenWasSilent = false;
             return null;
         }
     }
@@ -143,8 +137,9 @@ final class AudioCapture {
         if (rec == null) {
             return;
         }
-        int chunk = Math.max(sampleRate / 50, 320) * 2;
-        byte[] buf = new byte[chunk];
+        int frameBytes = Math.max(sampleRate / 50, 320) * 2 * captureChannels;
+        byte[] buf = new byte[frameBytes];
+        byte[] mono = captureChannels == 2 ? new byte[frameBytes / 2] : buf;
         while (running) {
             int n;
             try {
@@ -155,15 +150,24 @@ final class AudioCapture {
             if (n <= 0) {
                 continue;
             }
-            listener.onAudio(buf, n, peak(buf, n));
+            int outLen = n;
+            byte[] out = buf;
+            if (captureChannels == 2) {
+                outLen = mixToMono(buf, n, mono);
+                out = mono;
+            }
+            listener.onAudio(out, outLen, peak(out, outLen));
         }
     }
 
-    private static boolean hasDigitalSignal(AudioRecord rec, int rate) {
-        int chunk = Math.max(rate / 50, 320) * 2;
+    private static boolean hasRealSignal(AudioRecord rec, int rate, int ch) {
+        int chunk = Math.max(rate / 50, 320) * 2 * ch;
         byte[] buf = new byte[chunk];
-        float maxPeak = 0f;
-        long deadline = SystemClock.elapsedRealtime() + 220;
+        long sumSq = 0;
+        long zeros = 0;
+        long samples = 0;
+        int peak = 0;
+        long deadline = SystemClock.elapsedRealtime() + 280;
         while (SystemClock.elapsedRealtime() < deadline) {
             int n;
             try {
@@ -171,15 +175,53 @@ final class AudioCapture {
             } catch (Exception e) {
                 return false;
             }
-            if (n <= 0) {
+            if (n <= 1) {
                 continue;
             }
-            maxPeak = Math.max(maxPeak, peak(buf, n));
-            if (maxPeak >= 0.004f) {
-                return true;
+            for (int i = 0; i + 1 < n; i += 2) {
+                int sample = (buf[i] & 0xFF) | (buf[i + 1] << 8);
+                if (sample > 32767) {
+                    sample -= 65536;
+                }
+                int abs = sample < 0 ? -sample : sample;
+                if (abs > peak) {
+                    peak = abs;
+                }
+                sumSq += (long) sample * sample;
+                if (sample == 0) {
+                    zeros++;
+                }
+                samples++;
             }
         }
-        return maxPeak >= 0.002f;
+        if (samples < 200) {
+            return false;
+        }
+        float rms = (float) Math.sqrt(sumSq / (double) samples) / 32768f;
+        float zeroFrac = zeros / (float) samples;
+        boolean ok = rms >= 0.004f && zeroFrac < 0.35f;
+        Log.i("lx04-mic", "probe rms=" + rms + " zero=" + zeroFrac + " peak=" + peak + " ok=" + ok);
+        return ok;
+    }
+
+    private static int mixToMono(byte[] stereo, int length, byte[] mono) {
+        int frames = length / 4;
+        int out = 0;
+        for (int i = 0; i < frames; i++) {
+            int left = (stereo[i * 4] & 0xFF) | (stereo[i * 4 + 1] << 8);
+            int right = (stereo[i * 4 + 2] & 0xFF) | (stereo[i * 4 + 3] << 8);
+            if (left > 32767) {
+                left -= 65536;
+            }
+            if (right > 32767) {
+                right -= 65536;
+            }
+            int mixed = (left + right) / 2;
+            mono[out] = (byte) (mixed & 0xFF);
+            mono[out + 1] = (byte) ((mixed >> 8) & 0xFF);
+            out += 2;
+        }
+        return out;
     }
 
     private static float peak(byte[] pcm, int length) {
@@ -212,6 +254,8 @@ final class AudioCapture {
                 return "camcorder";
             case MediaRecorder.AudioSource.VOICE_RECOGNITION:
                 return "voice_recognition";
+            case MediaRecorder.AudioSource.VOICE_COMMUNICATION:
+                return "voice_communication";
             default:
                 return "default";
         }

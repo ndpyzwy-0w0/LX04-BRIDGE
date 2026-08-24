@@ -31,6 +31,8 @@ final class BridgeState {
     }
 
     String formatAudio() {
-        return sampleRate / 1000 + "kHz / 16bit / " + (channels == 1 ? "单声道" : channels + "声道");
+        String source = audioSource == null || audioSource.isEmpty() ? "" : " · " + audioSource;
+        return sampleRate / 1000 + "kHz / 16bit / "
+                + (channels == 1 ? "单声道" : channels + "声道") + source;
     }
 }

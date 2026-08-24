@@ -112,6 +112,29 @@ def restore_adb_only(adb: str, serial: str | None = None) -> None:
     _run(adb, [*args, "shell", script], timeout=6)
 
 
+def take_speaker_mic(adb: str, serial: str | None = None) -> str:
+    """Stop XiaoAi always-on VPM so AudioRecord can use the dual digital mics."""
+    args = ["-s", serial] if serial else []
+    result = _run(adb, [*args, "shell", "stop mivpm; getprop init.svc.mivpm"], timeout=8)
+    text = ((result.stdout or "") + " " + (result.stderr or "")).strip()
+    status = (result.stdout or "").strip().splitlines()
+    last = status[-1].strip() if status else ""
+    if last not in {"stopped", "stopping"}:
+        return "小爱唤醒麦未能释放（mivpm=" + (last or text or "unknown") + "）"
+    return "已暂停小爱唤醒麦，音箱麦克风交给桥接"
+
+
+def release_speaker_mic(adb: str, serial: str | None = None) -> str:
+    args = ["-s", serial] if serial else []
+    result = _run(adb, [*args, "shell", "start mivpm; getprop init.svc.mivpm"], timeout=8)
+    text = ((result.stdout or "") + " " + (result.stderr or "")).strip()
+    status = (result.stdout or "").strip().splitlines()
+    last = status[-1].strip() if status else ""
+    if last not in {"running", "restarting"}:
+        return "小爱唤醒麦未恢复（mivpm=" + (last or text or "unknown") + "）"
+    return "已恢复小爱唤醒麦"
+
+
 def usb_forward(adb: str, serial: str | None = None) -> None:
     args = ["-s", serial] if serial else []
     _run(adb, [*args, "forward", "--remove", f"tcp:{PORT}"])
