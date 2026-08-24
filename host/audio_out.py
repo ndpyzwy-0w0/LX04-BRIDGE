@@ -25,7 +25,7 @@ class AudioSink:
         self.in_channels = 1
         self.out_channels = 1
         self.device: int | None = None
-        self._queue: queue.Queue[bytes] = queue.Queue(maxsize=10)
+        self._queue: queue.Queue[bytes] = queue.Queue(maxsize=32)
         self._pending = bytearray()
         self._stream = None
         self._lock = threading.Lock()
@@ -106,15 +106,15 @@ class AudioSink:
             rate = native_rate or 48000
         attempts: list[tuple[str, int, int, object]] = []
         if extra is not None:
-            attempts.append(("float32", channels, rate, extra))
             attempts.append(("int16", channels, rate, extra))
+            attempts.append(("float32", channels, rate, extra))
         attempts.append(("int16", channels, rate, None))
         if rate != native_rate and native_rate > 0:
             attempts.append(("int16", channels, native_rate, extra if extra is not None else None))
         if channels > 1:
             attempts.append(("int16", 1, rate, None))
         last_error: Exception | None = None
-        self._queue = queue.Queue(maxsize=10)
+        self._queue = queue.Queue(maxsize=32)
         self._pending = bytearray()
         self.underruns = 0
         self.callback_error = ""

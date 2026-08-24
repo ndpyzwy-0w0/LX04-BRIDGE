@@ -305,7 +305,8 @@ class HostApp:
         self._log(
             f"注入格式: {self.sink.out_rate}Hz / {self.sink._dtype} / {self.sink.out_channels}ch"
         )
-        self._log("语音软件请选择麦克风: " + rec_name + "（不要选 CABLE Input，也不要选 16 Ch）")
+        self._log("语音软件请选择麦克风: " + rec_name + "（不要选 CABLE Input）")
+        self._log("若微信里仍无声：完全退出微信（托盘也退出），再打开并只选 CABLE Output。")
         if prepared.get("capture"):
             self._log("已设为系统默认麦克风: " + str(prepared["capture"]))
 
@@ -426,7 +427,11 @@ class HostApp:
                 self.sink.push(data.payload, muted=data.muted)
         elif kind == "status":
             rate = int(data.get("sampleRate") or 0)
-            if rate and self.sink.running() and rate != self.sink.sample_rate:
+            if (
+                rate
+                and self.sink.running()
+                and abs(rate - self.sink.sample_rate) >= 50
+            ):
                 self.sink.configure(rate, 1)
                 try:
                     self._start_inject()
