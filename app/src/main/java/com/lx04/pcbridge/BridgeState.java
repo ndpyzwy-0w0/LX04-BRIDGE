@@ -8,6 +8,7 @@ final class BridgeState {
     volatile boolean muted;
     volatile boolean permissionDenied;
     volatile float level;
+    volatile float playLevel;
     volatile float gain = 1f;
     volatile long frames;
     volatile long dropped;

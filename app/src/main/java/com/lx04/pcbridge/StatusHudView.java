@@ -24,6 +24,7 @@ public class StatusHudView extends View {
     private final Paint meter = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint button = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final RectF meterRect = new RectF();
+    private final RectF playRect = new RectF();
     private final RectF muteRect = new RectF();
     private float pulse;
 
@@ -68,7 +69,7 @@ public class StatusHudView extends View {
         canvas.drawRoundRect(card, dp(18), dp(18), panel);
 
         pulse = (pulse + 0.08f) % ((float) (Math.PI * 2));
-        boolean live = s.clientConnected && s.recording && !s.muted;
+        boolean live = s.clientConnected && !s.muted && (s.recording || s.playLevel > 0.02f);
         int usbColor = !s.usbConnected ? 0xFFFF5C7A : (s.clientConnected ? 0xFF3DDC97 : 0xFFFFB020);
         accent.setColor(usbColor);
         float usbAlpha = live ? 0.65f + 0.35f * (float) Math.abs(Math.sin(pulse)) : 1f;
@@ -91,7 +92,7 @@ public class StatusHudView extends View {
         dim.setTextSize(dp(15));
         canvas.drawText(s.detail, dp(28), dp(132), dim);
 
-        meterRect.set(dp(28), dp(158), w - dp(28), dp(198));
+        meterRect.set(dp(28), dp(148), w - dp(28), dp(178));
         canvas.drawRoundRect(meterRect, dp(10), dp(10), meterBg);
         float level = Math.max(0f, Math.min(1f, s.level * 2.4f));
         if (s.muted) {
@@ -109,9 +110,28 @@ public class StatusHudView extends View {
                 meterRect.bottom - 4);
         canvas.drawRoundRect(fill, dp(8), dp(8), meter);
 
+        playRect.set(dp(28), dp(198), w - dp(28), dp(228));
+        canvas.drawRoundRect(playRect, dp(10), dp(10), meterBg);
+        float play = Math.max(0f, Math.min(1f, s.playLevel * 2.4f));
+        if (s.muted) {
+            meter.setColor(0xFF5B6B88);
+            play = 0.04f;
+        } else if (play > 0.85f) {
+            meter.setColor(0xFFFF5C7A);
+        } else if (play > 0.55f) {
+            meter.setColor(0xFFFFB020);
+        } else {
+            meter.setColor(0xFF6EA8FF);
+        }
+        RectF playFill = new RectF(playRect.left + 4, playRect.top + 4,
+                playRect.left + 4 + Math.max(dp(8), (playRect.width() - 8) * Math.max(0.04f, play)),
+                playRect.bottom - 4);
+        canvas.drawRoundRect(playFill, dp(8), dp(8), meter);
+
         dim.setTextSize(dp(13));
-        canvas.drawText("麦克风电平", dp(32), dp(222), dim);
-        canvas.drawText("帧 " + s.frames + "  丢 " + s.dropped, w - dp(180), dp(222), dim);
+        canvas.drawText("麦克风", dp(32), dp(192), dim);
+        canvas.drawText("扬声器", dp(32), dp(242), dim);
+        canvas.drawText("帧 " + s.frames + "  丢 " + s.dropped, w - dp(180), dp(242), dim);
 
         muteRect.set(dp(28), h - dp(78), w - dp(28), h - dp(28));
         button.setColor(s.muted ? 0xFF5B2A38 : 0xFF223154);

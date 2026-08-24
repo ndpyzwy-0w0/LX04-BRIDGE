@@ -1,0 +1,15 @@
+VB-Audio Hi-Fi Cable is a product of VB-Audio (Vincent Burel).
+
+Origin: https://vb-audio.com/Cable/index.htm
+Official package: HiFiCableAsioBridgeSetup_v1007.zip (unmodified)
+
+This is a second virtual cable, separate from VB-CABLE.
+LX04 uses it only as a Windows playback endpoint so system audio
+can be looped to the speaker without mixing into WeChat's microphone.
+
+Hi-Fi Cable is donationware. All participations are welcome:
+https://vb-audio.com/Cable/
+
+This folder only redistributes the official package as-is.
+LX04 PC Bridge launches HiFiCableAsioBridgeSetup.exe; it does not
+replace the VB-Audio installer and does not modify driver files.

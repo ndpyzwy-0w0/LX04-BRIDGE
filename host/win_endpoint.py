@@ -57,11 +57,77 @@ def is_cable_render(name: str) -> bool:
     lowered = text.lower()
     if is_steam_speakers(text) or _is_16ch_cable(text) or "vb-audio point" in lowered:
         return False
+    if "hi-fi cable" in lowered or "hifi cable" in lowered:
+        return False
     if "cable output" in lowered:
         return False
     if "cable input" in lowered:
         return True
     return False
+
+
+def is_hifi_render(name: str) -> bool:
+    import hifi_cable
+
+    return hifi_cable.is_hifi_render(name)
+
+
+def get_default_render() -> tuple[str, str] | None:
+    try:
+        from pycaw.pycaw import AudioUtilities
+    except Exception:
+        return None
+    try:
+        speakers = AudioUtilities.GetSpeakers()
+    except Exception:
+        return None
+    if speakers is None:
+        return None
+    return speakers.id, speakers.FriendlyName or ""
+
+
+def set_default_render(device_id: str) -> bool:
+    try:
+        from pycaw.constants import ERole
+        from pycaw.pycaw import AudioUtilities
+    except Exception:
+        return False
+    try:
+        AudioUtilities.SetDefaultDevice(
+            device_id,
+            roles=[ERole.eConsole, ERole.eMultimedia, ERole.eCommunications],
+        )
+        return True
+    except Exception:
+        return False
+
+
+def find_hifi_render() -> Any | None:
+    try:
+        from pycaw.constants import EDataFlow
+    except Exception:
+        return None
+    return _find_endpoint(EDataFlow.eRender.value, is_hifi_render)
+
+
+def prepare_hifi_cable() -> dict[str, Any]:
+    """Unmute Hi-Fi Cable Input so system audio can be looped to the LX04 speaker."""
+    result: dict[str, Any] = {"render": None, "device_id": None, "logs": []}
+    logs: list[str] = result["logs"]
+    render = find_hifi_render()
+    if render is None:
+        logs.append("未找到 Hi-Fi Cable Input。请安装 VB-Audio Hi-Fi Cable 并重启。")
+        return result
+    _unmute(render)
+    ok = set_capture_app_format(render.id, channels=CABLE_CHANNELS, rate=CABLE_RATE)
+    set_shared_mode(render.id)
+    _disable_endpoint_fx("Render", render.id)
+    result["render"] = render.FriendlyName
+    result["device_id"] = render.id
+    logs.append(
+        ("已锁定" if ok else "未能锁定") + " Hi-Fi Cable Input: 48kHz / 立体声"
+    )
+    return result
 
 
 def _pcm16(channels: int, rate: int):

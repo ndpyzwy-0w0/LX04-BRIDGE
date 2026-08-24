@@ -16,6 +16,7 @@ public class BridgeService extends Service {
     public static final BridgeState STATE = new BridgeState();
 
     private AudioCapture capture;
+    private AudioPlayback playback;
     private TcpBridgeServer server;
     private UsbMonitor usbMonitor;
     private PowerManager.WakeLock wakeLock;
@@ -34,6 +35,7 @@ public class BridgeService extends Service {
             wakeLock.acquire();
         }
         capture = new AudioCapture(this::onAudio);
+        playback = new AudioPlayback();
         server = new TcpBridgeServer(STATE, new TcpBridgeServer.Callbacks() {
             @Override
             public void prepareForClient() {
@@ -44,10 +46,27 @@ public class BridgeService extends Service {
                 STATE.clientConnected = connected;
                 STATE.pcName = helloAckName == null ? "" : helloAckName;
                 if (connected) {
+                    playback.start();
+                    android.media.AudioManager am =
+                            (android.media.AudioManager) getSystemService(AUDIO_SERVICE);
+                    if (am != null) {
+                        am.setStreamMute(android.media.AudioManager.STREAM_MUSIC, false);
+                        am.setStreamVolume(android.media.AudioManager.STREAM_MUSIC,
+                                am.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC), 0);
+                    }
                     refreshHeadline();
                 } else {
                     stopMic();
+                    playback.stop();
                     refreshHeadline();
+                }
+            }
+
+            @Override
+            public void onPlay(byte[] pcm, boolean muted) {
+                if (playback != null) {
+                    playback.push(pcm, muted || STATE.muted);
+                    STATE.playLevel = playback.getPeak();
                 }
             }
 
@@ -103,6 +122,9 @@ public class BridgeService extends Service {
             server.stop();
         }
         stopMic();
+        if (playback != null) {
+            playback.stop();
+        }
         if (wakeLock != null && wakeLock.isHeld()) {
             wakeLock.release();
         }
@@ -117,7 +139,13 @@ public class BridgeService extends Service {
     public static void toggleMute() {
         STATE.muted = !STATE.muted;
         if (STATE.clientConnected) {
-            STATE.headline = STATE.muted ? "已静音" : "正在拾音";
+            if (STATE.muted) {
+                STATE.headline = "已静音";
+            } else if (STATE.recording) {
+                STATE.headline = "正在拾音";
+            } else {
+                STATE.headline = "电脑扬声器 \u2192 音箱";
+            }
         }
     }
 
@@ -197,7 +225,7 @@ public class BridgeService extends Service {
         } else if (STATE.recording) {
             STATE.headline = "正在拾音";
         } else {
-            STATE.headline = "电脑直采硬件麦";
+            STATE.headline = "电脑扬声器 → 音箱";
         }
         String pc = STATE.pcName.isEmpty() ? "电脑" : STATE.pcName;
         long silence = lastAudioMs == 0 ? 0 : SystemClock.elapsedRealtime() - lastAudioMs;

@@ -1,12 +1,13 @@
 # LX04 PC Bridge
 
-给小爱音箱触屏版 **LX04** 用的麦克风桥接：音箱里跑一个很小的 APK（目标远小于 300MB），用 **USB 数据线**连到 Windows 电脑。电脑上位机把音箱麦克风当成输入，音箱 800×480 屏幕当状态显示器。
+给小爱音箱触屏版 **LX04** 用的麦克风 + 扬声器桥接：音箱里跑一个很小的 APK（目标远小于 300MB），用 **USB 数据线**连到 Windows 电脑。电脑上位机把音箱麦克风当成输入，把电脑正在播放的声音送到音箱喇叭，音箱 800×480 屏幕当状态显示器。
 
 ## 它做什么
 
 - 音箱采集双麦阵列里的麦克风，把 PCM 音频经 USB（ADB 隧道）送给电脑
-- 电脑上位机把音频播放到指定输出设备。若安装 [VB-Audio Virtual Cable](https://vb-audio.com/Cable/)，其它软件可以把 `CABLE Output` 选成麦克风
-- 音箱屏幕显示：USB 是否插上、是否连上上位机、电平、静音、采样率、丢帧
+- 电脑上位机把麦克风灌进 [VB-CABLE](https://vb-audio.com/Cable/)，其它软件把 `CABLE Output` 选成麦克风
+- 电脑正在播放的声音经第二根虚拟线 [Hi-Fi Cable](https://vb-audio.com/Cable/) 环回，再送到音箱喇叭
+- 音箱屏幕显示：USB 是否插上、是否连上上位机、麦克风/扬声器电平、静音、采样率、丢帧
 
 官方固件的 Micro USB **默认不能装第三方 APK**，也常被写成“不支持数据传输”。要用本项目，音箱需要已经能装普通 APK（社区官改 / 刷成 X04G / Lineage 等），并且使用 **能传数据的 Micro USB 线**（纯充电线不行）。
 
@@ -26,14 +27,18 @@
 2. 官方 **VB-CABLE** 虚拟声卡（捐赠软件，来源 [www.vb-cable.com](https://www.vb-cable.com/)）
    - 发行包里带未修改的 `host/vbcable/`（`VBCABLE_Driver_Pack45.zip`）
    - 或以管理员运行 `host/vbcable/pack/VBCABLE_Setup_x64.exe`，**然后重启**
-3. 上位机已内置 adb，不需要再装 Android SDK 也能连音箱
+3. 要把电脑音乐/视频接到音箱喇叭，再装官方 **Hi-Fi Cable**（同样来自 VB-Audio，和 VB-CABLE 不是同一根线）
+   - 连接时上位机会提示安装；或打开 [vb-audio.com](https://vb-audio.com/Cable/) 下载 `HiFiCableAsioBridgeSetup`
+   - **装完后重启**
+4. 上位机已内置 adb，不需要再装 Android SDK 也能连音箱
 
 VB-CABLE 装好后，Windows 声音设置里会出现：
 
-- **CABLE Input**：给上位机灌声音（不要设成电脑扬声器）
+- **CABLE Input**：给上位机灌麦克风（不要设成电脑扬声器）
 - **CABLE Output**：给微信 / QQ 当麦克风
+- **Hi-Fi Cable Input**：连接后作为系统播放设备，声音进音箱喇叭
 
-觉得 VB-CABLE 好用请向作者捐赠。商业批量分发请看 [VB-Audio 授权说明](https://vb-audio.com/Services/licensing.htm)。
+觉得 VB-CABLE / Hi-Fi Cable 好用请向作者捐赠。商业批量分发请看 [VB-Audio 授权说明](https://vb-audio.com/Services/licensing.htm)。
 
 本仓库电脑上如果还没有 Android Studio / SDK，需要先装才能编译出 APK。
 
@@ -84,8 +89,10 @@ python build_host_exe.py
 1. 点 **刷新**，应出现 LX04 的 adb 序列号
 2. 若尚未安装 VB-CABLE，点 **连接** 时会打开官方安装程序（需管理员）。装完后重启，再打开上位机
 3. 点 **连接**
-4. 音箱屏幕应变为「正在拾音」，对音箱说话，电脑电平条会动
-5. 在微信 / QQ / 语音输入里把麦克风选成 **CABLE Output**（或「麦克风 (VB-Audio Virtual Cable)」）。彻底退出再打开这些软件，避免缓存旧设备
+4. 音箱屏幕应变为「电脑扬声器 → 音箱」或「正在拾音」，对音箱说话，电脑麦克风电平条会动
+5. 点 **音箱试音**，音箱喇叭应能听到「嘀」
+6. 在微信 / QQ / 语音输入里把麦克风选成 **CABLE Output**（或「麦克风 (VB-Audio Virtual Cable)」）。彻底退出再打开这些软件，避免缓存旧设备
+7. 电脑里的音乐/视频会从音箱出声（需已安装 Hi-Fi Cable 并重启）。断开连接后，系统扬声器会改回原来的设备
 
 从源码跑上位机：先 `pip install -r host/requirements.txt`，再 `host/start_host.bat`。
 

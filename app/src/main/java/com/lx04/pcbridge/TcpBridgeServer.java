@@ -20,6 +20,7 @@ final class TcpBridgeServer {
         void prepareForClient();
         void onClient(boolean connected, String helloAckName);
         void onControl(JSONObject json);
+        void onPlay(byte[] pcm, boolean muted);
     }
 
     private final BridgeState state;
@@ -89,6 +90,7 @@ final class TcpBridgeServer {
             o.put("dropped", dropped);
             o.put("sampleRate", state.sampleRate);
             o.put("channels", state.channels);
+            o.put("playLevel", state.playLevel);
             enqueue(Protocol.STATUS, (byte) 0, o.toString().getBytes(StandardCharsets.UTF_8));
         } catch (Exception ignored) {
         }
@@ -209,6 +211,10 @@ final class TcpBridgeServer {
             }
             if (frame.type == Protocol.CONTROL && frame.payload != null && frame.payload.length > 0) {
                 callbacks.onControl(new JSONObject(new String(frame.payload, StandardCharsets.UTF_8)));
+                return;
+            }
+            if (frame.type == Protocol.PLAY && frame.payload != null) {
+                callbacks.onPlay(frame.payload, (frame.flags & Protocol.FLAG_MUTED) != 0);
             }
         } catch (Exception ignored) {
         }
