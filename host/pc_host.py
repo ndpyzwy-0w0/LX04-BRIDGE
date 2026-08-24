@@ -380,12 +380,6 @@ class HostApp:
             adb_usb.usb_forward(self.adb, serial)
             self.client.connect("127.0.0.1", protocol.PORT)
             self.connected = True
-            try:
-                self.sink.configure(48000, 1)
-                self._start_inject()
-            except Exception as exc:
-                self._log("虚拟麦克风打开失败: " + str(exc))
-                messagebox.showerror("LX04", "音箱已连接，但没能把声音送进微信麦克风：\n" + str(exc))
             self._on_gain()
             self.client.send_control("gain", gain=round(self.sink.gain, 3))
             self.headline.configure(text="USB 已连接")
@@ -410,10 +404,11 @@ class HostApp:
             rate = int(data.get("sampleRate") or 48000)
             # APK always captures mono s16; treating it as stereo makes speech-gated static.
             self.sink.configure(rate, 1)
-            try:
-                self._start_inject()
-            except Exception as exc:
-                self._log("音频输出失败: " + str(exc))
+            if not self.sink.running():
+                try:
+                    self._start_inject()
+                except Exception as exc:
+                    self._log("音频输出失败: " + str(exc))
             model = data.get("model") or "LX04"
             source = data.get("audioSource") or ""
             self.headline.configure(text=f"已连接 {model}")

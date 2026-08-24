@@ -35,6 +35,7 @@ class AudioSink:
         self.callback_error = ""
         self.device_name = ""
         self._dtype = "int16"
+        self._started = False
 
     def available(self) -> bool:
         return sd is not None
@@ -131,8 +132,8 @@ class AudioSink:
                 kwargs["extra_settings"] = settings
             try:
                 stream = sd.RawOutputStream(**kwargs)
-                stream.start()
                 self._stream = stream
+                self._started = False
                 self._dtype = dtype
                 self.out_channels = ch
                 self.out_rate = sr
@@ -145,6 +146,7 @@ class AudioSink:
         with self._lock:
             stream = self._stream
             self._stream = None
+        self._started = False
         if stream is not None:
             try:
                 stream.stop()
@@ -153,8 +155,19 @@ class AudioSink:
                 pass
 
     def running(self) -> bool:
+        return self._stream is not None
+
+    def _ensure_started(self, force: bool = False) -> None:
         stream = self._stream
-        return stream is not None and bool(getattr(stream, "active", False))
+        if stream is None or self._started:
+            return
+        if not force and self._queue.qsize() < 4:
+            return
+        try:
+            stream.start()
+            self._started = True
+        except Exception as exc:
+            self.callback_error = repr(exc)
 
     def push(self, pcm: bytes, muted: bool = False) -> None:
         if muted:
@@ -175,6 +188,7 @@ class AudioSink:
                 self._queue.put_nowait(pcm)
             except queue.Full:
                 pass
+        self._ensure_started()
 
     def play_test_tone(self, seconds: float = 0.6, freq: float = 880.0) -> None:
         if not self.running():
@@ -190,6 +204,7 @@ class AudioSink:
                 self._queue.put_nowait(pcm[offset : offset + chunk])
             except queue.Full:
                 break
+        self._ensure_started(force=True)
 
     def _callback(self, outdata, frames, time_info, status) -> None:  # noqa: ANN001
         try:
