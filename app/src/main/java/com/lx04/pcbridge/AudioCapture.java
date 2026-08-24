@@ -41,15 +41,15 @@ final class AudioCapture {
     synchronized boolean start() {
         stop();
         int[] sources = new int[] {
-                MediaRecorder.AudioSource.VOICE_RECOGNITION,
                 MediaRecorder.AudioSource.MIC,
+                MediaRecorder.AudioSource.VOICE_RECOGNITION,
                 MediaRecorder.AudioSource.CAMCORDER,
                 MediaRecorder.AudioSource.DEFAULT,
                 MediaRecorder.AudioSource.VOICE_COMMUNICATION,
                 MediaRecorder.AudioSource.UNPROCESSED
         };
-        int[] rates = new int[] {16000, 48000, 44100};
-        int[] masks = new int[] {AudioFormat.CHANNEL_IN_STEREO, AudioFormat.CHANNEL_IN_MONO};
+        int[] rates = new int[] {48000, 16000, 44100};
+        int[] masks = new int[] {AudioFormat.CHANNEL_IN_MONO, AudioFormat.CHANNEL_IN_STEREO};
         for (int source : sources) {
             for (int rate : rates) {
                 for (int mask : masks) {
@@ -125,7 +125,23 @@ final class AudioCapture {
                 rec.release();
                 return null;
             }
-            return rec;
+            try {
+                rec.stop();
+            } catch (Exception ignored) {
+            }
+            rec.release();
+            AudioRecord live = new AudioRecord(source, rate, channelMask,
+                    AudioFormat.ENCODING_PCM_16BIT, buffer);
+            if (live.getState() != AudioRecord.STATE_INITIALIZED) {
+                live.release();
+                return null;
+            }
+            live.startRecording();
+            if (live.getRecordingState() != AudioRecord.RECORDSTATE_RECORDING) {
+                live.release();
+                return null;
+            }
+            return live;
         } catch (Exception e) {
             return null;
         }

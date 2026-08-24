@@ -27,6 +27,7 @@ import vb_cable
 import win_endpoint
 import win_mic
 from audio_out import AudioSink
+from hw_capture import HardwareMic
 
 BG = "#0B1220"
 PANEL = "#141C2E"
@@ -147,6 +148,7 @@ class HostApp:
         self.root = root
         self.client = BridgeClient(self._on_bridge_event)
         self.sink = AudioSink()
+        self.hw = HardwareMic()
         self.adb = adb_usb.find_adb()
         self.devices: list[str] = []
         self.connected = False
@@ -381,6 +383,21 @@ class HostApp:
             mic = adb_usb.take_speaker_mic(self.adb, serial)
             self._log(mic)
             adb_usb.usb_forward(self.adb, serial)
+            self.sink.configure(48000, 1)
+            self._start_inject()
+            try:
+                self.hw.start(self.adb, serial, self.sink)
+                self._log("已从音箱数字麦直采：48kHz 单声道（tinycap pcmC0D1c）")
+            except Exception as exc:
+                self._log("硬件直采失败，回退 APK 麦克风: " + str(exc))
+                self.client.connect("127.0.0.1", protocol.PORT)
+                self.connected = True
+                self._serial = serial
+                self.client.send_control("start_mic")
+                self._on_gain()
+                self.client.send_control("gain", gain=round(self.sink.gain, 3))
+                self.headline.configure(text="USB 已连接")
+                return
             self.client.connect("127.0.0.1", protocol.PORT)
             self.connected = True
             self._serial = serial
@@ -390,6 +407,10 @@ class HostApp:
         except Exception as exc:
             self.connected = False
             try:
+                self.hw.stop(self.adb, serial)
+            except Exception:
+                pass
+            try:
                 adb_usb.release_speaker_mic(self.adb, serial)
             except Exception:
                 pass
@@ -398,6 +419,7 @@ class HostApp:
 
     def disconnect(self) -> None:
         self.client.close()
+        self.hw.stop(self.adb, self._serial)
         self.sink.stop()
         self.connected = False
         if self.adb and self._serial:
@@ -415,13 +437,13 @@ class HostApp:
     def _handle_event(self, kind: str, data) -> None:
         if kind == "hello":
             rate = int(data.get("sampleRate") or 48000)
-            # APK always captures mono s16; treating it as stereo makes speech-gated static.
-            self.sink.configure(rate, 1)
-            if not self.sink.running():
-                try:
-                    self._start_inject()
-                except Exception as exc:
-                    self._log("音频输出失败: " + str(exc))
+            if not self.hw.running():
+                self.sink.configure(rate, 1)
+                if not self.sink.running():
+                    try:
+                        self._start_inject()
+                    except Exception as exc:
+                        self._log("音频输出失败: " + str(exc))
             model = data.get("model") or "LX04"
             source = data.get("audioSource") or ""
             apk = str(data.get("apkVersion") or "").strip()
@@ -431,13 +453,31 @@ class HostApp:
             self._log(f"HELLO {data}")
             if apk_label:
                 self._log("音箱 APK: " + apk_label)
-            if source:
-                self._log("音箱采集源: " + str(source))
-            self._log(f"按单声道 {rate} Hz 接收音箱 PCM")
+            if self.hw.running():
+                self._log("音频来自音箱硬件麦 48 kHz，不走 APK AudioRecord")
+            else:
+                if source:
+                    self._log("音箱采集源: " + str(source))
+                self._log(f"按单声道 {rate} Hz 接收音箱 PCM")
         elif kind == "audio":
-            if self.sink.running():
+            if self.sink.running() and not self.hw.running():
                 self.sink.push(data.payload, muted=data.muted)
         elif kind == "status":
+            if self.hw.running():
+                self.hw.muted = bool(data.get("muted"))
+                muted = "静音" if data.get("muted") else "拾音中"
+                usb = "USB" if data.get("usbConnected") else "USB断开"
+                self.detail.configure(
+                    text=f"{usb} · {muted} · 硬件麦 48kHz · 电平 {self.sink.peak:.2f}"
+                )
+                if data.get("muted"):
+                    self.headline.configure(text="音箱已静音")
+                elif self.connected:
+                    self.headline.configure(text="正在把 LX04 硬件麦送给语音软件")
+                if self.sink.callback_error:
+                    self._log("音频回调: " + self.sink.callback_error)
+                    self.sink.callback_error = ""
+                return
             rate = int(data.get("sampleRate") or 0)
             if (
                 rate
@@ -467,7 +507,13 @@ class HostApp:
             self._log("链路错误: " + str(data))
         elif kind == "disconnected":
             self.connected = False
+            self.hw.stop(self.adb, self._serial)
             self.sink.stop()
+            if self.adb and self._serial:
+                try:
+                    adb_usb.release_speaker_mic(self.adb, self._serial)
+                except Exception:
+                    pass
             self.headline.configure(text="USB 已断开")
             self.detail.configure(text="检查数据线后重新连接。")
             self._draw_meter(0)

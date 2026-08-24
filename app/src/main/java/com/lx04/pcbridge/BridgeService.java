@@ -37,7 +37,6 @@ public class BridgeService extends Service {
         server = new TcpBridgeServer(STATE, new TcpBridgeServer.Callbacks() {
             @Override
             public void prepareForClient() {
-                startMic();
             }
 
             @Override
@@ -68,6 +67,10 @@ public class BridgeService extends Service {
                     STATE.muted = false;
                 } else if ("toggle_mute".equals(cmd)) {
                     STATE.muted = !STATE.muted;
+                } else if ("start_mic".equals(cmd)) {
+                    startMic();
+                } else if ("stop_mic".equals(cmd)) {
+                    stopMic();
                 }
                 refreshHeadline();
             }
@@ -194,7 +197,7 @@ public class BridgeService extends Service {
         } else if (STATE.recording) {
             STATE.headline = "正在拾音";
         } else {
-            STATE.headline = "已连接电脑";
+            STATE.headline = "电脑直采硬件麦";
         }
         String pc = STATE.pcName.isEmpty() ? "电脑" : STATE.pcName;
         long silence = lastAudioMs == 0 ? 0 : SystemClock.elapsedRealtime() - lastAudioMs;
