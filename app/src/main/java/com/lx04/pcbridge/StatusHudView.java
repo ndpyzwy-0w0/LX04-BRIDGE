@@ -78,8 +78,13 @@ public class StatusHudView extends View {
 
         text.setTextSize(dp(18));
         canvas.drawText("LX04 PC Bridge", dp(54), dp(42), text);
+        String ver = formatVersion(s.apkVersion);
+        text.setTextSize(dp(28));
+        text.setColor(0xFF3DDC97);
+        canvas.drawText(ver, w - dp(28) - text.measureText(ver), dp(48), text);
+        text.setColor(0xFFE8EEF8);
         dim.setTextSize(dp(14));
-        canvas.drawText(s.formatLink(), w - dp(150), dp(42), dim);
+        canvas.drawText(s.formatLink(), dp(54), dp(64), dim);
 
         text.setTextSize(dp(36));
         canvas.drawText(s.headline, dp(28), dp(100), text);
@@ -127,6 +132,15 @@ public class StatusHudView extends View {
             return true;
         }
         return super.onTouchEvent(event);
+    }
+
+    private static String formatVersion(String apkVersion) {
+        if (apkVersion == null || apkVersion.isEmpty()) {
+            return "v?";
+        }
+        return apkVersion.startsWith("v") || apkVersion.startsWith("V")
+                ? apkVersion
+                : "v" + apkVersion;
     }
 
     private float dp(float v) {

@@ -28,6 +28,7 @@ public class MainActivity extends Activity {
         super.onCreate(savedInstanceState);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
                 | WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED);
+        BridgeService.STATE.apkVersion = AppVersion.read(this);
         hud = new StatusHudView(this);
         hud.setListener(BridgeService::toggleMute);
         setContentView(hud);

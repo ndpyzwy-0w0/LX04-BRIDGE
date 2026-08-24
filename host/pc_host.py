@@ -411,9 +411,13 @@ class HostApp:
                     self._log("音频输出失败: " + str(exc))
             model = data.get("model") or "LX04"
             source = data.get("audioSource") or ""
-            self.headline.configure(text=f"已连接 {model}")
+            apk = str(data.get("apkVersion") or "").strip()
+            apk_label = ("v" + apk.lstrip("vV")) if apk else ""
+            self.headline.configure(text=f"已连接 {model}" + (f"  {apk_label}" if apk_label else ""))
             self.detail.configure(text=f"Android {data.get('android', '?')} · USB 麦克风 + 状态屏")
             self._log(f"HELLO {data}")
+            if apk_label:
+                self._log("音箱 APK: " + apk_label)
             if source:
                 self._log("音箱采集源: " + str(source))
             self._log(f"按单声道 {rate} Hz 接收音箱 PCM")
