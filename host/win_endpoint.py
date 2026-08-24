@@ -120,6 +120,8 @@ def list_render_endpoints() -> list[tuple[str, str]]:
         name = device.FriendlyName or ""
         if is_steam_speakers(name) or _is_16ch_cable(name) or "vb-audio point" in name.lower():
             continue
+        if is_cable_render(name):
+            continue
         items.append((device.id, name))
     items.sort(
         key=lambda item: (
@@ -383,11 +385,35 @@ def _iter_devices(data_flow: int, device_state: int | None = None):
             return []
 
 
-def _find_endpoint(data_flow: int, matcher) -> Any | None:
-    for device in _iter_devices(data_flow):
+def find_cable_capture() -> Any | None:
+    try:
+        from pycaw.constants import DEVICE_STATE, EDataFlow
+    except Exception:
+        return None
+    return _find_endpoint_state(
+        EDataFlow.eCapture.value, DEVICE_STATE.MASK_ALL.value, is_cable_capture
+    )
+
+
+def find_cable_render() -> Any | None:
+    try:
+        from pycaw.constants import DEVICE_STATE, EDataFlow
+    except Exception:
+        return None
+    return _find_endpoint_state(
+        EDataFlow.eRender.value, DEVICE_STATE.MASK_ALL.value, is_cable_render
+    )
+
+
+def _find_endpoint_state(data_flow: int, device_state: int, matcher) -> Any | None:
+    for device in _iter_devices(data_flow, device_state):
         if matcher(device.FriendlyName or ""):
             return device
     return None
+
+
+def _find_endpoint(data_flow: int, matcher) -> Any | None:
+    return _find_endpoint_state(data_flow, None, matcher)
 
 
 def _unmute(device: Any) -> None:
@@ -400,7 +426,7 @@ def _unmute(device: Any) -> None:
 
 
 def _restore_stereo_cable_endpoints() -> list[str]:
-    """Keep the 2-channel VB-CABLE ends visible. Do not unhide 16ch."""
+    """Keep stereo CABLE Output visible. CABLE Input is hidden on purpose."""
     try:
         from pycaw.constants import DEVICE_STATE, EDataFlow
     except Exception:
@@ -411,17 +437,16 @@ def _restore_stereo_cable_endpoints() -> list[str]:
     except Exception:
         return []
     mask = DEVICE_STATE.MASK_ALL.value
-    for flow in (EDataFlow.eCapture.value, EDataFlow.eRender.value):
-        for device in _iter_devices(flow, mask):
-            name = device.FriendlyName or ""
-            if not (is_cable_capture(name) or is_cable_render(name)):
-                continue
-            try:
-                hr = policy.SetEndpointVisibility(device.id, 1)
-                if hr == 0 or hr is None:
-                    restored.append(name)
-            except Exception:
-                pass
+    for device in _iter_devices(EDataFlow.eCapture.value, mask):
+        name = device.FriendlyName or ""
+        if not is_cable_capture(name):
+            continue
+        try:
+            hr = policy.SetEndpointVisibility(device.id, 1)
+            if hr == 0 or hr is None:
+                restored.append(name)
+        except Exception:
+            pass
     return restored
 
 
@@ -457,26 +482,67 @@ def _hide_16ch_cable_endpoints() -> list[str]:
     return hidden
 
 
+def _hide_cable_input_render() -> list[str]:
+    """Hide stereo CABLE Input from the Windows playback list."""
+    try:
+        from pycaw.constants import DEVICE_STATE, EDataFlow
+    except Exception:
+        return []
+    hidden: list[str] = []
+    try:
+        policy = _policy_config()
+    except Exception:
+        return []
+    mask = DEVICE_STATE.MASK_ALL.value
+    for device in _iter_devices(EDataFlow.eRender.value, mask):
+        name = device.FriendlyName or ""
+        if not is_cable_render(name):
+            continue
+        try:
+            hr = policy.SetEndpointVisibility(device.id, 0)
+            if hr == 0 or hr is None:
+                hidden.append(name)
+        except Exception:
+            pass
+    return hidden
+
+
 def tidy_cable_endpoints() -> list[str]:
     _restore_stereo_cable_endpoints()
-    return _hide_16ch_cable_endpoints()
+    hidden = _hide_16ch_cable_endpoints()
+    hidden.extend(_hide_cable_input_render())
+    return hidden
 
 
 def prepare_vb_cable() -> dict[str, Any]:
     """Unmute both VB-CABLE ends, make CABLE Output the default mic, keep 48 kHz stereo."""
     result: dict[str, Any] = {"capture": None, "render": None, "logs": []}
     logs: list[str] = result["logs"]
-    hidden = tidy_cable_endpoints()
-    if hidden:
-        logs.append("已隐藏 16 声道 CABLE（微信请继续选立体声 CABLE Output）")
     try:
-        from pycaw.constants import EDataFlow, ERole
+        from pycaw.constants import ERole
         from pycaw.pycaw import AudioUtilities
     except Exception:
         logs.append("未安装 pycaw，无法锁定 CABLE 采样率。")
         return result
-    capture = _find_endpoint(EDataFlow.eCapture.value, is_cable_capture)
-    render = _find_endpoint(EDataFlow.eRender.value, is_cable_render)
+    render = find_cable_render()
+    if render is not None:
+        try:
+            _policy_config().SetEndpointVisibility(render.id, 1)
+        except Exception:
+            pass
+        render = find_cable_render() or render
+        _unmute(render)
+        ok = set_capture_app_format(render.id, channels=CABLE_CHANNELS, rate=CABLE_RATE)
+        set_shared_mode(render.id)
+        _disable_endpoint_fx("Render", render.id)
+        result["render"] = render.FriendlyName
+        logs.append(
+            ("已锁定" if ok else "未能锁定") + " CABLE Input: 48kHz / 16bit / 立体声"
+        )
+    hidden = tidy_cable_endpoints()
+    if hidden:
+        logs.append("已隐藏系统播放列表里的 CABLE Input，麦克风仍灌进该设备")
+    capture = find_cable_capture()
     if capture is not None:
         _unmute(capture)
         ok = set_capture_app_format(capture.id, channels=CABLE_CHANNELS, rate=CABLE_RATE)
@@ -492,15 +558,6 @@ def prepare_vb_cable() -> dict[str, Any]:
         result["capture"] = capture.FriendlyName
         logs.append(
             ("已锁定" if ok else "未能锁定") + " CABLE Output: 48kHz / 16bit / 立体声"
-        )
-    if render is not None:
-        _unmute(render)
-        ok = set_capture_app_format(render.id, channels=CABLE_CHANNELS, rate=CABLE_RATE)
-        set_shared_mode(render.id)
-        _disable_endpoint_fx("Render", render.id)
-        result["render"] = render.FriendlyName
-        logs.append(
-            ("已锁定" if ok else "未能锁定") + " CABLE Input: 48kHz / 16bit / 立体声"
         )
     if capture is None or render is None:
         logs.append("未找全 CABLE Input / CABLE Output。请确认已安装 VB-CABLE 并重启过电脑。")

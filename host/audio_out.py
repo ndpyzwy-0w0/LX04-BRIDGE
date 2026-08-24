@@ -34,6 +34,7 @@ class AudioSink:
         self.gain = 1.0
         self.callback_error = ""
         self.device_name = ""
+        self._endpoint = None
         self._dtype = "int16"
         self._started = False
 
@@ -86,6 +87,13 @@ class AudioSink:
         self.sample_rate = sample_rate
         self.in_channels = max(1, channels)
 
+    def start_hidden_cable(self, display_name: str = "") -> None:
+        found = find_hidden_cable_ks_output()
+        if found is None:
+            raise RuntimeError("找不到隐藏的 CABLE Input（WDM-KS Output / VB-Audio Point）")
+        self.start(found[0])
+        self.device_name = display_name or "CABLE Input (VB-Audio Virtual Cable)"
+
     def start(self, device: int | None) -> None:
         self.stop()
         if sd is None:
@@ -99,12 +107,21 @@ class AudioSink:
         self.device = device
         self.device_name = str(info.get("name") or f"device-{device}")
         native_rate = int(info.get("default_samplerate") or self.sample_rate)
-        cable = "cable input" in self.device_name.lower() and "hi-fi" not in self.device_name.lower() and "hifi" not in self.device_name.lower()
         api = ""
         try:
             api = str(sd.query_hostapis()[int(info.get("hostapi") or 0)].get("name") or "")
         except Exception:
             pass
+        lowered = self.device_name.lower()
+        ks_cable = _is_cable_ks_output(self.device_name, api, max_out)
+        cable = (
+            ks_cable
+            or (
+                "cable input" in lowered
+                and "hi-fi" not in lowered
+                and "hifi" not in lowered
+            )
+        )
         extra = None
         if "WASAPI" in api:
             try:
@@ -151,9 +168,16 @@ class AudioSink:
                 return
             except Exception as exc:
                 last_error = exc
-        raise RuntimeError("无法打开 CABLE Input") from last_error
+        raise RuntimeError("无法打开播放设备") from last_error
 
     def stop(self) -> None:
+        endpoint = self._endpoint
+        self._endpoint = None
+        if endpoint is not None:
+            try:
+                endpoint.stop()
+            except Exception:
+                pass
         with self._lock:
             stream = self._stream
             self._stream = None
@@ -166,6 +190,8 @@ class AudioSink:
                 pass
 
     def running(self) -> bool:
+        if self._endpoint is not None and self._endpoint.running():
+            return True
         return self._stream is not None
 
     def _ensure_started(self, force: bool = False) -> None:
@@ -181,6 +207,15 @@ class AudioSink:
             self.callback_error = repr(exc)
 
     def push(self, pcm: bytes, muted: bool = False) -> None:
+        if self._endpoint is not None:
+            self._endpoint.sample_rate = self.sample_rate
+            self._endpoint.in_channels = self.in_channels
+            self._endpoint.gain = self.gain
+            self._endpoint.push(pcm, muted)
+            self.peak = self._endpoint.peak
+            if self._endpoint.error:
+                self.callback_error = self._endpoint.error
+            return
         if muted:
             pcm = b"\x00" * len(pcm)
         else:
@@ -202,6 +237,9 @@ class AudioSink:
         self._ensure_started()
 
     def play_test_tone(self, seconds: float = 0.6, freq: float = 880.0) -> None:
+        if self._endpoint is not None:
+            self._endpoint.play_test_tone(seconds, freq)
+            return
         if not self.running():
             raise RuntimeError("还没有打开虚拟麦克风")
         frames = int(self.out_rate * seconds)
@@ -241,6 +279,48 @@ class AudioSink:
                 memoryview(outdata)[:need_i16] = data
         except Exception as exc:
             self.callback_error = repr(exc)
+
+
+def _is_cable_ks_output(name: str, api: str, max_out: int) -> bool:
+    if max_out <= 0:
+        return False
+    if "WDM-KS" not in api and not ("WDM" in api and "KS" in api):
+        return False
+    lowered = (name or "").lower()
+    if "vb-audio point" not in lowered:
+        return False
+    if lowered.startswith("input") or "cable output" in lowered:
+        return False
+    return True
+
+
+def find_hidden_cable_ks_output() -> tuple[int, str] | None:
+    if sd is None:
+        return None
+    try:
+        hostapis = list(sd.query_hostapis())
+    except Exception:
+        return None
+    ranked: list[tuple[int, str, int]] = []
+    for index, info in enumerate(sd.query_devices()):
+        max_out = int(info.get("max_output_channels") or 0)
+        name = str(info.get("name") or f"device-{index}")
+        api = ""
+        api_index = int(info.get("hostapi") or 0)
+        if 0 <= api_index < len(hostapis):
+            api = str(hostapis[api_index].get("name") or "")
+        if not _is_cable_ks_output(name, api, max_out):
+            continue
+        score = 10
+        if max_out == 2:
+            score += 20
+        elif max_out == 16:
+            score += 5
+        ranked.append((index, name, score))
+    if not ranked:
+        return None
+    ranked.sort(key=lambda item: (-item[2], item[1].lower()))
+    return ranked[0][0], ranked[0][1]
 
 
 def _score_inject_output(name: str, api: str, max_out: int) -> int:

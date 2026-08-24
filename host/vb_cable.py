@@ -86,17 +86,10 @@ def setup_exe() -> Path | None:
 
 def present() -> bool:
     try:
-        import sounddevice as sd
-    except ImportError:
-        return False
-    try:
-        devices = list(sd.query_devices())
+        import win_endpoint
     except Exception:
         return False
-    names = [str(info.get("name") or "") for info in devices]
-    has_in = any(_is_vb_cable_input(name) for name in names)
-    has_out = any(_is_vb_cable_output(name) for name in names)
-    return has_in and has_out
+    return win_endpoint.find_cable_capture() is not None and win_endpoint.find_cable_render() is not None
 
 
 def _is_hifi(name: str) -> bool:
