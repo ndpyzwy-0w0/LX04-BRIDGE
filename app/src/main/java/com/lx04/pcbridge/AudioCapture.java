@@ -17,6 +17,7 @@ final class AudioCapture {
     private AudioRecord record;
     private int sampleRate = 48000;
     private int channels = 1;
+    private String sourceName = "mic";
 
     AudioCapture(Listener listener) {
         this.listener = listener;
@@ -30,13 +31,19 @@ final class AudioCapture {
         return channels;
     }
 
+    String getSourceName() {
+        return sourceName;
+    }
+
     synchronized boolean start() {
         stop();
         int[] rates = new int[] {48000, 44100, 16000};
+        // XiaoAi often opens VOICE_RECOGNITION first and returns silence for normal speech.
         int[] sources = new int[] {
-                MediaRecorder.AudioSource.VOICE_RECOGNITION,
                 MediaRecorder.AudioSource.MIC,
-                MediaRecorder.AudioSource.CAMCORDER
+                MediaRecorder.AudioSource.CAMCORDER,
+                MediaRecorder.AudioSource.DEFAULT,
+                MediaRecorder.AudioSource.VOICE_RECOGNITION
         };
         for (int source : sources) {
             for (int rate : rates) {
@@ -44,6 +51,7 @@ final class AudioCapture {
                 if (record != null) {
                     sampleRate = rate;
                     channels = 1;
+                    sourceName = sourceLabel(source);
                     running = true;
                     thread = new Thread(this::loop, "lx04-mic");
                     thread.start();
@@ -139,5 +147,20 @@ final class AudioCapture {
     static boolean hasMicPermission(Context context) {
         return context.checkSelfPermission(android.Manifest.permission.RECORD_AUDIO)
                 == android.content.pm.PackageManager.PERMISSION_GRANTED;
+    }
+
+    private static String sourceLabel(int source) {
+        switch (source) {
+            case MediaRecorder.AudioSource.MIC:
+                return "mic";
+            case MediaRecorder.AudioSource.VOICE_COMMUNICATION:
+                return "voice_communication";
+            case MediaRecorder.AudioSource.CAMCORDER:
+                return "camcorder";
+            case MediaRecorder.AudioSource.VOICE_RECOGNITION:
+                return "voice_recognition";
+            default:
+                return "default";
+        }
     }
 }

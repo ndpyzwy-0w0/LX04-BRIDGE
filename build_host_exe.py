@@ -35,7 +35,7 @@ def main() -> int:
     exe_path = DIST / f"{name}.exe"
     latest = DIST / "LX04-PC-Bridge-Host.exe"
 
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "-q", "pyinstaller", "sounddevice"])
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "-q", "pyinstaller", "sounddevice", "pycaw", "comtypes", "psutil"])
     cmd = [
         sys.executable,
         "-m",
@@ -61,6 +61,20 @@ def main() -> int:
         "--hidden-import",
         "audio_out",
         "--hidden-import",
+        "vb_cable",
+        "--hidden-import",
+        "win_mic",
+        "--hidden-import",
+        "win_endpoint",
+        "--hidden-import",
+        "virtual_mic",
+        "--hidden-import",
+        "driver_setup",
+        "--hidden-import",
+        "pycaw",
+        "--hidden-import",
+        "comtypes",
+        "--hidden-import",
         "sounddevice",
         "--hidden-import",
         "_sounddevice",
@@ -68,12 +82,47 @@ def main() -> int:
         "cffi",
         "--hidden-import",
         "_cffi_backend",
+        "--hidden-import",
+        "psutil",
         "--collect-all",
         "sounddevice",
         "--collect-all",
         "cffi",
-        str(HOST / "pc_host.py"),
+        "--collect-all",
+        "pycaw",
+        "--collect-all",
+        "comtypes",
     ]
+    vbcable_pack = HOST / "vbcable" / "pack"
+    if vbcable_pack.is_dir():
+        for item in sorted(vbcable_pack.iterdir()):
+            if item.is_file():
+                cmd.extend(["--add-data", f"{item};vbcable"])
+        dest_cable = DIST / "vbcable"
+        dest_pack = dest_cable / "pack"
+        dest_pack.mkdir(parents=True, exist_ok=True)
+        for item in sorted(vbcable_pack.iterdir()):
+            if item.is_file():
+                (dest_pack / item.name).write_bytes(item.read_bytes())
+        notice = HOST / "vbcable" / "NOTICE.txt"
+        zip_pack = HOST / "vbcable" / "VBCABLE_Driver_Pack45.zip"
+        if notice.is_file():
+            (dest_cable / "NOTICE.txt").write_bytes(notice.read_bytes())
+        if zip_pack.is_file():
+            (dest_cable / zip_pack.name).write_bytes(zip_pack.read_bytes())
+    driver_pkg = ROOT / "driver" / "lx04-mic" / "x64" / "Release" / "package"
+    if driver_pkg.is_dir():
+        for item in sorted(driver_pkg.iterdir()):
+            if item.is_file():
+                cmd.extend(["--add-data", f"{item};lx04mic"])
+    adb_dir = HOST / "adb"
+    if adb_dir.is_dir():
+        for item in sorted(adb_dir.iterdir()):
+            if item.suffix.lower() in {".exe", ".dll"}:
+                cmd.extend(["--add-binary", f"{item};adb"])
+            elif item.suffix.lower() in {".txt", ".md"}:
+                cmd.extend(["--add-data", f"{item};adb"])
+    cmd.append(str(HOST / "pc_host.py"))
     print("Building", exe_path)
     subprocess.check_call(cmd)
     if latest.exists() or latest.is_symlink():
@@ -81,7 +130,47 @@ def main() -> int:
     latest.write_bytes(exe_path.read_bytes())
     print("Wrote", exe_path)
     print("Wrote", latest)
+    _commit_usable_version(version)
     return 0
+
+
+COMMIT_PATHS = [
+    "VERSION.txt",
+    "README.md",
+    "build_host_exe.py",
+    ".gitignore",
+    ".cursor/rules",
+    "app",
+    "host",
+    "protocol.md",
+    "local.properties.example",
+    "dist/LX04-PC-Bridge-Host.exe",
+]
+
+
+def _commit_usable_version(version: int) -> None:
+    """Snapshot source + current EXE after a usable pack. Historical vN.exe stay gitignored."""
+    git_dir = ROOT / ".git"
+    if not git_dir.exists():
+        return
+    try:
+        subprocess.check_call(["git", "add", "--", *COMMIT_PATHS], cwd=ROOT)
+        staged = subprocess.check_output(
+            ["git", "diff", "--cached", "--name-only"],
+            cwd=ROOT,
+            text=True,
+        ).strip()
+        if not staged:
+            return
+        message = (
+            f"Release v{version}: snapshot source and current host EXE.\n"
+            "\n"
+            "Keep versioned dist/LX04-PC-Bridge-Host-vN.exe on disk only."
+        )
+        subprocess.check_call(["git", "commit", "-m", message], cwd=ROOT)
+        print("Committed git snapshot for v" + str(version))
+    except subprocess.CalledProcessError as exc:
+        print("Git commit skipped:", exc)
 
 
 if __name__ == "__main__":

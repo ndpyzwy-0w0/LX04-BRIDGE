@@ -54,7 +54,14 @@ public class BridgeService extends Service {
             @Override
             public void onControl(JSONObject json) {
                 String cmd = json.optString("cmd", "");
-                if ("mute".equals(cmd)) {
+                if ("gain".equals(cmd)) {
+                    STATE.gain = (float) json.optDouble("gain", 1.0);
+                    if (STATE.gain < 0f) {
+                        STATE.gain = 0f;
+                    } else if (STATE.gain > 4f) {
+                        STATE.gain = 4f;
+                    }
+                } else if ("mute".equals(cmd)) {
                     STATE.muted = true;
                 } else if ("unmute".equals(cmd)) {
                     STATE.muted = false;
@@ -122,6 +129,14 @@ public class BridgeService extends Service {
             STATE.recording = true;
             STATE.sampleRate = capture.getSampleRate();
             STATE.channels = capture.getChannels();
+            STATE.audioSource = capture.getSourceName();
+            android.media.AudioManager am =
+                    (android.media.AudioManager) getSystemService(AUDIO_SERVICE);
+            if (am != null) {
+                am.setMicrophoneMute(false);
+                am.requestAudioFocus(null, android.media.AudioManager.STREAM_MUSIC,
+                        android.media.AudioManager.AUDIOFOCUS_GAIN);
+            }
         } else {
             STATE.recording = false;
             STATE.headline = "麦克风打开失败";
@@ -183,6 +198,7 @@ public class BridgeService extends Service {
         String pc = STATE.pcName.isEmpty() ? "电脑" : STATE.pcName;
         long silence = lastAudioMs == 0 ? 0 : SystemClock.elapsedRealtime() - lastAudioMs;
         STATE.detail = pc + " · " + STATE.formatLink() + " · " + STATE.formatAudio()
+                + " · 增益 " + Math.round(STATE.gain * 100) + "%"
                 + (silence > 1500 && STATE.recording ? " · 无声音输入" : "");
     }
 

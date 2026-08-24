@@ -14,10 +14,6 @@ android {
         versionName "1.0.0"
     }
 
-    androidResources {
-        localeFilters += ["zh", "en"]
-    }
-
     buildTypes {
         debug {
             minifyEnabled false

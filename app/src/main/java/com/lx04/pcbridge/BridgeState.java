@@ -8,10 +8,12 @@ final class BridgeState {
     volatile boolean muted;
     volatile boolean permissionDenied;
     volatile float level;
+    volatile float gain = 1f;
     volatile long frames;
     volatile long dropped;
     volatile int sampleRate = 48000;
     volatile int channels = 1;
+    volatile String audioSource = "";
     volatile String androidRelease = "";
     volatile String pcName = "";
     volatile String headline = "等待 USB";

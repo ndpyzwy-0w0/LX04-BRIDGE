@@ -22,3 +22,11 @@ host/.venv/
 *.log
 *.iml
 .externalNativeBuild/
+
+# Historical packed hosts stay on disk for rollback; git only tracks the current EXE.
+dist/LX04-PC-Bridge-Host-v*.exe
+dist/vbcable/
+
+# Unsigned kernel-driver experiment (cannot load with Secure Boot). Keep off git.
+driver/
+host/lx04mic/

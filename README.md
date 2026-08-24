@@ -22,15 +22,18 @@
 
 ## 电脑准备
 
-1. 安装 [Android SDK Platform-Tools](https://developer.android.com/tools/releases/platform-tools)（要有 `adb.exe`），或安装 Android Studio
-2. Python 3.10+ 
-3. 在 `host` 目录运行 `install_deps.bat`，或：
+1. Windows 10/11 64 位（可开着安全启动）
+2. 官方 **VB-CABLE** 虚拟声卡（捐赠软件，来源 [www.vb-cable.com](https://www.vb-cable.com/)）
+   - 发行包里带未修改的 `host/vbcable/`（`VBCABLE_Driver_Pack45.zip`）
+   - 或以管理员运行 `host/vbcable/pack/VBCABLE_Setup_x64.exe`，**然后重启**
+3. 上位机已内置 adb，不需要再装 Android SDK 也能连音箱
 
-```text
-pip install -r host/requirements.txt
-```
+VB-CABLE 装好后，Windows 声音设置里会出现：
 
-4. （推荐）安装 VB-Audio Virtual Cable，这样微信 / 腾讯会议 / Discord 才能把 LX04 选成麦克风
+- **CABLE Input**：给上位机灌声音（不要设成电脑扬声器）
+- **CABLE Output**：给微信 / QQ 当麦克风
+
+觉得 VB-CABLE 好用请向作者捐赠。商业批量分发请看 [VB-Audio 授权说明](https://vb-audio.com/Services/licensing.htm)。
 
 本仓库电脑上如果还没有 Android Studio / SDK，需要先装才能编译出 APK。
 
@@ -79,10 +82,12 @@ python build_host_exe.py
 启动后：
 
 1. 点 **刷新**，应出现 LX04 的 adb 序列号
-2. **虚拟麦克风输出**优先选 `CABLE Input`（若已装虚拟声卡）
+2. 若尚未安装 VB-CABLE，点 **连接** 时会打开官方安装程序（需管理员）。装完后重启，再打开上位机
 3. 点 **连接**
 4. 音箱屏幕应变为「正在拾音」，对音箱说话，电脑电平条会动
-5. 在会议软件里把麦克风选成 `CABLE Output`
+5. 在微信 / QQ / 语音输入里把麦克风选成 **CABLE Output**（或「麦克风 (VB-Audio Virtual Cable)」）。彻底退出再打开这些软件，避免缓存旧设备
+
+从源码跑上位机：先 `pip install -r host/requirements.txt`，再 `host/start_host.bat`。
 
 ## 硬件与系统
 

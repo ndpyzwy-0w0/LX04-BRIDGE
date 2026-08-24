@@ -1,0 +1,16 @@
+---
+description: Commit each usable packaged version; keep git free of historical EXEs
+alwaysApply: true
+---
+
+# Versioned releases
+
+After a **usable** host or APK build, commit once. `python build_host_exe.py` already commits when the EXE is written.
+
+- Bump/keep `VERSION.txt` in sync with `dist/LX04-PC-Bridge-Host-vN.exe`
+- Commit source, `VERSION.txt`, and `dist/LX04-PC-Bridge-Host.exe` (current only)
+- Do **not** `git add` `dist/LX04-PC-Bridge-Host-v*.exe`, `dist/vbcable/`, `driver/`, or `host/lx04mic/`
+- Versioned EXEs may remain on disk for rollback; they are gitignored
+- VB-CABLE lives once under `host/vbcable/` (official pack). Do not duplicate it into git via `dist/`
+- Commit message: `Release vN: <why this version is usable>`
+- If the packer already created that commit, do not commit again with an empty or duplicate message
