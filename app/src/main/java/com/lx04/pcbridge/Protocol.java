@@ -17,6 +17,7 @@ final class Protocol {
     static final byte CONTROL = 0x05;
     static final byte PING = 0x06;
     static final byte PONG = 0x07;
+    static final byte PLAY = 0x08;
 
     static final byte FLAG_MUTED = 0x01;
 

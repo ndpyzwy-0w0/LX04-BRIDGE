@@ -32,6 +32,7 @@ adb forward tcp:17890 tcp:17890
 | 0x05 | CONTROL | 电脑→音箱 | UTF-8 JSON |
 | 0x06 | PING | 双向 | 空 |
 | 0x07 | PONG | 双向 | 空 |
+| 0x08 | PLAY | 电脑→音箱 | PCM S16LE 48 kHz 立体声 |
 
 ## HELLO JSON
 
@@ -60,7 +61,8 @@ adb forward tcp:17890 tcp:17890
   "frames": 1200,
   "dropped": 0,
   "sampleRate": 48000,
-  "channels": 1
+  "channels": 1,
+  "playLevel": 0.18
 }
 ```
 
@@ -73,3 +75,5 @@ adb forward tcp:17890 tcp:17890
 ```
 
 音频块约 20ms。电脑侧应优先丢旧帧保实时，不要为了可靠传输堆缓冲。
+
+`PLAY` 是电脑正在播放的声音，送给音箱喇叭。与 `AUDIO`（音箱麦克风 → 电脑）方向相反。

@@ -69,6 +69,10 @@ def main() -> int:
         "--hidden-import",
         "hw_capture",
         "--hidden-import",
+        "hifi_cable",
+        "--hidden-import",
+        "speaker_loopback",
+        "--hidden-import",
         "virtual_mic",
         "--hidden-import",
         "driver_setup",
@@ -112,6 +116,24 @@ def main() -> int:
             (dest_cable / "NOTICE.txt").write_bytes(notice.read_bytes())
         if zip_pack.is_file():
             (dest_cable / zip_pack.name).write_bytes(zip_pack.read_bytes())
+    hifi_pack = HOST / "hificable" / "pack"
+    hifi_zip = HOST / "hificable" / "HiFiCableAsioBridgeSetup_v1007.zip"
+    if hifi_pack.is_dir() or hifi_zip.is_file():
+        dest_hifi = DIST / "hificable"
+        dest_hifi_pack = dest_hifi / "pack"
+        dest_hifi_pack.mkdir(parents=True, exist_ok=True)
+        if hifi_pack.is_dir():
+            for item in sorted(hifi_pack.iterdir()):
+                if item.is_file():
+                    cmd.extend(["--add-data", f"{item};hificable"])
+                    (dest_hifi_pack / item.name).write_bytes(item.read_bytes())
+        if hifi_zip.is_file():
+            cmd.extend(["--add-data", f"{hifi_zip};hificable"])
+            (dest_hifi / hifi_zip.name).write_bytes(hifi_zip.read_bytes())
+        hifi_notice = HOST / "hificable" / "NOTICE.txt"
+        if hifi_notice.is_file():
+            cmd.extend(["--add-data", f"{hifi_notice};hificable"])
+            (dest_hifi / "NOTICE.txt").write_bytes(hifi_notice.read_bytes())
     driver_pkg = ROOT / "driver" / "lx04-mic" / "x64" / "Release" / "package"
     if driver_pkg.is_dir():
         for item in sorted(driver_pkg.iterdir()):
@@ -134,7 +156,7 @@ def main() -> int:
     print("Wrote", latest)
     _commit_usable_version(
         version,
-        "capture LX04 digital mics with tinycap after pausing XiaoAi VPM",
+        "play PC audio through the LX04 speaker via USB",
     )
     return 0
 

@@ -2,6 +2,7 @@
 """Windows host for LX04: USB ADB tunnel + virtual-mic playback + status."""
 from __future__ import annotations
 
+import array
 import math
 import socket
 import sys
@@ -22,12 +23,14 @@ if not getattr(sys, "frozen", False) and str(HOST_DIR) not in sys.path:
     sys.path.insert(0, str(HOST_DIR))
 
 import adb_usb
+import hifi_cable
 import protocol
 import vb_cable
 import win_endpoint
 import win_mic
 from audio_out import AudioSink
 from hw_capture import HardwareMic
+from speaker_loopback import SpeakerLoopback
 
 BG = "#0B1220"
 PANEL = "#141C2E"
@@ -48,6 +51,8 @@ class BridgeClient:
         self.status: dict = {}
         self.frames = 0
         self._thread: threading.Thread | None = None
+        self._send_lock = threading.Lock()
+        self._seq_lock = threading.Lock()
 
     def connect(self, host: str, port: int) -> None:
         self.close()
@@ -75,18 +80,24 @@ class BridgeClient:
         payload.update(fields)
         self._send(protocol.encode_json(protocol.CONTROL, payload, seq=self._next_seq()))
 
+    def send_play(self, pcm: bytes, muted: bool = False) -> None:
+        flags = protocol.FLAG_MUTED if muted else 0
+        self._send(protocol.encode(protocol.PLAY, pcm or b"", flags=flags, seq=self._next_seq()))
+
     def _next_seq(self) -> int:
-        self.seq = (self.seq + 1) & 0xFFFF
-        return self.seq
+        with self._seq_lock:
+            self.seq = (self.seq + 1) & 0xFFFF
+            return self.seq
 
     def _send(self, data: bytes) -> None:
-        sock = self.sock
-        if sock is None:
-            return
-        try:
-            sock.sendall(data)
-        except OSError:
-            self.alive = False
+        with self._send_lock:
+            sock = self.sock
+            if sock is None:
+                return
+            try:
+                sock.sendall(data)
+            except OSError:
+                self.alive = False
 
     def _loop(self) -> None:
         sock = self.sock
@@ -149,11 +160,14 @@ class HostApp:
         self.client = BridgeClient(self._on_bridge_event)
         self.sink = AudioSink()
         self.hw = HardwareMic()
+        self.loopback = SpeakerLoopback()
         self.adb = adb_usb.find_adb()
         self.devices: list[str] = []
         self.connected = False
         self._serial = ""
         self._gain_sent_at = 0.0
+        self._prev_render: tuple[str, str] | None = None
+        self.play_peak = 0.0
         self._build()
         self.refresh_devices()
         self.refresh_mic_status()
@@ -162,8 +176,8 @@ class HostApp:
     def _build(self) -> None:
         self.root.title("LX04 上位机")
         self.root.configure(bg=BG)
-        self.root.geometry("780x620")
-        self.root.minsize(700, 520)
+        self.root.geometry("780x680")
+        self.root.minsize(700, 560)
 
         style = ttk.Style()
         try:
@@ -206,7 +220,7 @@ class HostApp:
         ttk.Label(self.root, text="LX04 PC Bridge", style="Title.TLabel").pack(anchor="w", padx=20, pady=(16, 4))
         ttk.Label(
             self.root,
-            text="USB 数据线连接小爱触屏音箱 LX04。语音软件请选麦克风「CABLE Output」，不要选 CABLE Input，也不要选 16 Ch。",
+            text="USB 数据线连接小爱触屏音箱 LX04。语音软件请选麦克风「CABLE Output」。系统播放会走到音箱喇叭。",
             style="Dim.TLabel",
         ).pack(anchor="w", padx=20)
 
@@ -226,6 +240,7 @@ class HostApp:
         row2 = ttk.Frame(card, style="Card.TFrame")
         row2.pack(fill="x", padx=16, pady=(0, 8))
         ttk.Button(row2, text="试音", command=self._on_test_tone).pack(side="left")
+        ttk.Button(row2, text="音箱试音", command=self._on_speaker_test_tone).pack(side="left", padx=6)
         ttk.Button(row2, text="静音切换", command=lambda: self.client.send_control("toggle_mute")).pack(side="left", padx=6)
 
         row3 = ttk.Frame(card, style="Card.TFrame")
@@ -263,8 +278,12 @@ class HostApp:
         self.detail = ttk.Label(card, text="插入数据线后点刷新，再点连接。", style="CardDim.TLabel")
         self.detail.pack(anchor="w", padx=16, pady=(2, 8))
 
+        ttk.Label(card, text="麦克风", style="CardDim.TLabel").pack(anchor="w", padx=16)
         self.meter = tk.Canvas(card, height=22, bg="#1E2A44", highlightthickness=0)
-        self.meter.pack(fill="x", padx=16, pady=(0, 16))
+        self.meter.pack(fill="x", padx=16, pady=(0, 8))
+        ttk.Label(card, text="扬声器", style="CardDim.TLabel").pack(anchor="w", padx=16)
+        self.spk_meter = tk.Canvas(card, height=22, bg="#1E2A44", highlightthickness=0)
+        self.spk_meter.pack(fill="x", padx=16, pady=(0, 16))
 
         self.log = tk.Text(
             self.root,
@@ -276,7 +295,7 @@ class HostApp:
             font=("Consolas", 10),
         )
         self.log.pack(fill="both", expand=True, padx=20, pady=(0, 8))
-        hint = "连接后，微信 / QQ / 语音输入请选麦克风「CABLE Output」。"
+        hint = "连接后：微信麦克风选「CABLE Output」；电脑声音从音箱喇叭出。不要把 CABLE Input 设成系统扬声器。"
         ttk.Label(self.root, text=hint, style="Dim.TLabel").pack(anchor="w", padx=20, pady=(0, 16))
         self._log("adb: " + (self.adb or "未找到内置 adb"))
         if vb_cable.present():
@@ -285,6 +304,10 @@ class HostApp:
             self._log("未检测到 VB-CABLE。连接时会打开官方安装程序（www.vb-cable.com，捐赠软件）。")
         if not self.sink.available():
             self._log("音频库未安装：在 host 目录执行  pip install -r requirements.txt")
+        if hifi_cable.present():
+            self._log("已检测到 Hi-Fi Cable，连接后会把系统播放接到音箱喇叭。")
+        else:
+            self._log("未检测到 Hi-Fi Cable。连接时可选装（要把电脑音乐接到音箱才需要）。")
 
     def _start_inject(self) -> None:
         if not vb_cable.present():
@@ -312,6 +335,84 @@ class HostApp:
         self._log("若微信里仍无声：完全退出微信（托盘也退出），再打开并只选 CABLE Output。")
         if prepared.get("capture"):
             self._log("已设为系统默认麦克风: " + str(prepared["capture"]))
+
+    def _start_speaker(self) -> None:
+        if not hifi_cable.present():
+            if messagebox.askokcancel("LX04", hifi_cable.DONATE_TEXT):
+                result = hifi_cable.run_official_setup()
+                self._log(result)
+            if not hifi_cable.present():
+                self._log("音箱可以先点「音箱试音」。要把电脑音乐接到音箱，请装完 Hi-Fi Cable 后重启。")
+                return
+        prepared = win_endpoint.prepare_hifi_cable()
+        for line in prepared.get("logs") or []:
+            self._log(line)
+        device_id = prepared.get("device_id")
+        if not device_id:
+            return
+        current = win_endpoint.get_default_render()
+        if current and current[0] != device_id:
+            self._prev_render = current
+        if not win_endpoint.set_default_render(device_id):
+            self._log("未能把系统播放切到 Hi-Fi Cable Input。")
+            return
+        self._log("已把系统播放切到: " + str(prepared.get("render")))
+        self._log("微信麦克风仍选 CABLE Output。若某软件还走原来的扬声器，请关掉再打开该软件。")
+        self.loopback.start(
+            device_id,
+            str(prepared.get("render") or "Hi-Fi Cable Input"),
+            self._on_loopback_pcm,
+        )
+
+    def _on_loopback_pcm(self, pcm: bytes, muted: bool) -> None:
+        self.play_peak = self.loopback.peak
+        self.client.send_play(pcm, muted=muted)
+
+    def _restore_render(self) -> None:
+        self.loopback.stop()
+        prev = self._prev_render
+        self._prev_render = None
+        self.play_peak = 0.0
+        if prev:
+            if win_endpoint.set_default_render(prev[0]):
+                self._log("已恢复系统播放设备: " + prev[1])
+
+    def _pcm_peak(self, pcm: bytes) -> float:
+        peak = 0
+        for i in range(0, len(pcm) - 1, 2):
+            sample = pcm[i] | (pcm[i + 1] << 8)
+            if sample >= 32768:
+                sample -= 65536
+            value = -sample if sample < 0 else sample
+            if value > peak:
+                peak = value
+        return peak / 32768.0
+
+    def _on_speaker_test_tone(self) -> None:
+        if not self.connected:
+            messagebox.showerror("LX04", "请先连接音箱。")
+            return
+        rate = 48000
+        frames = int(rate * 0.7)
+        samples = array.array("h")
+        for index in range(frames):
+            value = int(9000 * math.sin(2.0 * math.pi * 440.0 * index / rate))
+            samples.append(value)
+            samples.append(value)
+        pcm = samples.tobytes()
+        step = (rate // 50) * 4
+
+        def _send() -> None:
+            for offset in range(0, len(pcm), step):
+                if not self.connected:
+                    break
+                chunk = pcm[offset : offset + step]
+                self.play_peak = max(self.play_peak, self._pcm_peak(chunk))
+                self.client.send_play(chunk)
+                time.sleep(0.02)
+
+        threading.Thread(target=_send, daemon=True).start()
+        self._log("已向音箱送出试音。应能从音箱喇叭听到「嘀」。")
 
     def _on_test_tone(self) -> None:
         try:
@@ -388,24 +489,26 @@ class HostApp:
             try:
                 self.hw.start(self.adb, serial, self.sink)
                 self._log("已从音箱数字麦直采：48kHz 单声道（tinycap pcmC0D1c）")
+                hw_ok = True
             except Exception as exc:
+                hw_ok = False
                 self._log("硬件直采失败，回退 APK 麦克风: " + str(exc))
-                self.client.connect("127.0.0.1", protocol.PORT)
-                self.connected = True
-                self._serial = serial
-                self.client.send_control("start_mic")
-                self._on_gain()
-                self.client.send_control("gain", gain=round(self.sink.gain, 3))
-                self.headline.configure(text="USB 已连接")
-                return
             self.client.connect("127.0.0.1", protocol.PORT)
             self.connected = True
             self._serial = serial
+            if not hw_ok:
+                self.client.send_control("start_mic")
             self._on_gain()
             self.client.send_control("gain", gain=round(self.sink.gain, 3))
+            self._start_speaker()
             self.headline.configure(text="USB 已连接")
         except Exception as exc:
             self.connected = False
+            self._restore_render()
+            try:
+                self.client.close()
+            except Exception:
+                pass
             try:
                 self.hw.stop(self.adb, serial)
             except Exception:
@@ -421,6 +524,7 @@ class HostApp:
         self.client.close()
         self.hw.stop(self.adb, self._serial)
         self.sink.stop()
+        self._restore_render()
         self.connected = False
         if self.adb and self._serial:
             try:
@@ -429,7 +533,8 @@ class HostApp:
                 self._log("恢复小爱麦失败: " + str(exc))
         self.headline.configure(text="已断开")
         self.detail.configure(text="可以重新点连接。")
-        self._draw_meter(0)
+        self._draw_meter(self.meter, 0)
+        self._draw_meter(self.spk_meter, 0)
 
     def _on_bridge_event(self, kind: str, data) -> None:
         self.root.after(0, lambda: self._handle_event(kind, data))
@@ -463,12 +568,16 @@ class HostApp:
             if self.sink.running() and not self.hw.running():
                 self.sink.push(data.payload, muted=data.muted)
         elif kind == "status":
+            self.loopback.muted = bool(data.get("muted"))
+            if self.loopback.error:
+                self._log("扬声器环回: " + self.loopback.error)
+                self.loopback.error = ""
             if self.hw.running():
                 self.hw.muted = bool(data.get("muted"))
                 muted = "静音" if data.get("muted") else "拾音中"
                 usb = "USB" if data.get("usbConnected") else "USB断开"
                 self.detail.configure(
-                    text=f"{usb} · {muted} · 硬件麦 48kHz · 电平 {self.sink.peak:.2f}"
+                    text=f"{usb} · {muted} · 硬件麦 48kHz · 电平 {self.sink.peak:.2f} · 扬声器 {float(data.get('playLevel') or self.play_peak):.2f}"
                 )
                 if data.get("muted"):
                     self.headline.configure(text="音箱已静音")
@@ -494,7 +603,7 @@ class HostApp:
             muted = "静音" if data.get("muted") else "拾音中"
             usb = "USB" if data.get("usbConnected") else "USB断开"
             self.detail.configure(
-                text=f"{usb} · {muted} · 电平 {float(data.get('level') or 0):.2f} · 丢帧 {data.get('dropped', 0)}"
+                text=f"{usb} · {muted} · 电平 {float(data.get('level') or 0):.2f} · 扬声器 {float(data.get('playLevel') or self.play_peak):.2f} · 丢帧 {data.get('dropped', 0)}"
             )
             if data.get("muted"):
                 self.headline.configure(text="音箱已静音")
@@ -509,6 +618,7 @@ class HostApp:
             self.connected = False
             self.hw.stop(self.adb, self._serial)
             self.sink.stop()
+            self._restore_render()
             if self.adb and self._serial:
                 try:
                     adb_usb.release_speaker_mic(self.adb, self._serial)
@@ -516,18 +626,23 @@ class HostApp:
                     pass
             self.headline.configure(text="USB 已断开")
             self.detail.configure(text="检查数据线后重新连接。")
-            self._draw_meter(0)
+            self._draw_meter(self.meter, 0)
+            self._draw_meter(self.spk_meter, 0)
 
     def _tick(self) -> None:
-        self._draw_meter(self.sink.peak if self.connected else 0)
+        spk = self.loopback.peak if self.loopback.running() else self.play_peak
+        self._draw_meter(self.meter, self.sink.peak if self.connected else 0)
+        self._draw_meter(self.spk_meter, spk if self.connected else 0)
+        if not self.loopback.running():
+            self.play_peak *= 0.82
         self.root.after(80, self._tick)
 
-    def _draw_meter(self, level: float) -> None:
-        self.meter.delete("all")
-        width = max(self.meter.winfo_width(), 10)
+    def _draw_meter(self, canvas: tk.Canvas, level: float) -> None:
+        canvas.delete("all")
+        width = max(canvas.winfo_width(), 10)
         fill = max(4, int(width * min(1.0, level * 2.2)))
         color = GREEN if level < 0.35 else AMBER if level < 0.7 else RED
-        self.meter.create_rectangle(0, 0, fill, 22, fill=color, outline="")
+        canvas.create_rectangle(0, 0, fill, 22, fill=color, outline="")
 
     def _log(self, line: str) -> None:
         self.log.insert("end", line + "\n")
