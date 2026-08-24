@@ -88,7 +88,7 @@ class AudioSink:
         self.device = device
         self.device_name = str(info.get("name") or f"device-{device}")
         native_rate = int(info.get("default_samplerate") or self.sample_rate)
-        cable = "cable input" in self.device_name.lower()
+        cable = "cable input" in self.device_name.lower() and "hi-fi" not in self.device_name.lower() and "hifi" not in self.device_name.lower()
         api = ""
         try:
             api = str(sd.query_hostapis()[int(info.get("hostapi") or 0)].get("name") or "")
@@ -238,11 +238,15 @@ def _score_inject_output(name: str, api: str, max_out: int) -> int:
         return 0
     if "16ch" in lowered or "16 ch" in lowered or "vb-audio point" in lowered:
         return 0
+    if "hi-fi" in lowered or "hifi" in lowered:
+        return 0
     if "cable output" in lowered:
         return 0
     if "cable input" not in lowered:
         return 0
     score = 50
+    if "virtual cable" in lowered:
+        score += 30
     if "WASAPI" in api:
         score += 40
     elif "DirectSound" in api:

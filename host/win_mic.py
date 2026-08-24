@@ -46,6 +46,8 @@ def find_usb_microphone(names: list[tuple[int, str]] | None = None) -> tuple[int
                 continue
             if "16ch" in lowered or "16 ch" in lowered:
                 continue
+            if "hi-fi" in lowered or "hifi" in lowered:
+                continue
             return index, name
         if "microphone" in lowered and "usb" in lowered:
             return index, name
@@ -73,6 +75,8 @@ def matching_recording_device(output_name: str) -> tuple[int, str] | None:
         if "speakers" in candidate or "inject" in candidate or "注入" in name:
             continue
         if "16ch" in candidate or "16 ch" in candidate:
+            continue
+        if "hi-fi" in candidate or "hifi" in candidate:
             continue
         if any(key in candidate or key in name for key in keys):
             return index, name

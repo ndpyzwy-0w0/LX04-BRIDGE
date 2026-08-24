@@ -45,6 +45,8 @@ def is_cable_capture(name: str) -> bool:
         return False
     if _is_16ch_cable(text) or "vb-audio point" in lowered:
         return False
+    if _is_hifi_name(text):
+        return False
     if "cable input" in lowered:
         return False
     if "cable output" in lowered:
@@ -57,13 +59,19 @@ def is_cable_render(name: str) -> bool:
     lowered = text.lower()
     if is_steam_speakers(text) or _is_16ch_cable(text) or "vb-audio point" in lowered:
         return False
-    if "hi-fi cable" in lowered or "hifi cable" in lowered:
+    if _is_hifi_name(text):
         return False
     if "cable output" in lowered:
         return False
     if "cable input" in lowered:
         return True
     return False
+
+
+def _is_hifi_name(name: str) -> bool:
+    import hifi_cable
+
+    return hifi_cable.is_hifi_name(name)
 
 
 def is_hifi_render(name: str) -> bool:

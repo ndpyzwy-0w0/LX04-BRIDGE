@@ -156,7 +156,7 @@ def main() -> int:
     print("Wrote", latest)
     _commit_usable_version(
         version,
-        "play PC audio through the LX04 speaker via USB",
+        "keep mic inject on VB-CABLE, not Hi-Fi Cable",
     )
     return 0
 
