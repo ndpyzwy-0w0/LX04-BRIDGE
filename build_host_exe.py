@@ -67,6 +67,8 @@ def main() -> int:
         "--hidden-import",
         "win_endpoint",
         "--hidden-import",
+        "hw_capture",
+        "--hidden-import",
         "virtual_mic",
         "--hidden-import",
         "driver_setup",
@@ -132,7 +134,7 @@ def main() -> int:
     print("Wrote", latest)
     _commit_usable_version(
         version,
-        "pause XiaoAi VPM so the dual mics reach the APK instead of digital silence",
+        "capture LX04 digital mics with tinycap after pausing XiaoAi VPM",
     )
     return 0
 
