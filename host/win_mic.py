@@ -63,7 +63,12 @@ def matching_recording_device(output_name: str) -> tuple[int, str] | None:
         keys.extend(("lx04 麦克风", "lx04 microphone", "lx04"))
     if "steam streaming microphone" in lowered:
         keys.append("steam streaming microphone")
-    if "cable input" in lowered or "cable output" in lowered or "vb-audio" in lowered:
+    if (
+        "cable input" in lowered
+        or "cable output" in lowered
+        or "vb-audio" in lowered
+        or "vb-audio point" in lowered
+    ):
         keys.extend(("cable output", "cable out", "vb-audio virtual cable"))
     if "voicemeeter" in lowered:
         keys.append("voicemeeter")

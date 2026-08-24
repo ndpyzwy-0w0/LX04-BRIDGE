@@ -156,7 +156,7 @@ def main() -> int:
     print("Wrote", latest)
     _commit_usable_version(
         version,
-        "hide unused 16-channel VB-CABLE endpoints",
+        "hide CABLE Input from Windows playback while mic still injects via WDM-KS",
     )
     return 0
 

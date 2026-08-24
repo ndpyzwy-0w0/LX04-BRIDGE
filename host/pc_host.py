@@ -30,7 +30,7 @@ import protocol
 import vb_cable
 import win_endpoint
 import win_mic
-from audio_out import AudioSink
+from audio_out import AudioSink, find_hidden_cable_ks_output
 from hw_capture import HardwareMic
 from speaker_loopback import SpeakerLoopback
 
@@ -175,7 +175,7 @@ class HostApp:
         self.set_default_spk = tk.BooleanVar(value=True)
         self.inject_var = tk.StringVar()
         self.spk_dev_var = tk.StringVar()
-        self._inject_devices: list[tuple[int, str]] = []
+        self._inject_devices: list[tuple[str, str | int, str]] = []
         self._spk_devices: list[tuple[str, str]] = []
         self._routes_ready = False
         self._build()
@@ -360,17 +360,17 @@ class HostApp:
             font=("Consolas", 10),
         )
         self.log.pack(fill="both", expand=True, padx=20, pady=(0, 8))
-        hint = "麦克风通路请选 CABLE Input，微信里选 CABLE Output。扬声器通路请选 Hi-Fi Cable Input。两条线不要选成同一个设备。"
+        hint = "CABLE Input 已从系统播放列表隐藏，上位机仍会把麦克风灌进去。微信选 CABLE Output。扬声器选 Hi-Fi Cable Input。"
         ttk.Label(self.root, text=hint, style="Dim.TLabel").pack(anchor="w", padx=20, pady=(0, 16))
         self._log("adb: " + (self.adb or "未找到内置 adb"))
         if not self.sink.available():
             self._log("音频库未安装：在 host 目录执行  pip install -r requirements.txt")
 
-    def _selected_inject(self) -> tuple[int, str] | None:
+    def _selected_inject(self) -> tuple[str, str | int, str] | None:
         label = self.inject_var.get()
-        for index, name in self._inject_devices:
-            if name == label:
-                return index, name
+        for item in self._inject_devices:
+            if item[2] == label:
+                return item
         if self._inject_devices:
             return self._inject_devices[0]
         return None
@@ -411,18 +411,23 @@ class HostApp:
     def refresh_audio_devices(self, log: bool = True) -> None:
         hidden = win_endpoint.tidy_cable_endpoints()
         if log and hidden:
-            self._log("已隐藏 16 声道 CABLE：" + "、".join(hidden))
+            self._log("已从系统播放列表隐藏：" + "、".join(hidden))
         previous_inject = self.inject_var.get() or getattr(self, "_saved_inject", "")
         previous_spk = self.spk_dev_var.get() or getattr(self, "_saved_spk", "")
-        self._inject_devices = self.sink.list_playback_devices()
-        inject_labels = [name for _index, name in self._inject_devices]
+        inject_items: list[tuple[str, str | int, str]] = []
+        ks = find_hidden_cable_ks_output()
+        cable = win_endpoint.find_cable_render()
+        if ks is not None:
+            label = (cable.FriendlyName if cable is not None else "CABLE Input") + "  [隐藏]"
+            inject_items.append(("hidden", ks[0], label))
+        for index, name in self.sink.list_playback_devices():
+            if win_endpoint.is_cable_render(name):
+                continue
+            inject_items.append(("sd", index, name))
+        self._inject_devices = inject_items
+        inject_labels = [label for _kind, _handle, label in inject_items]
         self.inject_combo["values"] = inject_labels
-        preferred = None
-        pref_index = self.sink.preferred_device()
-        for index, name in self._inject_devices:
-            if index == pref_index:
-                preferred = name
-                break
+        preferred = inject_labels[0] if inject_labels else None
         chosen = _pick_label(inject_labels, previous_inject, preferred)
         if chosen:
             self.inject_var.set(chosen)
@@ -435,7 +440,7 @@ class HostApp:
             self.spk_dev_var.set(chosen_spk)
         if log:
             if vb_cable.present():
-                self._log("麦克风建议：CABLE Input（VB-Audio Virtual Cable），微信选 CABLE Output。")
+                self._log("麦克风建议：隐藏的 CABLE Input，微信选 CABLE Output。")
             if hifi_cable.present():
                 self._log("扬声器建议：Hi-Fi Cable Input。")
 
@@ -501,12 +506,15 @@ class HostApp:
         selected = self._selected_inject()
         if selected is None:
             raise RuntimeError("没有可用的播放设备。请先点刷新，或安装 VB-CABLE。")
-        device, label = selected
-        if win_endpoint.is_cable_render(label):
+        kind, handle, label = selected
+        if win_endpoint.is_cable_render(label) or kind == "hidden":
             prepared = win_endpoint.prepare_vb_cable()
             for line in prepared.get("logs") or []:
                 self._log(line)
-        self.sink.start(device)
+        if kind == "hidden":
+            self.sink.start_hidden_cable(label.replace("  [隐藏]", "").strip())
+        else:
+            self.sink.start(int(handle))
         rec = win_mic.matching_recording_device(self.sink.device_name)
         rec_name = rec[1] if rec else "CABLE Output"
         self.mic_var.set("请选择： " + rec_name)
@@ -524,7 +532,7 @@ class HostApp:
             return
         device_id, name = selected
         inject = self._selected_inject()
-        if self.mic_enabled.get() and inject is not None and win_endpoint.is_cable_render(name) and win_endpoint.is_cable_render(inject[1]):
+        if self.mic_enabled.get() and inject is not None and win_endpoint.is_cable_render(name) and win_endpoint.is_cable_render(inject[2]):
             self._log("警告：扬声器和麦克风都选了 VB-CABLE，微信里会串进系统声音。")
         self.loopback.stop()
         self.play_peak = 0.0
