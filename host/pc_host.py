@@ -892,6 +892,8 @@ class HostApp:
             if "hudStyle" in data or "lightTheme" in data:
                 self._reconcile_hud(data)
             return
+        if "lightTheme" in data:
+            self._sync_light_theme_from_apk(bool(data["lightTheme"]))
         payload = data.get("hudStyle")
         if not isinstance(payload, dict):
             return
@@ -899,6 +901,18 @@ class HostApp:
         host_rev = int(hud_preview.live_state(bool(self.light_theme.get())).get("rev") or 0)
         if apk_rev > host_rev:
             self._apply_hud_from_apk(data)
+
+    def _sync_light_theme_from_apk(self, light: bool) -> None:
+        if bool(self.light_theme.get()) == bool(light):
+            return
+        self._hud_from_apk = True
+        try:
+            self.light_theme.set(light)
+            if self._routes_ready:
+                self._save_routes()
+            hud_preview.set_light(light)
+        finally:
+            self._hud_from_apk = False
 
     def _reconcile_hud(self, data: dict) -> None:
         self._hud_need_reconcile = False

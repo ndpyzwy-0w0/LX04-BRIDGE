@@ -22,6 +22,7 @@ public class StatusHudView extends View {
 
     private Listener listener;
     private final CardEditor editor = new CardEditor(this);
+    private final AppMenu menu = new AppMenu(this);
     private final RectF[] cardRects = new RectF[] {
             new RectF(), new RectF(), new RectF(), new RectF()
     };
@@ -33,6 +34,7 @@ public class StatusHudView extends View {
         @Override
         public void run() {
             if (pressSlot >= 0) {
+                menu.close();
                 editor.open(pressSlot);
                 pressSlot = -1;
             }
@@ -173,6 +175,8 @@ public class StatusHudView extends View {
                 s.spkMuted ? "扬声器已静音" : "扬声器");
         if (editor.isOpen()) {
             editor.draw(canvas, w, h, lightTheme);
+        } else {
+            menu.draw(canvas, w, h, lightTheme);
         }
     }
 
@@ -380,7 +384,14 @@ public class StatusHudView extends View {
     @Override
     public void computeScroll() {
         super.computeScroll();
+        boolean more = false;
         if (editor.isOpen() && editor.advanceFling()) {
+            more = true;
+        }
+        if (!editor.isOpen() && menu.advance()) {
+            more = true;
+        }
+        if (more) {
             postInvalidateOnAnimation();
         }
     }
@@ -392,8 +403,13 @@ public class StatusHudView extends View {
         }
         float x = event.getX();
         float y = event.getY();
-        int action = event.getAction();
+        int action = event.getActionMasked();
+        int w = getWidth();
         if (action == MotionEvent.ACTION_DOWN) {
+            menu.onDown(x, y, w, event);
+            if (menu.blocksHud()) {
+                return true;
+            }
             pressSlot = cardIndexAt(x, y);
             pressX = x;
             pressY = y;
@@ -403,6 +419,14 @@ public class StatusHudView extends View {
             return true;
         }
         if (action == MotionEvent.ACTION_MOVE) {
+            if (menu.onMove(x, y, w, event)) {
+                touchHandler.removeCallbacks(longPress);
+                pressSlot = -1;
+                return true;
+            }
+            if (menu.blocksHud()) {
+                return true;
+            }
             if (pressSlot >= 0 && (Math.abs(x - pressX) > dp(12) || Math.abs(y - pressY) > dp(12))) {
                 touchHandler.removeCallbacks(longPress);
                 pressSlot = -1;
@@ -410,6 +434,7 @@ public class StatusHudView extends View {
             return true;
         }
         if (action == MotionEvent.ACTION_CANCEL) {
+            menu.onCancel();
             touchHandler.removeCallbacks(longPress);
             pressSlot = -1;
             return true;
@@ -417,6 +442,12 @@ public class StatusHudView extends View {
         if (action == MotionEvent.ACTION_UP) {
             touchHandler.removeCallbacks(longPress);
             pressSlot = -1;
+            if (menu.onUp(x, y, w, event)) {
+                return true;
+            }
+            if (menu.blocksHud()) {
+                return true;
+            }
             if (micMuteRect.contains(x, y)) {
                 if (listener != null) {
                     listener.onMicMuteTap();

@@ -108,8 +108,7 @@ public class BridgeService extends Service {
                     DisplayPrefs.setUpsideDown(BridgeService.this, STATE.upsideDown);
                     return;
                 } else if ("light_theme".equals(cmd)) {
-                    STATE.lightTheme = json.optBoolean("on", !STATE.lightTheme);
-                    DisplayPrefs.setLightTheme(BridgeService.this, STATE.lightTheme);
+                    setLightTheme(BridgeService.this, json.optBoolean("on", !STATE.lightTheme));
                     return;
                 } else if ("hud_style".equals(cmd)) {
                     applyHudStyle(json);
@@ -183,6 +182,13 @@ public class BridgeService extends Service {
         if (context != null) {
             persistHudStyle(context);
             DisplayPrefs.setLightTheme(context, false);
+        }
+    }
+
+    public static void setLightTheme(android.content.Context context, boolean light) {
+        STATE.lightTheme = light;
+        if (context != null) {
+            DisplayPrefs.setLightTheme(context, light);
         }
     }
 
