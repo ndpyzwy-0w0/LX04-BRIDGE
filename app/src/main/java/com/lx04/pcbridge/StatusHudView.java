@@ -187,9 +187,10 @@ public class StatusHudView extends View {
         float cardW = (right - left - gap * 3) / 4f;
         for (int i = 0; i < 4; i++) {
             String metric = s.hudStyle.metric(i);
+            String subMetric = s.hudStyle.subMetric(i);
             String title = s.hudStyle.title(i, HudStyle.fallbackTitle(metric, s.pcDiskName));
             drawStatCard(canvas, left + (cardW + gap) * i, top, cardW, cardH, title,
-                    formatMetricValue(s, metric), formatMetricSub(s, metric),
+                    formatMetricValue(s, metric), formatMetricValue(s, subMetric),
                     formatMetricFoot(s, metric), metricUsage(s, metric), metricTemp(s, metric), i);
         }
 
@@ -317,6 +318,9 @@ public class StatusHudView extends View {
     }
 
     private static String formatMetricValue(BridgeState s, String metric) {
+        if (metric == null || metric.isEmpty() || "none".equals(metric)) {
+            return "";
+        }
         if ("cpuT".equals(metric)) {
             return formatTemp(s.pcCpuTemp);
         }
@@ -335,27 +339,25 @@ public class StatusHudView extends View {
         if ("netU".equals(metric)) {
             return formatRate(s.pcNetUp);
         }
-        return formatPct(metricUsage(s, metric));
-    }
-
-    private static String formatMetricSub(BridgeState s, String metric) {
-        if ("cpu".equals(metric)) {
-            return formatTemp(s.pcCpuTemp);
-        }
-        if ("cpuT".equals(metric)) {
-            return s.pcCores > 0 ? s.pcCores + " 核" : "";
-        }
-        if ("gpu".equals(metric) || "gpuT".equals(metric) || "gpuW".equals(metric)
-                || "gpuFan".equals(metric) || "vram".equals(metric)) {
-            return gpuSub(s, metric);
-        }
-        if ("ram".equals(metric) && s.pcRamTotal > 0) {
+        if ("ramGB".equals(metric)) {
+            if (s.pcRamTotal <= 0) {
+                return "--";
+            }
             return String.format("%.0f / %.0f GB", s.pcRamUsed, s.pcRamTotal);
         }
-        if (("disk".equals(metric) || "diskIo".equals(metric)) && s.pcDiskTotal > 0) {
+        if ("diskGB".equals(metric)) {
+            if (s.pcDiskTotal <= 0) {
+                return "--";
+            }
             return String.format("%.0f / %.0f GB", s.pcDiskUsed, s.pcDiskTotal);
         }
-        return "";
+        if ("cores".equals(metric)) {
+            return s.pcCores > 0 ? s.pcCores + " 核" : "--";
+        }
+        if ("gpuN".equals(metric)) {
+            return s.pcGpuName != null && !s.pcGpuName.isEmpty() ? s.pcGpuName : "--";
+        }
+        return formatPct(metricUsage(s, metric));
     }
 
     private static String formatMetricFoot(BridgeState s, String metric) {
@@ -381,10 +383,10 @@ public class StatusHudView extends View {
         if ("vram".equals(metric)) {
             return s.pcVram;
         }
-        if ("ram".equals(metric)) {
+        if ("ram".equals(metric) || "ramGB".equals(metric)) {
             return s.pcRam;
         }
-        if ("disk".equals(metric)) {
+        if ("disk".equals(metric) || "diskGB".equals(metric)) {
             return s.pcDisk;
         }
         if ("diskIo".equals(metric)) {
@@ -417,32 +419,6 @@ public class StatusHudView extends View {
             return s.pcGpuTemp;
         }
         return Float.NaN;
-    }
-
-    private static String gpuSub(BridgeState s, String skip) {
-        StringBuilder b = new StringBuilder();
-        if (!"gpuT".equals(skip) && !Float.isNaN(s.pcGpuTemp)) {
-            b.append(Math.round(s.pcGpuTemp)).append("°C");
-        }
-        if (!"gpuW".equals(skip) && !Float.isNaN(s.pcGpuWatts) && s.pcGpuWatts >= 1f) {
-            if (b.length() > 0) {
-                b.append("  ");
-            }
-            b.append(Math.round(s.pcGpuWatts)).append("W");
-        }
-        if (!"vram".equals(skip) && !Float.isNaN(s.pcVram)) {
-            if (b.length() > 0) {
-                b.append("  ");
-            }
-            b.append("显存 ").append(Math.round(s.pcVram)).append("%");
-        }
-        if (!"gpu".equals(skip) && !Float.isNaN(s.pcGpu)) {
-            if (b.length() > 0) {
-                b.append("  ");
-            }
-            b.append(Math.round(s.pcGpu)).append("%");
-        }
-        return b.toString();
     }
 
     private static String formatPct(float value) {
