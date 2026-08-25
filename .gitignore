@@ -24,7 +24,7 @@ host/.venv/
 *.iml
 .externalNativeBuild/
 
-# Historical packed hosts stay on disk for rollback; git only tracks the current EXE.
+# Do not keep versioned host EXEs; git tracks dist/LX04-PC-Bridge-Host.exe only.
 dist/LX04-PC-Bridge-Host-v*.exe
 dist/vbcable/
 dist/hificable/

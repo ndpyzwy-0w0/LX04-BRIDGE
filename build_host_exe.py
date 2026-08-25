@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Package the Windows host into a versioned onefile EXE."""
+"""Package the Windows host into a onefile EXE. Rollback is git, not extra copies."""
 from __future__ import annotations
 
 import argparse
@@ -12,22 +12,13 @@ VERSION_FILE = ROOT / "VERSION.txt"
 DIST = ROOT / "dist"
 HOST = ROOT / "host"
 
-from release_git import commit_usable_version
+from release_git import commit_usable_version, read_version
 
 
-def current_version() -> int:
-    if not VERSION_FILE.exists():
-        return 1
-    text = VERSION_FILE.read_text(encoding="utf-8").strip()
-    return int(text) if text else 1
-
-
-def next_exe_version() -> int:
-    version = current_version()
-    while (DIST / f"LX04-PC-Bridge-Host-v{version}.exe").exists():
-        version += 1
-    if version != current_version():
-        VERSION_FILE.write_text(f"{version}\n", encoding="utf-8")
+def bump_version() -> int:
+    version = read_version() + 1
+    VERSION_FILE.write_text(f"{version}\n", encoding="utf-8")
+    print("VERSION.txt ->", version)
     return version
 
 
@@ -39,13 +30,25 @@ def main() -> int:
         default="",
         help="Release note for the git commit (Release vN: ...).",
     )
+    parser.add_argument(
+        "--bump",
+        action="store_true",
+        help="Increment VERSION.txt before packing.",
+    )
+    parser.add_argument(
+        "--no-commit",
+        action="store_true",
+        help="Pack only; skip the local git snapshot.",
+    )
     args = parser.parse_args()
 
     DIST.mkdir(parents=True, exist_ok=True)
-    version = next_exe_version()
-    name = f"LX04-PC-Bridge-Host-v{version}"
-    exe_path = DIST / f"{name}.exe"
-    latest = DIST / "LX04-PC-Bridge-Host.exe"
+    version = bump_version() if args.bump else read_version()
+    name = "LX04-PC-Bridge-Host"
+    staging = ROOT / "build" / "pyinstaller" / "dist"
+    staging.mkdir(parents=True, exist_ok=True)
+    built = staging / f"{name}.exe"
+    latest = DIST / f"{name}.exe"
 
     subprocess.check_call([sys.executable, "-m", "pip", "install", "-q", "pyinstaller", "sounddevice", "pycaw", "comtypes", "psutil"])
     cmd = [
@@ -59,7 +62,7 @@ def main() -> int:
         "--name",
         name,
         "--distpath",
-        str(DIST),
+        str(staging),
         "--workpath",
         str(ROOT / "build" / "pyinstaller"),
         "--specpath",
@@ -163,18 +166,18 @@ def main() -> int:
             elif item.suffix.lower() in {".txt", ".md"}:
                 cmd.extend(["--add-data", f"{item};adb"])
     cmd.append(str(HOST / "pc_host.py"))
-    print("Building", exe_path)
+    print("Building", latest)
     subprocess.check_call(cmd)
-    payload = exe_path.read_bytes()
+    payload = built.read_bytes()
     try:
-        if latest.exists() or latest.is_symlink():
-            latest.unlink()
         latest.write_bytes(payload)
         print("Wrote", latest)
     except OSError as exc:
-        print("Current EXE is in use, left", exe_path, ":", exc)
-    print("Wrote", exe_path)
-    commit_usable_version(version, args.message or "host EXE snapshot")
+        print("Current EXE is in use, left", built, ":", exc)
+        print("请先退出上位机，再把该文件复制到", latest)
+        return 1
+    if not args.no_commit:
+        commit_usable_version(version, args.message or "host EXE snapshot")
     return 0
 
 

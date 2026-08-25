@@ -36,7 +36,10 @@ final class BridgeState {
     volatile float pcRamUsed;
     volatile float pcRamTotal;
     volatile float pcDisk;
+    volatile float pcDiskUsed;
+    volatile float pcDiskTotal;
     volatile float pcDiskIo = Float.NaN;
+    volatile String pcDiskName = "";
     volatile float pcNetDown;
     volatile float pcNetUp;
     volatile long pcUptime;

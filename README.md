@@ -8,7 +8,7 @@
 - 电脑上位机把麦克风灌进 [VB-CABLE](https://vb-audio.com/Cable/)，其它软件把 `CABLE Output` 选成麦克风
 - 电脑正在播放的声音经第二根虚拟线 [Hi-Fi Cable](https://vb-audio.com/Cable/) 环回，再送到音箱喇叭
 - 音箱屏幕显示：USB 是否插上、是否连上上位机、麦克风/扬声器电平、静音、采样率、丢帧
-- 连接后屏幕同时显示电脑 CPU / GPU 温度和使用率、内存、磁盘占用、网速（上位机可关）
+- 连接后屏幕同时显示电脑 CPU / GPU 温度和使用率、内存、所选磁盘占用、网速（上位机可关、可选监测哪块盘）
 
 官方固件的 Micro USB **默认不能装第三方 APK**，也常被写成“不支持数据传输”。要用本项目，音箱需要已经能装普通 APK（社区官改 / 刷成 X04G / Lineage 等），并且使用 **能传数据的 Micro USB 线**（纯充电线不行）。
 
@@ -81,7 +81,7 @@ adb shell am start -n com.lx04.pcbridge/.MainActivity
 python build_host_exe.py
 ```
 
-生成 `dist/LX04-PC-Bridge-Host.exe`（当前版）和带版本号的 `dist/LX04-PC-Bridge-Host-vN.exe`（不覆盖旧包）。双击仓库根目录的 `启动上位机.bat` 即可。
+生成 `dist/LX04-PC-Bridge-Host.exe`（只保留当前这一份，旧版用 git 回退）。双击仓库根目录的 `启动上位机.bat` 即可。
 
 也可以直接跑源码：`host/start_host.bat`。
 
