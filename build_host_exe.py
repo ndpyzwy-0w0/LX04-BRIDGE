@@ -104,6 +104,8 @@ def main() -> int:
         "_cffi_backend",
         "--hidden-import",
         "psutil",
+        "--hidden-import",
+        "pc_stats",
         "--collect-all",
         "sounddevice",
         "--collect-all",

@@ -48,6 +48,9 @@ public class BridgeService extends Service {
             public void onClient(boolean connected, String helloAckName) {
                 STATE.clientConnected = connected;
                 STATE.pcName = helloAckName == null ? "" : helloAckName;
+                if (!connected) {
+                    STATE.pcStatsValid = false;
+                }
                 if (connected) {
                     playback.start();
                     if (audioManager != null) {
@@ -91,6 +94,9 @@ public class BridgeService extends Service {
                     stopMic();
                 } else if ("volume".equals(cmd)) {
                     setMusicVolume((float) json.optDouble("level", STATE.volume));
+                } else if ("pc_stats".equals(cmd)) {
+                    applyPcStats(json);
+                    return;
                 }
                 refreshHeadline();
             }
@@ -192,6 +198,38 @@ public class BridgeService extends Service {
         }
         am.setStreamVolume(AudioManager.STREAM_MUSIC, index, 0);
         STATE.volume = index / (float) max;
+    }
+
+    private static void applyPcStats(JSONObject json) {
+        STATE.pcStatsValid = true;
+        STATE.pcStatsAt = SystemClock.elapsedRealtime();
+        STATE.pcCpu = (float) json.optDouble("cpu", 0);
+        STATE.pcCpuTemp = optNum(json, "cpuT");
+        STATE.pcGpu = optNum(json, "gpu");
+        STATE.pcGpuTemp = optNum(json, "gpuT");
+        STATE.pcVram = optNum(json, "vram");
+        STATE.pcGpuWatts = optNum(json, "gpuW");
+        STATE.pcGpuFan = optNum(json, "gpuFan");
+        String gpuName = json.optString("gpuN", "");
+        if (!gpuName.isEmpty()) {
+            STATE.pcGpuName = gpuName;
+        }
+        STATE.pcRam = (float) json.optDouble("ram", 0);
+        STATE.pcRamUsed = (float) json.optDouble("ramU", 0);
+        STATE.pcRamTotal = (float) json.optDouble("ramT", 0);
+        STATE.pcDisk = (float) json.optDouble("disk", 0);
+        STATE.pcDiskIo = optNum(json, "diskIo");
+        STATE.pcNetDown = (float) json.optDouble("netD", 0);
+        STATE.pcNetUp = (float) json.optDouble("netU", 0);
+        STATE.pcUptime = json.optLong("up", 0);
+        STATE.pcCores = json.optInt("cores", 0);
+    }
+
+    private static float optNum(JSONObject json, String key) {
+        if (!json.has(key) || json.isNull(key)) {
+            return Float.NaN;
+        }
+        return (float) json.optDouble(key, Double.NaN);
     }
 
     private void startMic() {
