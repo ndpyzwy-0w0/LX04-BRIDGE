@@ -162,7 +162,7 @@ def main() -> int:
     print("Wrote", exe_path)
     _commit_usable_version(
         version,
-        "optional sync between Windows volume and the LX04 speaker",
+        "silence the speaker when synced Windows volume is at zero",
     )
     return 0
 
