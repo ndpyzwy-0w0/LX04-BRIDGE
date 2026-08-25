@@ -56,6 +56,11 @@ public class MainActivity extends Activity {
             public void onResetStyleTap() {
                 BridgeService.resetHudStyle(MainActivity.this);
             }
+
+            @Override
+            public void onHudStyleChanged() {
+                BridgeService.persistHudStyle(MainActivity.this);
+            }
         });
         setContentView(hud);
         BridgeService.STATE.upsideDown = DisplayPrefs.isUpsideDown(this);

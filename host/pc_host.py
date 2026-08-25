@@ -265,6 +265,8 @@ class HostApp:
         self._vol_ignore_spk_until = 0.0
         self._stats_ticks = 0
         self._stats_logged = False
+        self._hud_need_reconcile = False
+        self._hud_from_apk = False
         self._build()
         threading.Thread(target=pc_stats.snapshot, daemon=True).start()
         self._load_routes()
@@ -670,6 +672,8 @@ class HostApp:
         if not self._routes_ready:
             return
         self._save_routes()
+        if self._hud_from_apk:
+            return
         self._push_light_theme()
         if self.connected:
             self._log("音箱屏幕: " + ("浅色" if self.light_theme.get() else "深色"))
@@ -852,6 +856,8 @@ class HostApp:
         )
 
     def _on_hud_style_change(self, state: dict, reset: bool = False) -> None:
+        if self._hud_from_apk:
+            return
         self.light_theme.set(bool(state.get("light")))
         if self._routes_ready:
             self._save_routes()
@@ -864,10 +870,61 @@ class HostApp:
         if not self.connected:
             return
         if reset:
-            self.client.send_control("hud_style", reset=True)
+            rev = int(hud_preview.live_state(bool(self.light_theme.get())).get("rev") or 0)
+            self.client.send_control("hud_style", reset=True, rev=rev)
             return
         payload = hud_preview.control_payload(hud_preview.live_state(bool(self.light_theme.get())))
         self.client.send_control("hud_style", **payload)
+
+    def _begin_hud_reconcile(self) -> None:
+        self._hud_need_reconcile = True
+        self.root.after(900, self._hud_reconcile_timeout)
+
+    def _hud_reconcile_timeout(self) -> None:
+        if not self.connected or not self._hud_need_reconcile:
+            return
+        self._hud_need_reconcile = False
+        self._push_light_theme()
+        self._push_hud_style()
+
+    def _on_hud_status(self, data: dict) -> None:
+        if self._hud_need_reconcile:
+            if "hudStyle" in data or "lightTheme" in data:
+                self._reconcile_hud(data)
+            return
+        payload = data.get("hudStyle")
+        if not isinstance(payload, dict):
+            return
+        apk_rev = int(payload.get("rev") or 0)
+        host_rev = int(hud_preview.live_state(bool(self.light_theme.get())).get("rev") or 0)
+        if apk_rev > host_rev:
+            self._apply_hud_from_apk(data)
+
+    def _reconcile_hud(self, data: dict) -> None:
+        self._hud_need_reconcile = False
+        payload = data.get("hudStyle")
+        apk_rev = int(payload.get("rev") or 0) if isinstance(payload, dict) else 0
+        host_state = hud_preview.live_state(bool(self.light_theme.get()))
+        host_rev = int(host_state.get("rev") or 0)
+        if apk_rev > host_rev and isinstance(payload, dict):
+            self._apply_hud_from_apk(data)
+            return
+        self._push_light_theme()
+        self._push_hud_style()
+
+    def _apply_hud_from_apk(self, data: dict) -> None:
+        payload = data.get("hudStyle") or {}
+        light = bool(data["lightTheme"]) if "lightTheme" in data else bool(self.light_theme.get())
+        state = hud_preview.state_from_payload(payload, light)
+        state["light"] = light
+        self._hud_from_apk = True
+        try:
+            hud_preview.replace_state(state)
+            self.light_theme.set(light)
+            if self._routes_ready:
+                self._save_routes()
+        finally:
+            self._hud_from_apk = False
 
     def _start_inject(self) -> None:
         selected = self._selected_inject()
@@ -1050,8 +1107,7 @@ class HostApp:
                 self._push_pc_volume(force=True)
             self._push_pc_stats(force=True)
             self._push_upside_down()
-            self._push_light_theme()
-            self._push_hud_style()
+            self._begin_hud_reconcile()
             if self.spk_enabled.get():
                 self._apply_speaker_route()
             else:
@@ -1172,8 +1228,7 @@ class HostApp:
                 self._push_pc_volume(force=True)
             self._push_pc_stats(force=True)
             self._push_upside_down()
-            self._push_light_theme()
-            self._push_hud_style()
+            self._begin_hud_reconcile()
         except Exception as exc:
             self._log("重连后恢复通路失败: " + str(exc))
 
@@ -1240,6 +1295,7 @@ class HostApp:
             if self.sink.running() and not self.hw.running():
                 self.sink.push(data.payload, muted=data.muted)
         elif kind == "status":
+            self._on_hud_status(data)
             if "volume" in data:
                 try:
                     self._apply_speaker_volume(float(data.get("volume") or 0))
