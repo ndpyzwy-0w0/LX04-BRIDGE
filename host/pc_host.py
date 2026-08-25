@@ -699,7 +699,7 @@ class HostApp:
                 self._stats_logged = True
                 extra = ""
                 if "cpuT" not in payload:
-                extra = "（CPU 温度未读到，占用仍会显示；不需要另装软件）"
+                    extra = "（CPU 温度未读到，占用仍会显示；不需要另装软件）"
                 self._log("已向音箱发送电脑状态" + extra)
         except Exception as exc:
             self.pc_line.configure(text="电脑状态读取失败: " + str(exc))
