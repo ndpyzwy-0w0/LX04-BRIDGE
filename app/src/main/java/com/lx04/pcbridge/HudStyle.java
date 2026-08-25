@@ -22,8 +22,17 @@ final class HudStyle {
     private final String[] titles = new String[] {"", "", "", ""};
     private final String[] metrics = new String[] {"", "", "", ""};
     private final String[] subMetrics = new String[] {"", "", "", ""};
+    static final int DEFAULT_VALUE_SIZE = 28;
+    static final int DEFAULT_SUB_SIZE = 11;
+    static final int MIN_VALUE_SIZE = 12;
+    static final int MAX_VALUE_SIZE = 56;
+    static final int MIN_SUB_SIZE = 8;
+    static final int MAX_SUB_SIZE = 28;
+
     private final int[] titleColors = new int[4];
     private final int[] valueColors = new int[4];
+    private final int[] valueSizes = new int[4];
+    private final int[] subSizes = new int[4];
     private long rev;
 
     synchronized void clear() {
@@ -33,6 +42,8 @@ final class HudStyle {
             subMetrics[i] = "";
             titleColors[i] = 0;
             valueColors[i] = 0;
+            valueSizes[i] = 0;
+            subSizes[i] = 0;
         }
     }
 
@@ -71,6 +82,8 @@ final class HudStyle {
             subMetrics[index] = card.optString("subMetric", "");
             titleColors[index] = parseColor(card.optString("titleColor", ""));
             valueColors[index] = parseColor(card.optString("valueColor", ""));
+            valueSizes[index] = normalizeValueSize(card.optInt("valueSize", 0));
+            subSizes[index] = normalizeSubSize(card.optInt("subSize", 0));
         }
         if (incoming > 0) {
             rev = incoming;
@@ -99,6 +112,12 @@ final class HudStyle {
                 if (valueColors[i] != 0) {
                     card.put("valueColor", hex(valueColors[i]));
                 }
+                if (valueSize(i) != DEFAULT_VALUE_SIZE) {
+                    card.put("valueSize", valueSize(i));
+                }
+                if (subSize(i) != DEFAULT_SUB_SIZE) {
+                    card.put("subSize", subSize(i));
+                }
                 cards.put(card);
             }
             o.put("cards", cards);
@@ -114,7 +133,8 @@ final class HudStyle {
     synchronized boolean isClear() {
         for (int i = 0; i < 4; i++) {
             if (!titles[i].isEmpty() || !metrics[i].isEmpty() || !subMetrics[i].isEmpty()
-                    || titleColors[i] != 0 || valueColors[i] != 0) {
+                    || titleColors[i] != 0 || valueColors[i] != 0
+                    || valueSizes[i] != 0 || subSizes[i] != 0) {
                 return false;
             }
         }
@@ -188,6 +208,20 @@ final class HudStyle {
         return valueColors[index];
     }
 
+    synchronized int valueSize(int index) {
+        if (index < 0 || index >= 4 || valueSizes[index] == 0) {
+            return DEFAULT_VALUE_SIZE;
+        }
+        return clamp(valueSizes[index], MIN_VALUE_SIZE, MAX_VALUE_SIZE);
+    }
+
+    synchronized int subSize(int index) {
+        if (index < 0 || index >= 4 || subSizes[index] == 0) {
+            return DEFAULT_SUB_SIZE;
+        }
+        return clamp(subSizes[index], MIN_SUB_SIZE, MAX_SUB_SIZE);
+    }
+
     synchronized void setMetric(int index, String metric) {
         if (index < 0 || index >= 4 || !isPickable(metric)) {
             return;
@@ -223,6 +257,30 @@ final class HudStyle {
         bumpRev();
     }
 
+    synchronized void setValueSize(int index, int size) {
+        if (index < 0 || index >= 4) {
+            return;
+        }
+        int stored = normalizeValueSize(size);
+        if (valueSizes[index] == stored) {
+            return;
+        }
+        valueSizes[index] = stored;
+        bumpRev();
+    }
+
+    synchronized void setSubSize(int index, int size) {
+        if (index < 0 || index >= 4) {
+            return;
+        }
+        int stored = normalizeSubSize(size);
+        if (subSizes[index] == stored) {
+            return;
+        }
+        subSizes[index] = stored;
+        bumpRev();
+    }
+
     synchronized void resetSlot(int index) {
         if (index < 0 || index >= 4) {
             return;
@@ -232,6 +290,8 @@ final class HudStyle {
         subMetrics[index] = "";
         titleColors[index] = 0;
         valueColors[index] = 0;
+        valueSizes[index] = 0;
+        subSizes[index] = 0;
         bumpRev();
     }
 
@@ -359,6 +419,24 @@ final class HudStyle {
 
     static String hex(int color) {
         return String.format("#%06X", color & 0xFFFFFF);
+    }
+
+    static int clamp(int value, int min, int max) {
+        return Math.max(min, Math.min(max, value));
+    }
+
+    static int normalizeValueSize(int size) {
+        if (size <= 0 || size == DEFAULT_VALUE_SIZE) {
+            return 0;
+        }
+        return clamp(size, MIN_VALUE_SIZE, MAX_VALUE_SIZE);
+    }
+
+    static int normalizeSubSize(int size) {
+        if (size <= 0 || size == DEFAULT_SUB_SIZE) {
+            return 0;
+        }
+        return clamp(size, MIN_SUB_SIZE, MAX_SUB_SIZE);
     }
 
     private static int indexOf(String key) {
