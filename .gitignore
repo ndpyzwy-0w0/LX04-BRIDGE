@@ -26,6 +26,7 @@ host/.venv/
 
 # Do not keep versioned host EXEs; git tracks dist/LX04-PC-Bridge-Host.exe only.
 dist/LX04-PC-Bridge-Host-v*.exe
+dist/LX04-PC-Bridge-Host.exe.running
 dist/vbcable/
 dist/hificable/
 
