@@ -31,6 +31,7 @@ public class BridgeService extends Service {
         STATE.apkVersion = AppVersion.read(this);
         STATE.upsideDown = DisplayPrefs.isUpsideDown(this);
         STATE.lightTheme = DisplayPrefs.isLightTheme(this);
+        DisplayPrefs.loadHudStyle(this, STATE.hudStyle);
         startAsForeground();
         PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
         if (pm != null) {
@@ -110,6 +111,9 @@ public class BridgeService extends Service {
                     STATE.lightTheme = json.optBoolean("on", !STATE.lightTheme);
                     DisplayPrefs.setLightTheme(BridgeService.this, STATE.lightTheme);
                     return;
+                } else if ("hud_style".equals(cmd)) {
+                    applyHudStyle(json);
+                    return;
                 } else if ("pc_stats".equals(cmd)) {
                     applyPcStats(json);
                     return;
@@ -170,6 +174,32 @@ public class BridgeService extends Service {
     public static void toggleSpkMute() {
         STATE.spkMuted = !STATE.spkMuted;
         refreshHeadlineStatic();
+    }
+
+    public static void resetHudStyle(android.content.Context context) {
+        STATE.hudStyle.clear();
+        STATE.lightTheme = false;
+        if (context != null) {
+            DisplayPrefs.clearHudStyle(context);
+            DisplayPrefs.setLightTheme(context, false);
+        }
+    }
+
+    private void applyHudStyle(JSONObject json) {
+        if (json.optBoolean("reset", false)) {
+            STATE.hudStyle.clear();
+            DisplayPrefs.clearHudStyle(this);
+            return;
+        }
+        STATE.hudStyle.applyJson(json);
+        JSONObject store = new JSONObject();
+        try {
+            if (json.has("cards")) {
+                store.put("cards", json.get("cards"));
+            }
+        } catch (Exception ignored) {
+        }
+        DisplayPrefs.setHudStyleJson(this, store.toString());
     }
 
     private static void refreshHeadlineStatic() {

@@ -845,7 +845,29 @@ class HostApp:
         self._log(afterburner.open_download())
 
     def _open_hud_preview(self) -> None:
-        hud_preview.open_window(self.root, light=bool(self.light_theme.get()))
+        hud_preview.open_window(
+            self.root,
+            light=bool(self.light_theme.get()),
+            on_change=self._on_hud_style_change,
+        )
+
+    def _on_hud_style_change(self, state: dict, reset: bool = False) -> None:
+        self.light_theme.set(bool(state.get("light")))
+        if self._routes_ready:
+            self._save_routes()
+        self._push_light_theme()
+        self._push_hud_style(reset=reset)
+        if self.connected and reset:
+            self._log("已将音箱屏幕样式恢复默认")
+
+    def _push_hud_style(self, reset: bool = False) -> None:
+        if not self.connected:
+            return
+        if reset:
+            self.client.send_control("hud_style", reset=True)
+            return
+        payload = hud_preview.control_payload(hud_preview.live_state(bool(self.light_theme.get())))
+        self.client.send_control("hud_style", **payload)
 
     def _start_inject(self) -> None:
         selected = self._selected_inject()
@@ -1029,6 +1051,7 @@ class HostApp:
             self._push_pc_stats(force=True)
             self._push_upside_down()
             self._push_light_theme()
+            self._push_hud_style()
             if self.spk_enabled.get():
                 self._apply_speaker_route()
             else:
@@ -1150,6 +1173,7 @@ class HostApp:
             self._push_pc_stats(force=True)
             self._push_upside_down()
             self._push_light_theme()
+            self._push_hud_style()
         except Exception as exc:
             self._log("重连后恢复通路失败: " + str(exc))
 

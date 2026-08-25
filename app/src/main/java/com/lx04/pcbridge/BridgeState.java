@@ -47,6 +47,7 @@ final class BridgeState {
     volatile float pcNetUp;
     volatile long pcUptime;
     volatile int pcCores;
+    final HudStyle hudStyle = new HudStyle();
 
     boolean hasPcStats() {
         return pcStatsValid && clientConnected && pcStatsAt != 0

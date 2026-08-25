@@ -7,6 +7,7 @@ final class DisplayPrefs {
     private static final String PREFS = "lx04_bridge";
     private static final String KEY_UPSIDE_DOWN = "upside_down";
     private static final String KEY_LIGHT_THEME = "light_theme";
+    private static final String KEY_HUD_STYLE = "hud_style";
 
     private DisplayPrefs() {
     }
@@ -25,6 +26,33 @@ final class DisplayPrefs {
 
     static void setLightTheme(Context context, boolean lightTheme) {
         prefs(context).edit().putBoolean(KEY_LIGHT_THEME, lightTheme).apply();
+    }
+
+    static String hudStyleJson(Context context) {
+        return prefs(context).getString(KEY_HUD_STYLE, "");
+    }
+
+    static void setHudStyleJson(Context context, String json) {
+        prefs(context).edit().putString(KEY_HUD_STYLE, json == null ? "" : json).apply();
+    }
+
+    static void clearHudStyle(Context context) {
+        prefs(context).edit().remove(KEY_HUD_STYLE).apply();
+    }
+
+    static void loadHudStyle(Context context, HudStyle style) {
+        String raw = hudStyleJson(context);
+        if (raw == null || raw.isEmpty() || style == null) {
+            if (style != null) {
+                style.clear();
+            }
+            return;
+        }
+        try {
+            style.applyJson(new org.json.JSONObject(raw));
+        } catch (Exception ignored) {
+            style.clear();
+        }
     }
 
     private static SharedPreferences prefs(Context context) {
