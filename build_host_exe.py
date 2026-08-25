@@ -110,6 +110,8 @@ def main() -> int:
         "--hidden-import",
         "pc_stats",
         "--collect-all",
+        "psutil",
+        "--collect-all",
         "sounddevice",
         "--collect-all",
         "cffi",

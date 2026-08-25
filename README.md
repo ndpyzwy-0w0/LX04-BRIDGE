@@ -97,6 +97,20 @@ python build_host_exe.py
 
 从源码跑上位机：先 `pip install -r host/requirements.txt`，再 `host/start_host.bat`。
 
+## 电脑状态怎么来的
+
+上位机每秒采一次，经 USB 推到音箱。**发给别人只需要 `LX04-PC-Bridge-Host.exe`，不必装 Python、不必装 Afterburner。**
+
+| 项目 | 来源 | 分发时要不要额外东西 |
+|------|------|----------------------|
+| CPU / 内存占用、磁盘容量、网速、开机时长 | 打进 EXE 的 `psutil`，没有则退回 Windows API | 不用 |
+| 磁盘 IO、部分 ACPI 温度、核显占用 | 系统自带 PDH | 不用 |
+| NVIDIA 占用 / 温度 / 功耗 / 风扇 | 本机显卡驱动里的 `nvml.dll` | 有 NVIDIA 驱动即可，不随 EXE 带 DLL |
+| AMD 占用 / 温度 | 本机显卡驱动里的 `atiadlxx.dll` | 有 AMD 驱动即可 |
+| CPU 封装温度 | 若本机开着 MSI Afterburner，读它的共享内存 | **可选**。没有就省略温度，不显示假的 27°C |
+
+不要把 Afterburner、HWiNFO、LibreHardwareMonitor 打进安装包。读不到的温度字段直接不发。
+
 ## 硬件与系统
 
 | 项目 | LX04 |
