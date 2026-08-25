@@ -83,7 +83,7 @@ final class TcpBridgeServer {
             JSONObject o = new JSONObject();
             o.put("usbConnected", state.usbConnected);
             o.put("usbAdb", state.usbAdb);
-            o.put("recording", state.recording || state.hwCapture);
+            o.put("recording", state.recording);
             o.put("muted", state.muted);
             o.put("level", state.level);
             o.put("frames", state.frames);

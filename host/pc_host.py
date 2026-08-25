@@ -178,7 +178,6 @@ class HostApp:
         self._inject_devices: list[tuple[str, str | int, str]] = []
         self._spk_devices: list[tuple[str, str]] = []
         self._routes_ready = False
-        self._mic_level_sent_at = 0.0
         self._build()
         self._load_routes()
         self.refresh_devices()
@@ -471,8 +470,6 @@ class HostApp:
         if not self.mic_enabled.get():
             self.hw.stop(self.adb, self._serial)
             self.sink.stop()
-            self.client.send_control("mic_level", level=0, hw=False)
-            self.client.send_control("stop_mic")
             self._log("已关闭麦克风通路")
             return
         self.sink.configure(48000, 1)
@@ -481,7 +478,7 @@ class HostApp:
             try:
                 self.hw.start(self.adb, self._serial, self.sink)
                 self._log("已从音箱数字麦直采：48kHz 单声道（tinycap pcmC0D1c）")
-                self.client.send_control("stop_mic", hw=True)
+                self.client.send_control("stop_mic")
             except Exception as exc:
                 self._log("硬件直采失败，回退 APK 麦克风: " + str(exc))
                 self.client.send_control("start_mic")
@@ -811,14 +808,6 @@ class HostApp:
         self._draw_meter(self.spk_meter, spk if self.connected else 0)
         if not self.loopback.running():
             self.play_peak *= 0.82
-        now = time.monotonic()
-        if self.connected and self.hw.running() and now - self._mic_level_sent_at > 0.12:
-            self._mic_level_sent_at = now
-            self.client.send_control(
-                "mic_level",
-                level=round(self.sink.peak, 3),
-                hw=True,
-            )
         self.root.after(80, self._tick)
 
     def _draw_meter(self, canvas: tk.Canvas, level: float) -> None:
