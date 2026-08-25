@@ -156,7 +156,7 @@ def main() -> int:
     print("Wrote", latest)
     _commit_usable_version(
         version,
-        "hide CABLE Input from Windows playback while mic still injects via WDM-KS",
+        "show tinycap mic level on the speaker HUD",
     )
     return 0
 
