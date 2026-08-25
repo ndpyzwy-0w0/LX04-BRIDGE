@@ -33,6 +33,7 @@ def _host_dir() -> Path:
 PREVIEW_FILE = _host_dir() / "hud_preview.json"
 
 _open_root: tk.Toplevel | None = None
+_open_win: PreviewWindow | None = None
 
 
 def dp(value: float) -> float:
@@ -72,6 +73,8 @@ def default_state(light: bool = False) -> dict:
                 "value": value,
                 "title_color": colors["dim"],
                 "value_color": OK,
+                "title_color_set": False,
+                "value_color_set": False,
             }
         )
     return {"light": light, "cards": cards}
@@ -96,6 +99,12 @@ def load_state(light: bool = False) -> dict:
             card["title_color"] = _hex(extra.get("title_color"))
         if _hex(extra.get("value_color")):
             card["value_color"] = _hex(extra.get("value_color"))
+        card["title_color_set"] = bool(extra.get("title_color_set")) or (
+            bool(_hex(extra.get("title_color"))) and card["title_color"] != palette(light)["dim"]
+        )
+        card["value_color_set"] = bool(extra.get("value_color_set")) or (
+            bool(_hex(extra.get("value_color"))) and card["value_color"] != OK
+        )
     return base
 
 
@@ -104,6 +113,42 @@ def save_state(state: dict) -> None:
         PREVIEW_FILE.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
     except Exception:
         pass
+
+
+def style_is_default(state: dict) -> bool:
+    defaults = default_state(bool(state.get("light")))
+    for card, default in zip(state.get("cards") or [], defaults["cards"]):
+        if str(card.get("title") or "") != default["title"]:
+            return False
+        title_color = _hex(card.get("title_color")) or default["title_color"]
+        value_color = _hex(card.get("value_color")) or default["value_color"]
+        if title_color != default["title_color"] or value_color != default["value_color"]:
+            return False
+    return True
+
+
+def control_payload(state: dict) -> dict:
+    if style_is_default(state):
+        return {"reset": True}
+    defaults = default_state(bool(state.get("light")))
+    cards = []
+    for card, default in zip(state.get("cards") or [], defaults["cards"]):
+        item: dict = {"key": card.get("key")}
+        title = str(card.get("title") or "")
+        if title and title != default["title"]:
+            item["title"] = title[:8]
+        title_color = _hex(card.get("title_color"))
+        if card.get("title_color_set") and title_color:
+            item["titleColor"] = title_color
+        elif title_color and title_color != default["title_color"]:
+            item["titleColor"] = title_color
+        value_color = _hex(card.get("value_color"))
+        if card.get("value_color_set") and value_color:
+            item["valueColor"] = value_color
+        elif value_color and value_color != default["value_color"]:
+            item["valueColor"] = value_color
+        cards.append(item)
+    return {"cards": cards, "reset": False}
 
 
 def _hex(value: object) -> str:
@@ -258,23 +303,39 @@ def _draw_mute(canvas: tk.Canvas, rect: tuple[float, float, float, float], label
     canvas.create_text((x1 + x2) / 2.0, y1 + (y2 - y1) * 0.66, text=label, fill=colors["text"], font=font, anchor="s")
 
 
-def open_window(parent: tk.Misc, light: bool = False) -> tk.Toplevel:
-    global _open_root
-    if _open_root is not None:
+def open_window(parent: tk.Misc, light: bool = False, on_change=None) -> tk.Toplevel:
+    global _open_root, _open_win
+    if _open_win is not None:
         try:
-            if _open_root.winfo_exists():
-                _open_root.lift()
-                _open_root.focus_force()
-                return _open_root
+            if _open_win.root.winfo_exists():
+                _open_win.on_change = on_change
+                _open_win.root.lift()
+                _open_win.root.focus_force()
+                return _open_win.root
         except tk.TclError:
+            _open_win = None
             _open_root = None
-    win = PreviewWindow(parent, light)
+    win = PreviewWindow(parent, light, on_change)
+    _open_win = win
     _open_root = win.root
     return win.root
 
 
+def live_state(light: bool = False) -> dict:
+    win = _open_win
+    if win is not None:
+        try:
+            if win.root.winfo_exists():
+                win._cards_from_vars()
+                return win.state
+        except tk.TclError:
+            pass
+    return load_state(light)
+
+
 class PreviewWindow:
-    def __init__(self, parent: tk.Misc, light: bool) -> None:
+    def __init__(self, parent: tk.Misc, light: bool, on_change=None) -> None:
+        self.on_change = on_change
         self.root = tk.Toplevel(parent)
         self.root.title("音箱屏幕预览")
         self.root.configure(bg="#0B1220")
@@ -288,7 +349,7 @@ class PreviewWindow:
 
         hint = ttk.Label(
             self.root,
-            text="按音箱 800×480 画样式。大字和标题可改，不读电脑真实占用。",
+            text="按音箱 800×480 画样式。标题和颜色会同步到音箱；大字数字只在预览里随便填。",
             style="Dim.TLabel",
         )
         hint.pack(anchor="w", padx=16, pady=(12, 6))
@@ -317,7 +378,7 @@ class PreviewWindow:
             highlightthickness=0,
             font=("Segoe UI", 10),
         ).pack(side="left", padx=8, pady=8)
-        ttk.Label(tools, text="只改预览底色，不影响已连上的音箱。", style="CardDim.TLabel").pack(side="left")
+        ttk.Label(tools, text="浅色和板块样式会同步到已连接的音箱。", style="CardDim.TLabel").pack(side="left")
         ttk.Button(tools, text="恢复默认", command=self._reset).pack(side="right", padx=8, pady=6)
 
         editors = tk.Frame(self.root, bg="#141C2E")
@@ -377,6 +438,7 @@ class PreviewWindow:
         if not picked or not picked[1]:
             return
         self.state["cards"][index][key] = picked[1].upper()
+        self.state["cards"][index]["title_color_set" if which == "title" else "value_color_set"] = True
         self._paint_swatches()
         self._redraw()
         self._schedule_save()
@@ -390,6 +452,7 @@ class PreviewWindow:
         self._paint_swatches()
         self._redraw()
         save_state(self.state)
+        self._emit(reset=True)
 
     def _paint_swatches(self) -> None:
         for index, (title_btn, value_btn) in enumerate(self._swatches):
@@ -412,10 +475,22 @@ class PreviewWindow:
         self._saving = False
         self._cards_from_vars()
         save_state(self.state)
+        self._emit(reset=False)
+
+    def _emit(self, reset: bool = False) -> None:
+        callback = self.on_change
+        if callback is None:
+            return
+        try:
+            callback(self.state, reset)
+        except Exception:
+            pass
 
     def _close(self) -> None:
-        global _open_root
+        global _open_root, _open_win
         self._cards_from_vars()
         save_state(self.state)
+        self._emit(reset=False)
+        _open_win = None
         _open_root = None
         self.root.destroy()

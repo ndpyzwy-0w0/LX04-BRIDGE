@@ -14,6 +14,8 @@ public class StatusHudView extends View {
         void onMicMuteTap();
 
         void onSpkMuteTap();
+
+        void onResetStyleTap();
     }
 
     private Listener listener;
@@ -29,10 +31,12 @@ public class StatusHudView extends View {
     private final RectF playRect = new RectF();
     private final RectF micMuteRect = new RectF();
     private final RectF spkMuteRect = new RectF();
+    private final RectF resetRect = new RectF();
     private final RectF tmpRect = new RectF();
     private float pulse;
     private boolean lightTheme;
     private int colText;
+    private int colDim;
     private int colButton;
     private int colButtonMute;
     private int colPlayMute;
@@ -72,7 +76,8 @@ public class StatusHudView extends View {
             colButton = 0xFFD3DCE8;
             colButtonMute = 0xFFE9C9CF;
             colText = 0xFF1A2438;
-            dim.setColor(0xFF5A6B84);
+            colDim = 0xFF5A6B84;
+            dim.setColor(colDim);
             colPlayMute = 0xFF9AABC0;
         } else {
             bg.setColor(0xFF0B1220);
@@ -82,7 +87,8 @@ public class StatusHudView extends View {
             colButton = 0xFF223154;
             colButtonMute = 0xFF5B2A38;
             colText = 0xFFE8EEF8;
-            dim.setColor(0xFF8FA0BE);
+            colDim = 0xFF8FA0BE;
+            dim.setColor(colDim);
             colPlayMute = 0xFF5B6B88;
         }
         button.setColor(colButton);
@@ -135,6 +141,7 @@ public class StatusHudView extends View {
         float muteGap = dp(10);
         micMuteRect.set(dp(18), muteTop, w / 2f - muteGap / 2f, h - dp(12));
         spkMuteRect.set(w / 2f + muteGap / 2f, muteTop, w - dp(18), h - dp(12));
+        resetRect.setEmpty();
         if (s.hasPcStats()) {
             drawHardware(canvas, s, w, h, muteTop);
         } else {
@@ -164,6 +171,9 @@ public class StatusHudView extends View {
         canvas.drawText(s.detail, dp(22), dp(102), dim);
         playRect.set(dp(22), dp(118), w - dp(22), dp(148));
         drawPlayMeter(canvas, s, w);
+        if (!s.clientConnected) {
+            drawResetButton(canvas, w, muteTop);
+        }
     }
 
     private void drawHardware(Canvas canvas, BridgeState s, int w, int h, float muteTop) {
@@ -175,16 +185,16 @@ public class StatusHudView extends View {
         float bottom = muteTop - dp(8) - meterH;
         float cardH = bottom - top;
         float cardW = (right - left - gap * 3) / 4f;
-        drawStatCard(canvas, left, top, cardW, cardH, "CPU",
+        drawStatCard(canvas, left, top, cardW, cardH, s.hudStyle.title(0, "CPU"),
                 formatPct(s.pcCpu), formatTemp(s.pcCpuTemp),
-                s.pcCores > 0 ? s.pcCores + " 核" : "", s.pcCpu, s.pcCpuTemp);
-        drawStatCard(canvas, left + (cardW + gap), top, cardW, cardH, "GPU",
-                formatPct(s.pcGpu), gpuSub(s), s.pcGpuName, s.pcGpu, s.pcGpuTemp);
+                s.pcCores > 0 ? s.pcCores + " 核" : "", s.pcCpu, s.pcCpuTemp, 0);
+        drawStatCard(canvas, left + (cardW + gap), top, cardW, cardH, s.hudStyle.title(1, "GPU"),
+                formatPct(s.pcGpu), gpuSub(s), s.pcGpuName, s.pcGpu, s.pcGpuTemp, 1);
         String ramSub = (s.pcRamTotal > 0)
                 ? String.format("%.0f / %.0f GB", s.pcRamUsed, s.pcRamTotal)
                 : "";
-        drawStatCard(canvas, left + (cardW + gap) * 2, top, cardW, cardH, "内存",
-                formatPct(s.pcRam), ramSub, "", s.pcRam, Float.NaN);
+        drawStatCard(canvas, left + (cardW + gap) * 2, top, cardW, cardH, s.hudStyle.title(2, "内存"),
+                formatPct(s.pcRam), ramSub, "", s.pcRam, Float.NaN, 2);
         String diskTitle = (s.pcDiskName == null || s.pcDiskName.isEmpty()) ? "磁盘" : s.pcDiskName;
         String diskSub = (s.pcDiskTotal > 0)
                 ? String.format("%.0f / %.0f GB", s.pcDiskUsed, s.pcDiskTotal)
@@ -192,8 +202,8 @@ public class StatusHudView extends View {
         String diskFoot = !Float.isNaN(s.pcDiskIo)
                 ? ("IO " + Math.round(s.pcDiskIo) + "%")
                 : "";
-        drawStatCard(canvas, left + (cardW + gap) * 3, top, cardW, cardH, diskTitle,
-                formatPct(s.pcDisk), diskSub, diskFoot, s.pcDisk, Float.NaN);
+        drawStatCard(canvas, left + (cardW + gap) * 3, top, cardW, cardH, s.hudStyle.title(3, diskTitle),
+                formatPct(s.pcDisk), diskSub, diskFoot, s.pcDisk, Float.NaN, 3);
 
         dim.setTextSize(dp(12));
         float meterTop = muteTop - meterH;
@@ -204,13 +214,17 @@ public class StatusHudView extends View {
     }
 
     private void drawStatCard(Canvas canvas, float x, float y, float cw, float ch,
-            String title, String value, String sub, String foot, float usage, float temp) {
+            String title, String value, String sub, String foot, float usage, float temp, int slot) {
         tmpRect.set(x, y, x + cw, y + ch);
         canvas.drawRoundRect(tmpRect, dp(12), dp(12), cardPaint);
+        int titleColor = BridgeService.STATE.hudStyle.titleColor(slot);
+        dim.setColor(titleColor != 0 ? titleColor : colDim);
         dim.setTextSize(dp(13));
         canvas.drawText(title, x + dp(10), y + dp(18), dim);
+        dim.setColor(colDim);
 
-        int valueColor = meterColor(usage, temp);
+        int customValue = BridgeService.STATE.hudStyle.valueColor(slot);
+        int valueColor = customValue != 0 ? customValue : meterColor(usage, temp);
         text.setColor(valueColor);
         text.setTextSize(dp(28));
         canvas.drawText(value, x + dp(10), y + dp(52), text);
@@ -251,11 +265,28 @@ public class StatusHudView extends View {
                 playRect.left + 4 + Math.max(dp(8), (playRect.width() - 8) * Math.max(0.04f, play)),
                 playRect.bottom - 4);
         canvas.drawRoundRect(playFill, dp(8), dp(8), meter);
-        if (!s.hasPcStats()) {
+        if (!s.hasPcStats() && s.clientConnected) {
             dim.setTextSize(dp(13));
             canvas.drawText("扬声器", dp(32), playRect.bottom + dp(16), dim);
             canvas.drawText("帧 " + s.frames + "  丢 " + s.dropped, w - dp(180), playRect.bottom + dp(16), dim);
         }
+    }
+
+    private void drawResetButton(Canvas canvas, int w, float muteTop) {
+        text.setTextSize(dp(16));
+        text.setColor(colText);
+        String label = "重置样式";
+        float tw = text.measureText(label);
+        float bw = tw + dp(48);
+        float bh = dp(40);
+        float top = playRect.bottom + dp(36);
+        if (top + bh > muteTop - dp(8)) {
+            top = muteTop - dp(8) - bh;
+        }
+        resetRect.set(w / 2f - bw / 2f, top, w / 2f + bw / 2f, top + bh);
+        button.setColor(colButton);
+        canvas.drawRoundRect(resetRect, dp(12), dp(12), button);
+        canvas.drawText(label, resetRect.centerX() - tw / 2f, resetRect.top + resetRect.height() * 0.66f, text);
     }
 
     @Override
@@ -273,6 +304,13 @@ public class StatusHudView extends View {
             if (spkMuteRect.contains(x, y)) {
                 if (listener != null) {
                     listener.onSpkMuteTap();
+                }
+                invalidate();
+                return true;
+            }
+            if (!resetRect.isEmpty() && resetRect.contains(x, y)) {
+                if (listener != null) {
+                    listener.onResetStyleTap();
                 }
                 invalidate();
                 return true;

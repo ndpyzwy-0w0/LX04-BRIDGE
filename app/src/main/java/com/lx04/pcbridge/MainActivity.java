@@ -51,10 +51,16 @@ public class MainActivity extends Activity {
             public void onSpkMuteTap() {
                 BridgeService.toggleSpkMute();
             }
+
+            @Override
+            public void onResetStyleTap() {
+                BridgeService.resetHudStyle(MainActivity.this);
+            }
         });
         setContentView(hud);
         BridgeService.STATE.upsideDown = DisplayPrefs.isUpsideDown(this);
         BridgeService.STATE.lightTheme = DisplayPrefs.isLightTheme(this);
+        DisplayPrefs.loadHudStyle(this, BridgeService.STATE.hudStyle);
         applyDisplayRotation(BridgeService.STATE.upsideDown);
         applyChromeColors(BridgeService.STATE.lightTheme);
         hideSystemUi();
