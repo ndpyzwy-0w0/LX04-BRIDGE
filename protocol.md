@@ -62,7 +62,8 @@ adb forward tcp:17890 tcp:17890
   "dropped": 0,
   "sampleRate": 48000,
   "channels": 1,
-  "playLevel": 0.18
+  "playLevel": 0.18,
+  "volume": 0.55
 }
 ```
 
@@ -72,6 +73,7 @@ adb forward tcp:17890 tcp:17890
 {"cmd": "mute"}
 {"cmd": "unmute"}
 {"cmd": "ping"}
+{"cmd": "volume", "level": 0.55}
 ```
 
 音频块约 20ms。电脑侧应优先丢旧帧保实时，不要为了可靠传输堆缓冲。

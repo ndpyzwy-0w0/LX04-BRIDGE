@@ -73,6 +73,8 @@ def main() -> int:
         "--hidden-import",
         "speaker_loopback",
         "--hidden-import",
+        "win_volume",
+        "--hidden-import",
         "virtual_mic",
         "--hidden-import",
         "driver_setup",
@@ -149,14 +151,18 @@ def main() -> int:
     cmd.append(str(HOST / "pc_host.py"))
     print("Building", exe_path)
     subprocess.check_call(cmd)
-    if latest.exists() or latest.is_symlink():
-        latest.unlink()
-    latest.write_bytes(exe_path.read_bytes())
+    payload = exe_path.read_bytes()
+    try:
+        if latest.exists() or latest.is_symlink():
+            latest.unlink()
+        latest.write_bytes(payload)
+        print("Wrote", latest)
+    except OSError as exc:
+        print("Current EXE is in use, left", exe_path, ":", exc)
     print("Wrote", exe_path)
-    print("Wrote", latest)
     _commit_usable_version(
         version,
-        "remove the microphone meter from the speaker HUD",
+        "optional sync between Windows volume and the LX04 speaker",
     )
     return 0
 

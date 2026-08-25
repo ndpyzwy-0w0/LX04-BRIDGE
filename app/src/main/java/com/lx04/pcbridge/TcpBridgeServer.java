@@ -91,6 +91,7 @@ final class TcpBridgeServer {
             o.put("sampleRate", state.sampleRate);
             o.put("channels", state.channels);
             o.put("playLevel", state.playLevel);
+            o.put("volume", BridgeService.musicVolume());
             enqueue(Protocol.STATUS, (byte) 0, o.toString().getBytes(StandardCharsets.UTF_8));
         } catch (Exception ignored) {
         }
