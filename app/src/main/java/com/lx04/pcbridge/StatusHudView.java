@@ -185,25 +185,13 @@ public class StatusHudView extends View {
         float bottom = muteTop - dp(8) - meterH;
         float cardH = bottom - top;
         float cardW = (right - left - gap * 3) / 4f;
-        drawStatCard(canvas, left, top, cardW, cardH, s.hudStyle.title(0, "CPU"),
-                formatPct(s.pcCpu), formatTemp(s.pcCpuTemp),
-                s.pcCores > 0 ? s.pcCores + " 核" : "", s.pcCpu, s.pcCpuTemp, 0);
-        drawStatCard(canvas, left + (cardW + gap), top, cardW, cardH, s.hudStyle.title(1, "GPU"),
-                formatPct(s.pcGpu), gpuSub(s), s.pcGpuName, s.pcGpu, s.pcGpuTemp, 1);
-        String ramSub = (s.pcRamTotal > 0)
-                ? String.format("%.0f / %.0f GB", s.pcRamUsed, s.pcRamTotal)
-                : "";
-        drawStatCard(canvas, left + (cardW + gap) * 2, top, cardW, cardH, s.hudStyle.title(2, "内存"),
-                formatPct(s.pcRam), ramSub, "", s.pcRam, Float.NaN, 2);
-        String diskTitle = (s.pcDiskName == null || s.pcDiskName.isEmpty()) ? "磁盘" : s.pcDiskName;
-        String diskSub = (s.pcDiskTotal > 0)
-                ? String.format("%.0f / %.0f GB", s.pcDiskUsed, s.pcDiskTotal)
-                : "占用";
-        String diskFoot = !Float.isNaN(s.pcDiskIo)
-                ? ("IO " + Math.round(s.pcDiskIo) + "%")
-                : "";
-        drawStatCard(canvas, left + (cardW + gap) * 3, top, cardW, cardH, s.hudStyle.title(3, diskTitle),
-                formatPct(s.pcDisk), diskSub, diskFoot, s.pcDisk, Float.NaN, 3);
+        for (int i = 0; i < 4; i++) {
+            String metric = s.hudStyle.metric(i);
+            String title = s.hudStyle.title(i, HudStyle.fallbackTitle(metric, s.pcDiskName));
+            drawStatCard(canvas, left + (cardW + gap) * i, top, cardW, cardH, title,
+                    formatMetricValue(s, metric), formatMetricSub(s, metric),
+                    formatMetricFoot(s, metric), metricUsage(s, metric), metricTemp(s, metric), i);
+        }
 
         dim.setTextSize(dp(12));
         float meterTop = muteTop - meterH;
@@ -328,6 +316,135 @@ public class StatusHudView extends View {
                 : "v" + apkVersion;
     }
 
+    private static String formatMetricValue(BridgeState s, String metric) {
+        if ("cpuT".equals(metric)) {
+            return formatTemp(s.pcCpuTemp);
+        }
+        if ("gpuT".equals(metric)) {
+            return formatTemp(s.pcGpuTemp);
+        }
+        if ("gpuW".equals(metric)) {
+            if (Float.isNaN(s.pcGpuWatts) || s.pcGpuWatts < 1f) {
+                return "--";
+            }
+            return Math.round(s.pcGpuWatts) + "W";
+        }
+        if ("netD".equals(metric)) {
+            return formatRate(s.pcNetDown);
+        }
+        if ("netU".equals(metric)) {
+            return formatRate(s.pcNetUp);
+        }
+        return formatPct(metricUsage(s, metric));
+    }
+
+    private static String formatMetricSub(BridgeState s, String metric) {
+        if ("cpu".equals(metric)) {
+            return formatTemp(s.pcCpuTemp);
+        }
+        if ("cpuT".equals(metric)) {
+            return s.pcCores > 0 ? s.pcCores + " 核" : "";
+        }
+        if ("gpu".equals(metric) || "gpuT".equals(metric) || "gpuW".equals(metric)
+                || "gpuFan".equals(metric) || "vram".equals(metric)) {
+            return gpuSub(s, metric);
+        }
+        if ("ram".equals(metric) && s.pcRamTotal > 0) {
+            return String.format("%.0f / %.0f GB", s.pcRamUsed, s.pcRamTotal);
+        }
+        if (("disk".equals(metric) || "diskIo".equals(metric)) && s.pcDiskTotal > 0) {
+            return String.format("%.0f / %.0f GB", s.pcDiskUsed, s.pcDiskTotal);
+        }
+        return "";
+    }
+
+    private static String formatMetricFoot(BridgeState s, String metric) {
+        if ("disk".equals(metric) && !Float.isNaN(s.pcDiskIo)) {
+            return "IO " + Math.round(s.pcDiskIo) + "%";
+        }
+        if ("gpu".equals(metric) && s.pcGpuName != null && !s.pcGpuName.isEmpty()) {
+            return s.pcGpuName;
+        }
+        return "";
+    }
+
+    private static float metricUsage(BridgeState s, String metric) {
+        if ("cpu".equals(metric)) {
+            return s.pcCpu;
+        }
+        if ("gpu".equals(metric)) {
+            return s.pcGpu;
+        }
+        if ("gpuFan".equals(metric)) {
+            return s.pcGpuFan;
+        }
+        if ("vram".equals(metric)) {
+            return s.pcVram;
+        }
+        if ("ram".equals(metric)) {
+            return s.pcRam;
+        }
+        if ("disk".equals(metric)) {
+            return s.pcDisk;
+        }
+        if ("diskIo".equals(metric)) {
+            return s.pcDiskIo;
+        }
+        if ("cpuT".equals(metric)) {
+            return s.pcCpuTemp;
+        }
+        if ("gpuT".equals(metric)) {
+            return s.pcGpuTemp;
+        }
+        if ("gpuW".equals(metric)) {
+            return Float.isNaN(s.pcGpuWatts) ? Float.NaN : Math.min(100f, s.pcGpuWatts / 4.5f);
+        }
+        if ("netD".equals(metric)) {
+            return Math.min(100f, s.pcNetDown / 50000f);
+        }
+        if ("netU".equals(metric)) {
+            return Math.min(100f, s.pcNetUp / 50000f);
+        }
+        return Float.NaN;
+    }
+
+    private static float metricTemp(BridgeState s, String metric) {
+        if ("cpu".equals(metric) || "cpuT".equals(metric)) {
+            return s.pcCpuTemp;
+        }
+        if ("gpu".equals(metric) || "gpuT".equals(metric) || "gpuW".equals(metric)
+                || "gpuFan".equals(metric) || "vram".equals(metric)) {
+            return s.pcGpuTemp;
+        }
+        return Float.NaN;
+    }
+
+    private static String gpuSub(BridgeState s, String skip) {
+        StringBuilder b = new StringBuilder();
+        if (!"gpuT".equals(skip) && !Float.isNaN(s.pcGpuTemp)) {
+            b.append(Math.round(s.pcGpuTemp)).append("°C");
+        }
+        if (!"gpuW".equals(skip) && !Float.isNaN(s.pcGpuWatts) && s.pcGpuWatts >= 1f) {
+            if (b.length() > 0) {
+                b.append("  ");
+            }
+            b.append(Math.round(s.pcGpuWatts)).append("W");
+        }
+        if (!"vram".equals(skip) && !Float.isNaN(s.pcVram)) {
+            if (b.length() > 0) {
+                b.append("  ");
+            }
+            b.append("显存 ").append(Math.round(s.pcVram)).append("%");
+        }
+        if (!"gpu".equals(skip) && !Float.isNaN(s.pcGpu)) {
+            if (b.length() > 0) {
+                b.append("  ");
+            }
+            b.append(Math.round(s.pcGpu)).append("%");
+        }
+        return b.toString();
+    }
+
     private static String formatPct(float value) {
         if (Float.isNaN(value)) {
             return "--";
@@ -340,26 +457,6 @@ public class StatusHudView extends View {
             return "--";
         }
         return Math.round(temp) + "°C";
-    }
-
-    private static String gpuSub(BridgeState s) {
-        StringBuilder b = new StringBuilder();
-        if (!Float.isNaN(s.pcGpuTemp)) {
-            b.append(Math.round(s.pcGpuTemp)).append("°C");
-        }
-        if (!Float.isNaN(s.pcGpuWatts) && s.pcGpuWatts >= 1f) {
-            if (b.length() > 0) {
-                b.append("  ");
-            }
-            b.append(Math.round(s.pcGpuWatts)).append("W");
-        }
-        if (!Float.isNaN(s.pcVram)) {
-            if (b.length() > 0) {
-                b.append("  ");
-            }
-            b.append("显存 ").append(Math.round(s.pcVram)).append("%");
-        }
-        return b.toString();
     }
 
     private static String formatRate(float bytesPerSec) {

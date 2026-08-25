@@ -16,12 +16,65 @@ WARN = "#FFB020"
 BAD = "#FF5C7A"
 PLAY = "#6EA8FF"
 
-DEFAULT_CARDS = (
-    ("cpu", "CPU", "CPU", "88"),
-    ("gpu", "GPU", "GPU", "88"),
-    ("ram", "内存", "内存", "88"),
-    ("disk", "磁盘", "D:", "88"),
+DEFAULT_SLOTS = (
+    ("cpu", "CPU", "cpu"),
+    ("gpu", "GPU", "gpu"),
+    ("ram", "内存", "ram"),
+    ("disk", "磁盘", "disk"),
 )
+METRICS = (
+    ("cpu", "CPU 占用", "88%"),
+    ("cpuT", "CPU 温度", "64°C"),
+    ("gpu", "GPU 占用", "88%"),
+    ("gpuT", "GPU 温度", "64°C"),
+    ("gpuW", "GPU 功耗", "120W"),
+    ("gpuFan", "GPU 风扇", "40%"),
+    ("vram", "显存占用", "28%"),
+    ("ram", "内存占用", "35%"),
+    ("disk", "磁盘占用", "42%"),
+    ("diskIo", "磁盘 IO", "12%"),
+    ("netD", "下载速度", "—"),
+    ("netU", "上传速度", "—"),
+)
+METRIC_LABEL = {key: label for key, label, _sample in METRICS}
+METRIC_SAMPLE = {key: sample for key, _label, sample in METRICS}
+METRIC_KEY = {label: key for key, label, _sample in METRICS}
+
+
+def metric_label(key: str) -> str:
+    return METRIC_LABEL.get(key) or METRIC_LABEL["cpu"]
+
+
+def metric_sample(key: str) -> str:
+    return METRIC_SAMPLE.get(key) or "—"
+
+
+def metric_key(label: str) -> str:
+    return METRIC_KEY.get(label) or "cpu"
+
+
+def default_title_for(metric: str, slot_title: str) -> str:
+    if metric == "cpu" or metric == "cpuT":
+        return "CPU"
+    if metric == "gpu" or metric == "gpuT":
+        return "GPU"
+    if metric == "gpuW":
+        return "功耗"
+    if metric == "gpuFan":
+        return "风扇"
+    if metric == "vram":
+        return "显存"
+    if metric == "ram":
+        return "内存"
+    if metric == "disk":
+        return "磁盘"
+    if metric == "diskIo":
+        return "IO"
+    if metric == "netD":
+        return "下载"
+    if metric == "netU":
+        return "上传"
+    return slot_title
 
 
 def _host_dir() -> Path:
@@ -65,12 +118,12 @@ def palette(light: bool) -> dict[str, str]:
 def default_state(light: bool = False) -> dict:
     colors = palette(light)
     cards = []
-    for key, _label, title, value in DEFAULT_CARDS:
+    for key, title, metric in DEFAULT_SLOTS:
         cards.append(
             {
                 "key": key,
                 "title": title,
-                "value": value,
+                "metric": metric,
                 "title_color": colors["dim"],
                 "value_color": OK,
                 "title_color_set": False,
@@ -93,8 +146,9 @@ def load_state(light: bool = False) -> dict:
         extra = saved.get(card["key"]) or {}
         if extra.get("title"):
             card["title"] = str(extra["title"])[:8]
-        if extra.get("value") is not None and str(extra.get("value")) != "":
-            card["value"] = str(extra["value"])[:10]
+        metric = str(extra.get("metric") or "")
+        if metric in METRIC_LABEL:
+            card["metric"] = metric
         if _hex(extra.get("title_color")):
             card["title_color"] = _hex(extra.get("title_color"))
         if _hex(extra.get("value_color")):
@@ -120,6 +174,8 @@ def style_is_default(state: dict) -> bool:
     for card, default in zip(state.get("cards") or [], defaults["cards"]):
         if str(card.get("title") or "") != default["title"]:
             return False
+        if str(card.get("metric") or default["metric"]) != default["metric"]:
+            return False
         title_color = _hex(card.get("title_color")) or default["title_color"]
         value_color = _hex(card.get("value_color")) or default["value_color"]
         if title_color != default["title_color"] or value_color != default["value_color"]:
@@ -137,6 +193,9 @@ def control_payload(state: dict) -> dict:
         title = str(card.get("title") or "")
         if title and title != default["title"]:
             item["title"] = title[:8]
+        metric = str(card.get("metric") or default["metric"])
+        if metric != default["metric"] and metric in METRIC_LABEL:
+            item["metric"] = metric
         title_color = _hex(card.get("title_color"))
         if card.get("title_color_set") and title_color:
             item["titleColor"] = title_color
@@ -279,7 +338,7 @@ def draw_hud(canvas: tk.Canvas, state: dict) -> None:
 def _draw_card(canvas: tk.Canvas, x: float, y: float, cw: float, ch: float, card: dict, colors: dict[str, str]) -> None:
     _round_rect(canvas, x, y, x + cw, y + ch, dp(12), colors["card"])
     title = str(card.get("title") or "")
-    value = str(card.get("value") or "")
+    value = metric_sample(str(card.get("metric") or "cpu"))
     title_color = _hex(card.get("title_color")) or colors["dim"]
     value_color = _hex(card.get("value_color")) or OK
     title_font = _font(13)
@@ -287,7 +346,7 @@ def _draw_card(canvas: tk.Canvas, x: float, y: float, cw: float, ch: float, card
     sub_font = _font(11)
     canvas.create_text(x + dp(10), y + dp(18), text=_fit(title_font, title, cw - dp(18)), fill=title_color, font=title_font, anchor="sw")
     canvas.create_text(x + dp(10), y + dp(52), text=_fit(value_font, value, cw - dp(18)), fill=value_color, font=value_font, anchor="sw")
-    canvas.create_text(x + dp(10), y + dp(72), text="预览", fill=colors["dim"], font=sub_font, anchor="sw")
+    canvas.create_text(x + dp(10), y + dp(72), text=_fit(sub_font, metric_label(str(card.get("metric") or "cpu")), cw - dp(18)), fill=colors["dim"], font=sub_font, anchor="sw")
 
     bar_top = y + ch - dp(14)
     bar_l, bar_r = x + dp(10), x + cw - dp(10)
@@ -344,12 +403,12 @@ class PreviewWindow:
         self._saving = False
         self.light_var = tk.BooleanVar(value=bool(self.state["light"]))
         self.title_vars: list[tk.StringVar] = []
-        self.value_vars: list[tk.StringVar] = []
+        self.metric_vars: list[tk.StringVar] = []
         self._swatches: list[tuple[tk.Button, tk.Button]] = []
 
         hint = ttk.Label(
             self.root,
-            text="按音箱 800×480 画样式。标题和颜色会同步到音箱；大字数字只在预览里随便填。",
+            text="每个格子选要监视的数据，只改颜色和标题。大字显示真实数值，预览里用示意数字。",
             style="Dim.TLabel",
         )
         hint.pack(anchor="w", padx=16, pady=(12, 6))
@@ -388,29 +447,48 @@ class PreviewWindow:
         ttk.Label(header, text="板块", style="CardDim.TLabel", width=6).pack(side="left")
         ttk.Label(header, text="标题字母", style="CardDim.TLabel", width=10).pack(side="left")
         ttk.Label(header, text="字母色", style="CardDim.TLabel", width=8).pack(side="left")
-        ttk.Label(header, text="大字", style="CardDim.TLabel", width=10).pack(side="left")
+        ttk.Label(header, text="监视内容", style="CardDim.TLabel", width=14).pack(side="left")
         ttk.Label(header, text="大字色", style="CardDim.TLabel").pack(side="left")
 
-        for index, (_key, label, _title, _value) in enumerate(DEFAULT_CARDS):
+        combo_bg = "#F3F6FB"
+        combo_fg = "#1A2333"
+        for index, (_key, label, _metric) in enumerate(DEFAULT_SLOTS):
             card = self.state["cards"][index]
             row = tk.Frame(editors, bg="#141C2E")
             row.pack(fill="x", padx=8, pady=4)
             ttk.Label(row, text=label, style="Card.TLabel", width=6).pack(side="left")
             title_var = tk.StringVar(value=str(card["title"]))
-            value_var = tk.StringVar(value=str(card["value"]))
+            metric_var = tk.StringVar(value=metric_label(str(card.get("metric") or _metric)))
             self.title_vars.append(title_var)
-            self.value_vars.append(value_var)
-            title_entry = ttk.Entry(row, textvariable=title_var, width=10)
-            title_entry.pack(side="left", padx=(0, 6))
+            self.metric_vars.append(metric_var)
+            ttk.Entry(row, textvariable=title_var, width=10).pack(side="left", padx=(0, 6))
             title_swatch = tk.Button(row, width=3, relief="groove", bd=1, command=lambda i=index: self._pick(i, "title"))
             title_swatch.pack(side="left", padx=(0, 12))
-            value_entry = ttk.Entry(row, textvariable=value_var, width=10)
-            value_entry.pack(side="left", padx=(0, 6))
+            drop = ttk.Menubutton(row, textvariable=metric_var, style="Drop.TMenubutton", width=12, direction="below")
+            menu = tk.Menu(
+                drop,
+                tearoff=False,
+                font=("Segoe UI", 10),
+                bg=combo_bg,
+                fg=combo_fg,
+                activebackground="#C5E9D6",
+                activeforeground=combo_fg,
+                relief="solid",
+                borderwidth=1,
+            )
+            for _mkey, mlabel, _sample in METRICS:
+                menu.add_radiobutton(
+                    label=mlabel,
+                    variable=metric_var,
+                    value=mlabel,
+                    command=lambda i=index: self._on_metric(i),
+                )
+            drop["menu"] = menu
+            drop.pack(side="left", padx=(0, 12))
             value_swatch = tk.Button(row, width=3, relief="groove", bd=1, command=lambda i=index: self._pick(i, "value"))
             value_swatch.pack(side="left")
             self._swatches.append((title_swatch, value_swatch))
             title_var.trace_add("write", lambda *_a, i=index: self._on_text(i))
-            value_var.trace_add("write", lambda *_a, i=index: self._on_text(i))
 
         self.root.protocol("WM_DELETE_WINDOW", self._close)
         self._paint_swatches()
@@ -419,7 +497,17 @@ class PreviewWindow:
     def _cards_from_vars(self) -> None:
         for index, card in enumerate(self.state["cards"]):
             card["title"] = self.title_vars[index].get()[:8]
-            card["value"] = self.value_vars[index].get()[:10]
+            card["metric"] = metric_key(self.metric_vars[index].get())
+
+    def _on_metric(self, index: int) -> None:
+        card = self.state["cards"][index]
+        old_metric = str(card.get("metric") or DEFAULT_SLOTS[index][2])
+        new_metric = metric_key(self.metric_vars[index].get())
+        old_title = default_title_for(old_metric, DEFAULT_SLOTS[index][1])
+        if self.title_vars[index].get() in {"", old_title, DEFAULT_SLOTS[index][1], "D:"}:
+            self.title_vars[index].set(default_title_for(new_metric, DEFAULT_SLOTS[index][1]))
+        card["metric"] = new_metric
+        self._on_text(index)
 
     def _on_text(self, _index: int) -> None:
         self._cards_from_vars()
@@ -447,8 +535,8 @@ class PreviewWindow:
         self.state = default_state(bool(self.light_var.get()))
         self.light_var.set(bool(self.state["light"]))
         for index, card in enumerate(self.state["cards"]):
+            self.metric_vars[index].set(metric_label(str(card.get("metric") or DEFAULT_SLOTS[index][2])))
             self.title_vars[index].set(card["title"])
-            self.value_vars[index].set(card["value"])
         self._paint_swatches()
         self._redraw()
         save_state(self.state)
