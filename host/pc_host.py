@@ -358,8 +358,9 @@ class HostApp:
         ).pack(side="left")
         ttk.Label(stats_row, text="磁盘", style="Card.TLabel").pack(side="left", padx=(12, 4))
         self.disk_combo = ttk.Combobox(stats_row, textvariable=self.disk_var, width=28, state="readonly")
-        self.disk_combo.pack(side="left")
+        self.disk_combo.pack(side="left", fill="x", expand=True)
         self.disk_combo.bind("<<ComboboxSelected>>", lambda _e: self._on_disk_change())
+        self.disk_combo.bind("<ButtonPress-1>", _post_combobox)
 
         row2 = ttk.Frame(card, style="Card.TFrame")
         row2.pack(fill="x", padx=16, pady=(0, 8))
@@ -1125,6 +1126,17 @@ class HostApp:
     def _log(self, line: str) -> None:
         self.log.insert("end", line + "\n")
         self.log.see("end")
+
+
+def _post_combobox(event: tk.Event) -> str:
+    """Open a readonly Combobox even if the clam-theme arrow hit-test fails."""
+    combo = event.widget
+    try:
+        combo.focus_set()
+        combo.tk.call("ttk::combobox::Post", combo)
+    except tk.TclError:
+        combo.event_generate("<Down>")
+    return "break"
 
 
 def _pick_label(labels: list[str], saved: str, fallback: str | None) -> str:
