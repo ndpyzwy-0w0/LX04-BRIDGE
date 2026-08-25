@@ -23,7 +23,6 @@ public class StatusHudView extends View {
     private final Paint meterBg = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint meter = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint button = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private final RectF meterRect = new RectF();
     private final RectF playRect = new RectF();
     private final RectF muteRect = new RectF();
     private float pulse;
@@ -92,25 +91,7 @@ public class StatusHudView extends View {
         dim.setTextSize(dp(15));
         canvas.drawText(s.detail, dp(28), dp(132), dim);
 
-        meterRect.set(dp(28), dp(148), w - dp(28), dp(178));
-        canvas.drawRoundRect(meterRect, dp(10), dp(10), meterBg);
-        float level = Math.max(0f, Math.min(1f, s.level * 2.4f));
-        if (s.muted) {
-            meter.setColor(0xFF5B6B88);
-            level = 0.04f;
-        } else if (level > 0.85f) {
-            meter.setColor(0xFFFF5C7A);
-        } else if (level > 0.55f) {
-            meter.setColor(0xFFFFB020);
-        } else {
-            meter.setColor(0xFF3DDC97);
-        }
-        RectF fill = new RectF(meterRect.left + 4, meterRect.top + 4,
-                meterRect.left + 4 + Math.max(dp(8), (meterRect.width() - 8) * level),
-                meterRect.bottom - 4);
-        canvas.drawRoundRect(fill, dp(8), dp(8), meter);
-
-        playRect.set(dp(28), dp(198), w - dp(28), dp(228));
+        playRect.set(dp(28), dp(148), w - dp(28), dp(178));
         canvas.drawRoundRect(playRect, dp(10), dp(10), meterBg);
         float play = Math.max(0f, Math.min(1f, s.playLevel * 2.4f));
         if (s.muted) {
@@ -129,9 +110,8 @@ public class StatusHudView extends View {
         canvas.drawRoundRect(playFill, dp(8), dp(8), meter);
 
         dim.setTextSize(dp(13));
-        canvas.drawText("麦克风", dp(32), dp(192), dim);
-        canvas.drawText("扬声器", dp(32), dp(242), dim);
-        canvas.drawText("帧 " + s.frames + "  丢 " + s.dropped, w - dp(180), dp(242), dim);
+        canvas.drawText("扬声器", dp(32), dp(192), dim);
+        canvas.drawText("帧 " + s.frames + "  丢 " + s.dropped, w - dp(180), dp(192), dim);
 
         muteRect.set(dp(28), h - dp(78), w - dp(28), h - dp(28));
         button.setColor(s.muted ? 0xFF5B2A38 : 0xFF223154);

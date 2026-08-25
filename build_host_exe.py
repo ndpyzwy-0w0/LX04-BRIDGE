@@ -156,7 +156,7 @@ def main() -> int:
     print("Wrote", latest)
     _commit_usable_version(
         version,
-        "restore v25 host; stop sending mic level to the speaker HUD",
+        "remove the microphone meter from the speaker HUD",
     )
     return 0
 
