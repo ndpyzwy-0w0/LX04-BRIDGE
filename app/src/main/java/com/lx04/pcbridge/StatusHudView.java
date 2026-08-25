@@ -146,16 +146,12 @@ public class StatusHudView extends View {
         dim.setTextSize(dp(12));
         canvas.drawText(s.formatLink(), dp(36), dp(27), dim);
 
-        dim.setTextSize(dp(11));
-        String ver = formatVersion(s.apkVersion);
-        float verW = dim.measureText(ver);
-        canvas.drawText(ver, w - dp(22) - verW, dp(27), dim);
-
         if (s.hasPcStats()) {
             String host = s.pcName.isEmpty() ? "电脑" : s.pcName;
             String up = formatUptime(s.pcUptime);
             String mid = host + (up.isEmpty() ? "" : "  ·  " + up);
-            canvas.drawText(clip(dim, mid, w - dp(80) - verW - dp(110)), dp(110), dp(27), dim);
+            dim.setTextSize(dp(11));
+            canvas.drawText(clip(dim, mid, w - dp(22) - dp(110)), dp(110), dp(27), dim);
         }
 
         float muteTop = h - dp(64);
@@ -492,15 +488,6 @@ public class StatusHudView extends View {
             }
         }
         return -1;
-    }
-
-    private static String formatVersion(String apkVersion) {
-        if (apkVersion == null || apkVersion.isEmpty()) {
-            return "v?";
-        }
-        return apkVersion.startsWith("v") || apkVersion.startsWith("V")
-                ? apkVersion
-                : "v" + apkVersion;
     }
 
     private static String formatMetricValue(BridgeState s, String metric) {
