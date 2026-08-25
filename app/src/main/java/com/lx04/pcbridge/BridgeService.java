@@ -102,11 +102,13 @@ public class BridgeService extends Service {
         });
         usbMonitor.start();
         server.start();
+        Watchdog.schedule(this);
         refreshHeadline();
     }
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
+        Watchdog.schedule(this);
         if (intent != null && "toggle_mute".equals(intent.getAction())) {
             STATE.muted = !STATE.muted;
             refreshHeadline();
@@ -116,6 +118,7 @@ public class BridgeService extends Service {
 
     @Override
     public void onDestroy() {
+        Watchdog.schedule(this);
         if (usbMonitor != null) {
             usbMonitor.stop();
         }
@@ -280,7 +283,7 @@ public class BridgeService extends Service {
         NotificationManager nm = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
         if (nm != null) {
             NotificationChannel channel = new NotificationChannel(
-                    "bridge", "LX04 Bridge", NotificationManager.IMPORTANCE_LOW);
+                    "bridge", "LX04 Bridge", NotificationManager.IMPORTANCE_DEFAULT);
             channel.setShowBadge(false);
             nm.createNotificationChannel(channel);
         }

@@ -10,6 +10,8 @@ from pathlib import Path
 
 CREATE_NO_WINDOW = 0x08000000
 PORT = 17890
+PKG = "com.lx04.pcbridge"
+SERVICE = PKG + "/.BridgeService"
 
 
 def _bundled_adb_paths() -> list[Path]:
@@ -149,6 +151,60 @@ def install_apk(adb: str, apk: Path, serial: str | None = None) -> str:
     text = (result.stdout or "") + (result.stderr or "")
     if result.returncode != 0:
         raise RuntimeError(text.strip() or "adb install failed")
-    _run(adb, [*args, "shell", "pm", "grant", "com.lx04.pcbridge", "android.permission.RECORD_AUDIO"])
-    _run(adb, [*args, "shell", "am", "start", "-n", "com.lx04.pcbridge/.MainActivity"])
+    grant_bridge_permission(adb, serial)
+    whitelist_bridge(adb, serial)
+    start_bridge_service(adb, serial)
     return text.strip()
+
+
+def grant_bridge_permission(adb: str, serial: str | None = None) -> None:
+    args = ["-s", serial] if serial else []
+    _run(adb, [*args, "shell", "pm", "grant", PKG, "android.permission.RECORD_AUDIO"])
+
+
+def whitelist_bridge(adb: str, serial: str | None = None) -> None:
+    args = ["-s", serial] if serial else []
+    script = (
+        f"dumpsys deviceidle whitelist +{PKG} >/dev/null 2>&1; "
+        f"am set-inactive {PKG} false >/dev/null 2>&1; "
+        f"cmd appops set {PKG} RUN_IN_BACKGROUND allow >/dev/null 2>&1; "
+        f"cmd appops set {PKG} RUN_ANY_IN_BACKGROUND allow >/dev/null 2>&1; "
+        "true"
+    )
+    _run(adb, [*args, "shell", script], timeout=10)
+
+
+def start_bridge_service(adb: str, serial: str | None = None) -> None:
+    args = ["-s", serial] if serial else []
+    result = _run(
+        adb,
+        [*args, "shell", "am", "start-foreground-service", "-n", SERVICE],
+        timeout=10,
+    )
+    if result.returncode != 0:
+        _run(adb, [*args, "shell", "am", "startservice", "-n", SERVICE], timeout=10)
+
+
+def bridge_pid(adb: str, serial: str | None = None) -> str:
+    args = ["-s", serial] if serial else []
+    result = _run(adb, [*args, "shell", "pidof", PKG])
+    return (result.stdout or "").strip().split()[0] if (result.stdout or "").strip() else ""
+
+
+def ensure_bridge_running(adb: str, serial: str | None = None) -> str:
+    grant_bridge_permission(adb, serial)
+    whitelist_bridge(adb, serial)
+    start_bridge_service(adb, serial)
+    time.sleep(0.5)
+    pid = bridge_pid(adb, serial)
+    if pid:
+        return "后台服务已运行 pid=" + pid
+    start_bridge_service(adb, serial)
+    time.sleep(0.7)
+    pid = bridge_pid(adb, serial)
+    if pid:
+        return "后台服务已拉起 pid=" + pid
+    args = ["-s", serial] if serial else []
+    err = _run(adb, [*args, "shell", "am", "start-foreground-service", "-n", SERVICE], timeout=10)
+    detail = ((err.stderr or "") + " " + (err.stdout or "")).strip()
+    raise RuntimeError("无法在音箱上拉起后台服务（未打开窗口）。" + (detail or "请确认已安装 APK。"))

@@ -38,5 +38,5 @@ if not defined APK (
 
 "%ADB%" install -r -t "%APK%"
 "%ADB%" shell pm grant com.lx04.pcbridge android.permission.RECORD_AUDIO
-"%ADB%" shell am start -n com.lx04.pcbridge/.MainActivity
-echo 安装完成。
+"%ADB%" shell am start-foreground-service -n com.lx04.pcbridge/.BridgeService
+echo 安装完成。后台服务已启动，音箱上不必打开窗口。
