@@ -414,20 +414,6 @@ def _bar_fill(value: str) -> float:
     return max(0.04, min(1.0, number / 100.0))
 
 
-def _version_label() -> str:
-    for path in (
-        _host_dir() / "VERSION.txt",
-        _host_dir().parent / "VERSION.txt",
-    ):
-        try:
-            text = path.read_text(encoding="utf-8").strip()
-            if text:
-                return "v" + text.split()[0]
-        except Exception:
-            continue
-    return "v"
-
-
 def draw_hud(canvas: tk.Canvas, state: dict) -> None:
     canvas.delete("all")
     w, h = SCREEN_W, SCREEN_H
@@ -440,14 +426,10 @@ def draw_hud(canvas: tk.Canvas, state: dict) -> None:
 
     canvas.create_oval(dp(15), dp(15), dp(29), dp(29), fill=OK, outline="")
     top_font = _font(12)
-    ver_font = _font(11)
     canvas.create_text(dp(36), dp(27), text="USB ADB", fill=colors["dim"], font=top_font, anchor="sw")
-    ver = _version_label()
-    spec = tkfont.Font(font=ver_font)
-    ver_w = spec.measure(ver)
-    canvas.create_text(w - dp(22), dp(27), text=ver, fill=colors["dim"], font=ver_font, anchor="se")
-    mid = _fit(ver_font, "电脑  ·  预览", w - dp(80) - ver_w - dp(110))
-    canvas.create_text(dp(110), dp(27), text=mid, fill=colors["dim"], font=ver_font, anchor="sw")
+    mid_font = _font(11)
+    mid = _fit(mid_font, "电脑  ·  预览", w - dp(22) - dp(110))
+    canvas.create_text(dp(110), dp(27), text=mid, fill=colors["dim"], font=mid_font, anchor="sw")
 
     mute_top = h - dp(64)
     mute_gap = dp(10)
