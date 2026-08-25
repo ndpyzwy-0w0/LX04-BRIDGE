@@ -743,6 +743,13 @@ class _Mahm:
                 kernel32.CloseHandle(handle)
 
 
+def mahm_live() -> bool:
+    try:
+        return _Mahm().read() is not None
+    except Exception:
+        return False
+
+
 class _Nvml:
     def __init__(self) -> None:
         self.dll = None

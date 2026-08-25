@@ -25,6 +25,7 @@ if not getattr(sys, "frozen", False) and str(HOST_DIR) not in sys.path:
     sys.path.insert(0, str(HOST_DIR))
 
 import adb_usb
+import afterburner
 import hifi_cable
 import pc_stats
 import protocol
@@ -451,6 +452,9 @@ class HostApp:
         self.disk_drop = ChoiceDrop(
             stats_row, self.disk_var, self._on_disk_change, combo_bg, combo_fg, padx=0
         )
+        ttk.Button(
+            stats_row, text="CPU 温度 / Afterburner", command=self._on_afterburner
+        ).pack(side="right")
 
         row2 = ttk.Frame(card, style="Card.TFrame")
         row2.pack(fill="x", padx=16, pady=(0, 8))
@@ -699,7 +703,7 @@ class HostApp:
                 self._stats_logged = True
                 extra = ""
                 if "cpuT" not in payload:
-                    extra = "（CPU 温度未读到，占用仍会显示；不需要另装软件）"
+                    extra = "（CPU 温度未读到；可点「CPU 温度 / Afterburner」打开官网，占用仍会显示）"
                 self._log("已向音箱发送电脑状态" + extra)
         except Exception as exc:
             self.pc_line.configure(text="电脑状态读取失败: " + str(exc))
@@ -791,6 +795,21 @@ class HostApp:
             return
         self._log(hifi_cable.run_official_setup())
         self.refresh_audio_devices()
+
+    def _on_afterburner(self) -> None:
+        if afterburner.sensors_live():
+            messagebox.showinfo("LX04", afterburner.RUNNING_TEXT)
+            return
+        exe = afterburner.find_exe()
+        if exe is not None:
+            if not messagebox.askokcancel("LX04", afterburner.LAUNCH_TEXT):
+                return
+            self._log(afterburner.launch(exe))
+            self.root.after(2000, lambda: self._push_pc_stats(force=True))
+            return
+        if not messagebox.askokcancel("LX04", afterburner.DOWNLOAD_TEXT):
+            return
+        self._log(afterburner.open_download())
 
     def _start_inject(self) -> None:
         selected = self._selected_inject()

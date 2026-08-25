@@ -107,7 +107,7 @@ python build_host_exe.py
 | 磁盘 IO、部分 ACPI 温度、核显占用 | 系统自带 PDH | 不用 |
 | NVIDIA 占用 / 温度 / 功耗 / 风扇 | 本机显卡驱动里的 `nvml.dll` | 有 NVIDIA 驱动即可，不随 EXE 带 DLL |
 | AMD 占用 / 温度 | 本机显卡驱动里的 `atiadlxx.dll` | 有 AMD 驱动即可 |
-| CPU 封装温度 | 若本机开着 MSI Afterburner，读它的共享内存 | **可选**。没有就省略温度，不显示假的 27°C |
+| CPU 封装温度 | 若本机开着 MSI Afterburner，读它的共享内存 | **可选**。上位机有「CPU 温度 / Afterburner」按钮：已安装则启动，否则打开 [MSI 官网](https://www.msi.com/Landing/afterburner)。没有就省略温度，不显示假的 27°C |
 
 不要把 Afterburner、HWiNFO、LibreHardwareMonitor 打进安装包。读不到的温度字段直接不发。
 

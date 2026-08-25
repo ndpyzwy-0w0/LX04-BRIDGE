@@ -86,6 +86,8 @@ def main() -> int:
         "--hidden-import",
         "hifi_cable",
         "--hidden-import",
+        "afterburner",
+        "--hidden-import",
         "speaker_loopback",
         "--hidden-import",
         "win_volume",
