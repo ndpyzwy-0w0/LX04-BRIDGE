@@ -88,6 +88,8 @@ def main() -> int:
         "--hidden-import",
         "afterburner",
         "--hidden-import",
+        "hud_preview",
+        "--hidden-import",
         "speaker_loopback",
         "--hidden-import",
         "win_volume",
