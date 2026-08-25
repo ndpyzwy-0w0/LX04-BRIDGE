@@ -17,12 +17,15 @@ if not exist "%SDK%\platform-tools\adb.exe" (
 )
 
 set "APK="
-for %%F in ("%~dp0..\app\build\outputs\apk\debug\*.apk") do set "APK=%%~fF"
+for %%F in ("%~dp0..\dist\LX04-PC-Bridge.apk") do set "APK=%%~fF"
+if not defined APK (
+  for %%F in ("%~dp0..\app\build\outputs\apk\debug\*.apk") do set "APK=%%~fF"
+)
 if not defined APK (
   for %%F in ("%~dp0..\app\build\outputs\apk\release\*.apk") do set "APK=%%~fF"
 )
 if not defined APK (
-  echo 还没有编译出 APK。请用 Android Studio 打开本仓库，执行 Build ^> Build APK^(s^)。
+  echo 还没有 APK。请先运行 python build_apk.py，或在 Android Studio 里 Build APK。
   exit /b 1
 )
 

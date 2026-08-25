@@ -5,6 +5,8 @@ import subprocess
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
+DIST = ROOT / "dist"
+VERSION_FILE = ROOT / "VERSION.txt"
 
 COMMIT_PATHS = [
     "VERSION.txt",
@@ -19,11 +21,19 @@ COMMIT_PATHS = [
     "protocol.md",
     "local.properties.example",
     "dist/LX04-PC-Bridge-Host.exe",
+    "dist/LX04-PC-Bridge.apk",
 ]
 
 
+def read_version() -> int:
+    if not VERSION_FILE.exists():
+        return 1
+    text = VERSION_FILE.read_text(encoding="utf-8").strip()
+    return int(text) if text else 1
+
+
 def commit_usable_version(version: int, summary: str = "") -> bool:
-    """Commit source (+ current host EXE when present). Returns True if a commit was created."""
+    """Commit source (+ current host EXE / APK when present). Returns True if a commit was created."""
     if not (ROOT / ".git").is_dir():
         print("Not a git repo; skip commit.")
         return False
@@ -37,11 +47,12 @@ def commit_usable_version(version: int, summary: str = "") -> bool:
         if not staged:
             print("Nothing to commit.")
             return False
-        why = (summary or "snapshot source and current host EXE").strip()
+        why = (summary or "snapshot source and current release artifacts").strip()
         message = (
             f"Release v{version}: {why}\n"
             "\n"
-            "Keep versioned dist/LX04-PC-Bridge-Host-vN.exe on disk only."
+            "Keep versioned dist/LX04-PC-Bridge-Host-vN.exe and "
+            "dist/LX04-PC-Bridge-vN.apk on disk only."
         )
         subprocess.check_call(["git", "commit", "-m", message], cwd=ROOT)
         print("Committed git snapshot for v" + str(version))
