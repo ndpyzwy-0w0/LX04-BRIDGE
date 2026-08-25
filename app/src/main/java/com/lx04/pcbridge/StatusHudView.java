@@ -153,7 +153,7 @@ public class StatusHudView extends View {
             String host = s.pcName.isEmpty() ? "电脑" : s.pcName;
             String up = formatUptime(s.pcUptime);
             String mid = host + (up.isEmpty() ? "" : "  ·  " + up);
-            canvas.drawText(clip(mid, w - dp(80) - verW - dp(110)), dp(110), dp(27), dim);
+            canvas.drawText(clip(dim, mid, w - dp(80) - verW - dp(110)), dp(110), dp(27), dim);
         }
 
         float muteTop = h - dp(64);
@@ -236,27 +236,96 @@ public class StatusHudView extends View {
             String title, String value, String sub, String foot, float usage, float temp, int slot) {
         tmpRect.set(x, y, x + cw, y + ch);
         canvas.drawRoundRect(tmpRect, dp(12), dp(12), cardPaint);
-        int titleColor = BridgeService.STATE.hudStyle.titleColor(slot);
-        dim.setColor(titleColor != 0 ? titleColor : colDim);
-        dim.setTextSize(dp(13));
-        canvas.drawText(title, x + dp(10), y + dp(18), dim);
-        dim.setColor(colDim);
+        HudStyle style = BridgeService.STATE.hudStyle;
+        float padX = dp(10);
+        float innerW = Math.max(dp(24), cw - padX * 2);
+        float titleSize = dp(13);
+        float valueWant = dp(style.valueSize(slot));
+        float subWant = dp(style.subSize(slot));
+        boolean hasSub = sub != null && !sub.isEmpty();
+        boolean hasFoot = foot != null && !foot.isEmpty();
+        float barSpace = dp(16);
+        float footSpace = hasFoot ? dp(16) : 0;
+        float usableBottom = y + ch - barSpace - footSpace;
 
-        int customValue = BridgeService.STATE.hudStyle.valueColor(slot);
+        int titleColor = style.titleColor(slot);
+        dim.setColor(titleColor != 0 ? titleColor : colDim);
+        titleSize = fitText(dim, title, innerW, titleSize, dp(9));
+        float titleTop = y + dp(8);
+        float titleBase = titleTop - dim.ascent();
+
+        int customValue = style.valueColor(slot);
         int valueColor = customValue != 0 ? customValue : meterColor(usage, temp);
         text.setColor(valueColor);
-        text.setTextSize(dp(28));
-        canvas.drawText(value, x + dp(10), y + dp(52), text);
-        text.setColor(colText);
+        valueWant = fitText(text, value, innerW, valueWant, dp(HudStyle.MIN_VALUE_SIZE));
+        float afterTitle = titleBase + dim.descent() + dp(4);
+        float valueBase = afterTitle - text.ascent();
+        float valueBottom = valueBase + text.descent();
 
-        if (sub != null && !sub.isEmpty()) {
-            dim.setTextSize(dp(11));
-            canvas.drawText(clip(sub, cw - dp(18)), x + dp(10), y + dp(72), dim);
+        float subBase = 0;
+        float subBottom = valueBottom;
+        if (hasSub) {
+            dim.setColor(colDim);
+            subWant = fitText(dim, sub, innerW, subWant, dp(HudStyle.MIN_SUB_SIZE));
+            subBase = valueBottom + dp(3) - dim.ascent();
+            subBottom = subBase + dim.descent();
         }
-        if (foot != null && !foot.isEmpty()) {
-            dim.setTextSize(dp(11));
-            canvas.drawText(clip(foot, cw - dp(18)), x + dp(10), y + ch - dp(22), dim);
+
+        int guard = 0;
+        while (subBottom > usableBottom + 1f && guard++ < 48) {
+            boolean shrunk = false;
+            if (valueWant > dp(HudStyle.MIN_VALUE_SIZE) + 0.5f) {
+                valueWant = Math.max(dp(HudStyle.MIN_VALUE_SIZE), valueWant - 1f);
+                shrunk = true;
+            }
+            if (hasSub && subWant > dp(HudStyle.MIN_SUB_SIZE) + 0.5f) {
+                subWant = Math.max(dp(HudStyle.MIN_SUB_SIZE), subWant - 1f);
+                shrunk = true;
+            }
+            if (titleSize > dp(9) + 0.5f) {
+                titleSize = Math.max(dp(9), titleSize - 1f);
+                shrunk = true;
+            }
+            if (!shrunk) {
+                break;
+            }
+            dim.setTextSize(titleSize);
+            titleBase = titleTop - dim.ascent();
+            afterTitle = titleBase + dim.descent() + dp(4);
+            text.setTextSize(valueWant);
+            valueBase = afterTitle - text.ascent();
+            valueBottom = valueBase + text.descent();
+            if (hasSub) {
+                dim.setTextSize(subWant);
+                subBase = valueBottom + dp(3) - dim.ascent();
+                subBottom = subBase + dim.descent();
+            } else {
+                subBottom = valueBottom;
+            }
         }
+
+        canvas.save();
+        tmpRect.inset(1, 1);
+        canvas.clipRect(tmpRect);
+        tmpRect.set(x, y, x + cw, y + ch);
+        dim.setColor(titleColor != 0 ? titleColor : colDim);
+        dim.setTextSize(titleSize);
+        canvas.drawText(clip(dim, title, innerW), x + padX, titleBase, dim);
+        text.setColor(valueColor);
+        text.setTextSize(valueWant);
+        canvas.drawText(clip(text, value, innerW), x + padX, valueBase, text);
+        text.setColor(colText);
+        if (hasSub) {
+            dim.setColor(colDim);
+            dim.setTextSize(subWant);
+            canvas.drawText(clip(dim, sub, innerW), x + padX, subBase, dim);
+        }
+        if (hasFoot) {
+            dim.setTextSize(dp(11));
+            canvas.drawText(clip(dim, foot, innerW), x + padX, y + ch - barSpace - dp(2), dim);
+        }
+        canvas.restore();
+        dim.setColor(colDim);
 
         float barTop = y + ch - dp(14);
         tmpRect.set(x + dp(10), barTop, x + cw - dp(10), barTop + dp(7));
@@ -536,21 +605,34 @@ public class StatusHudView extends View {
         return "开机 " + h + "小时" + m + "分";
     }
 
-    private String clip(String value, float maxWidth) {
+    private String clip(Paint paint, String value, float maxWidth) {
         if (value == null || value.isEmpty()) {
             return "";
         }
-        if (dim.measureText(value) <= maxWidth) {
+        if (paint.measureText(value) <= maxWidth) {
             return value;
         }
         String ellip = "…";
         for (int i = value.length() - 1; i > 0; i--) {
             String cut = value.substring(0, i) + ellip;
-            if (dim.measureText(cut) <= maxWidth) {
+            if (paint.measureText(cut) <= maxWidth) {
                 return cut;
             }
         }
         return ellip;
+    }
+
+    private static float fitText(Paint paint, String value, float maxWidth, float want, float min) {
+        if (value == null || value.isEmpty()) {
+            return want;
+        }
+        float size = want;
+        paint.setTextSize(size);
+        while (size > min && paint.measureText(value) > maxWidth) {
+            size -= 1f;
+            paint.setTextSize(size);
+        }
+        return size;
     }
 
     private static int meterColor(float usage, float temp) {

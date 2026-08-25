@@ -33,6 +33,10 @@ final class CardEditor {
     private final RectF subRect = new RectF();
     private final RectF resetRect = new RectF();
     private final RectF doneRect = new RectF();
+    private final RectF valueMinus = new RectF();
+    private final RectF valuePlus = new RectF();
+    private final RectF subMinus = new RectF();
+    private final RectF subPlus = new RectF();
     private final RectF[] titleSwatches = new RectF[HudStyle.PALETTE.length];
     private final RectF[] valueSwatches = new RectF[HudStyle.PALETTE.length];
     private int slot = -1;
@@ -162,6 +166,9 @@ final class CardEditor {
                 HudStyle.metricLabel(style.subMetric(slot)));
         y = drawLabeledPalette(canvas, draw, "字母颜色", y, titleSwatches,
                 style.titleColor(slot), light ? 0xFF5A6B84 : 0xFF8FA0BE);
+        y += dp(12);
+        y = drawStepper(canvas, draw, "大字大小", y, valueMinus, valuePlus, style.valueSize(slot));
+        y = drawStepper(canvas, draw, "小字大小", y, subMinus, subPlus, style.subSize(slot));
         return y - start + dp(8);
     }
 
@@ -184,6 +191,33 @@ final class CardEditor {
         }
         y += dp(18);
         return drawPalette(canvas, draw, swatches, y, selected, fallback);
+    }
+
+    private float drawStepper(Canvas canvas, boolean draw, String caption, float y,
+            RectF minus, RectF plus, int value) {
+        if (draw) {
+            canvas.drawText(caption, panelRect.left + dp(16), y + dp(12), label);
+        }
+        y += dp(18);
+        float h = dp(40);
+        float btn = dp(44);
+        float gap = dp(8);
+        float right = panelRect.right - dp(16);
+        plus.set(right - btn, y, right, y + h);
+        minus.set(plus.left - gap - btn, y, plus.left - gap, y + h);
+        RectF num = new RectF(minus.left - dp(56), y, minus.left - gap, y + h);
+        if (draw) {
+            drawButton(canvas, minus, "－");
+            drawButton(canvas, plus, "＋");
+            card.setColor(light ? 0xFFE8EEF5 : 0xFF1A2438);
+            canvas.drawRoundRect(num, dp(10), dp(10), card);
+            String n = String.valueOf(value);
+            text.setTextSize(dp(16));
+            text.setColor(light ? 0xFF1A2438 : 0xFFE8EEF8);
+            float tw = text.measureText(n);
+            canvas.drawText(n, num.centerX() - tw / 2f, num.top + num.height() * 0.68f, text);
+        }
+        return y + h + dp(10);
     }
 
     private void drawList(Canvas canvas, boolean includeNone) {
@@ -362,8 +396,28 @@ final class CardEditor {
             view.invalidate();
             return true;
         }
-        HudStyle style = BridgeService.STATE.hudStyle;
         if (viewport.contains(x, y)) {
+            HudStyle style = BridgeService.STATE.hudStyle;
+            if (valueMinus.contains(x, y)) {
+                style.setValueSize(slot, style.valueSize(slot) - 1);
+                changed();
+                return true;
+            }
+            if (valuePlus.contains(x, y)) {
+                style.setValueSize(slot, style.valueSize(slot) + 1);
+                changed();
+                return true;
+            }
+            if (subMinus.contains(x, y)) {
+                style.setSubSize(slot, style.subSize(slot) - 1);
+                changed();
+                return true;
+            }
+            if (subPlus.contains(x, y)) {
+                style.setSubSize(slot, style.subSize(slot) + 1);
+                changed();
+                return true;
+            }
             for (int i = 0; i < valueSwatches.length; i++) {
                 if (valueSwatches[i].contains(x, y)) {
                     style.setValueColor(slot, HudStyle.PALETTE[i]);
@@ -380,7 +434,7 @@ final class CardEditor {
             }
         }
         if (resetRect.contains(x, y)) {
-            style.resetSlot(slot);
+            BridgeService.STATE.hudStyle.resetSlot(slot);
             changed();
             return true;
         }
