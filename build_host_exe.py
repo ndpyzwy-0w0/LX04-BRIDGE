@@ -2,6 +2,7 @@
 """Package the Windows host into a versioned onefile EXE."""
 from __future__ import annotations
 
+import argparse
 import subprocess
 import sys
 from pathlib import Path
@@ -10,6 +11,8 @@ ROOT = Path(__file__).resolve().parent
 VERSION_FILE = ROOT / "VERSION.txt"
 DIST = ROOT / "dist"
 HOST = ROOT / "host"
+
+from release_git import commit_usable_version
 
 
 def current_version() -> int:
@@ -29,6 +32,15 @@ def next_exe_version() -> int:
 
 
 def main() -> int:
+    parser = argparse.ArgumentParser(description="Pack host EXE and commit a local release snapshot.")
+    parser.add_argument(
+        "-m",
+        "--message",
+        default="",
+        help="Release note for the git commit (Release vN: ...).",
+    )
+    args = parser.parse_args()
+
     DIST.mkdir(parents=True, exist_ok=True)
     version = next_exe_version()
     name = f"LX04-PC-Bridge-Host-v{version}"
@@ -160,51 +172,8 @@ def main() -> int:
     except OSError as exc:
         print("Current EXE is in use, left", exe_path, ":", exc)
     print("Wrote", exe_path)
-    _commit_usable_version(
-        version,
-        "silence the speaker when synced Windows volume is at zero",
-    )
+    commit_usable_version(version, args.message or "host EXE snapshot")
     return 0
-
-
-COMMIT_PATHS = [
-    "VERSION.txt",
-    "README.md",
-    "build_host_exe.py",
-    ".gitignore",
-    ".cursor/rules",
-    "app",
-    "host",
-    "protocol.md",
-    "local.properties.example",
-    "dist/LX04-PC-Bridge-Host.exe",
-]
-
-
-def _commit_usable_version(version: int, summary: str = "") -> None:
-    """Snapshot source + current EXE after a usable pack. Historical vN.exe stay gitignored."""
-    git_dir = ROOT / ".git"
-    if not git_dir.exists():
-        return
-    try:
-        subprocess.check_call(["git", "add", "--", *COMMIT_PATHS], cwd=ROOT)
-        staged = subprocess.check_output(
-            ["git", "diff", "--cached", "--name-only"],
-            cwd=ROOT,
-            text=True,
-        ).strip()
-        if not staged:
-            return
-        why = summary or "snapshot source and current host EXE"
-        message = (
-            f"Release v{version}: {why}\n"
-            "\n"
-            "Keep versioned dist/LX04-PC-Bridge-Host-vN.exe on disk only."
-        )
-        subprocess.check_call(["git", "commit", "-m", message], cwd=ROOT)
-        print("Committed git snapshot for v" + str(version))
-    except subprocess.CalledProcessError as exc:
-        print("Git commit skipped:", exc)
 
 
 if __name__ == "__main__":

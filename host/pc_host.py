@@ -182,6 +182,7 @@ class HostApp:
         self._routes_ready = False
         self._spk_volume = None
         self._pc_volume = None
+        self._pc_muted = False
         self._vol_ignore_pc_until = 0.0
         self._vol_ignore_spk_until = 0.0
         self._build()
@@ -500,6 +501,7 @@ class HostApp:
             return
         self._save_routes()
         if not self.volume_sync.get():
+            self._pc_muted = False
             self._log("音量同步已关闭，电脑和音箱可各自调节。")
             return
         if not self.connected:
@@ -514,9 +516,10 @@ class HostApp:
         now = time.monotonic()
         if not force and now < self._vol_ignore_pc_until:
             return
-        pc = win_volume.get_scalar()
+        pc, muted = win_volume.get_state()
         if pc is None:
             return
+        self._pc_muted = muted
         if (
             not force
             and self._pc_volume is not None
@@ -630,7 +633,7 @@ class HostApp:
         self._save_routes()
 
     def _on_loopback_pcm(self, pcm: bytes, muted: bool) -> None:
-        silent = muted or (self.volume_sync.get() and win_volume.is_silent())
+        silent = muted or (self.volume_sync.get() and self._pc_muted)
         if silent:
             pcm = b"\x00" * len(pcm)
             self.play_peak = 0.0
