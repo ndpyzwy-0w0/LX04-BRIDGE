@@ -309,6 +309,14 @@ public class StatusHudView extends View {
     }
 
     @Override
+    public void computeScroll() {
+        super.computeScroll();
+        if (editor.isOpen() && editor.advanceFling()) {
+            postInvalidateOnAnimation();
+        }
+    }
+
+    @Override
     public boolean onTouchEvent(MotionEvent event) {
         if (editor.isOpen()) {
             return editor.onTouch(event);
