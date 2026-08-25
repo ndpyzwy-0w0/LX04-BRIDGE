@@ -12,11 +12,16 @@ import android.view.WindowManager;
 
 public class MainActivity extends Activity {
     private StatusHudView hud;
+    private boolean appliedUpsideDown;
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final Runnable tick = new Runnable() {
         @Override
         public void run() {
             if (hud != null) {
+                boolean want = BridgeService.STATE.upsideDown;
+                if (want != appliedUpsideDown) {
+                    applyDisplayRotation(want);
+                }
                 hud.invalidate();
             }
             handler.postDelayed(this, 50);
@@ -40,16 +45,10 @@ public class MainActivity extends Activity {
             public void onSpkMuteTap() {
                 BridgeService.toggleSpkMute();
             }
-
-            @Override
-            public void onRotateTap() {
-                boolean next = !DisplayPrefs.isUpsideDown(MainActivity.this);
-                DisplayPrefs.setUpsideDown(MainActivity.this, next);
-                applyDisplayRotation(next);
-            }
         });
         setContentView(hud);
-        applyDisplayRotation(DisplayPrefs.isUpsideDown(this));
+        BridgeService.STATE.upsideDown = DisplayPrefs.isUpsideDown(this);
+        applyDisplayRotation(BridgeService.STATE.upsideDown);
         hideSystemUi();
         ensurePermissionAndStart();
     }
@@ -96,7 +95,7 @@ public class MainActivity extends Activity {
     }
 
     private void applyDisplayRotation(boolean upsideDown) {
-        hud.setUpsideDown(upsideDown);
+        appliedUpsideDown = upsideDown;
         hud.post(() -> {
             hud.setPivotX(hud.getWidth() / 2f);
             hud.setPivotY(hud.getHeight() / 2f);
