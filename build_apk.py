@@ -6,7 +6,6 @@ import argparse
 import os
 import shutil
 import subprocess
-import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
@@ -27,15 +26,6 @@ def bump_version() -> int:
     return version
 
 
-def next_apk_version() -> int:
-    version = current_version()
-    while (DIST / f"LX04-PC-Bridge-v{version}.apk").exists():
-        version += 1
-    if version != current_version():
-        VERSION_FILE.write_text(f"{version}\n", encoding="utf-8")
-    return version
-
-
 def main() -> int:
     parser = argparse.ArgumentParser(description="Build APK and commit a local release snapshot.")
     parser.add_argument(
@@ -51,8 +41,7 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    DIST.mkdir(parents=True, exist_ok=True)
-    version = bump_version() if args.bump else next_apk_version()
+    version = bump_version() if args.bump else current_version()
     env = os.environ.copy()
     for key in ("JAVA_HOME", "ANDROID_HOME", "ANDROID_SDK_ROOT"):
         if key in os.environ:
@@ -68,12 +57,10 @@ def main() -> int:
     if not apks:
         raise SystemExit("Gradle finished but no APK was produced.")
     built = apks[-1]
-    versioned = DIST / f"LX04-PC-Bridge-v{version}.apk"
+    DIST.mkdir(parents=True, exist_ok=True)
     latest = DIST / "LX04-PC-Bridge.apk"
-    shutil.copy2(built, versioned)
     shutil.copy2(built, latest)
     print("Wrote", latest)
-    print("Wrote", versioned)
     commit_usable_version(version, args.message or "APK build snapshot")
     return 0
 

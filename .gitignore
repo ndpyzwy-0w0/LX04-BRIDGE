@@ -26,7 +26,6 @@ host/.venv/
 
 # Historical packed hosts stay on disk for rollback; git only tracks the current EXE.
 dist/LX04-PC-Bridge-Host-v*.exe
-dist/LX04-PC-Bridge-v*.apk
 dist/vbcable/
 dist/hificable/
 
