@@ -339,6 +339,27 @@ def replace_state(state: dict) -> None:
         pass
 
 
+def set_light(light: bool) -> None:
+    light = bool(light)
+    win = _open_win
+    if win is None:
+        return
+    try:
+        if not win.root.winfo_exists():
+            return
+    except tk.TclError:
+        return
+    if bool(win.state.get("light")) == light and bool(win.light_var.get()) == light:
+        return
+    win._remote = True
+    try:
+        win.state["light"] = light
+        win.light_var.set(light)
+        win._redraw()
+    finally:
+        win._remote = False
+
+
 def _hex(value: object) -> str:
     text = str(value or "").strip()
     if len(text) == 7 and text.startswith("#"):
