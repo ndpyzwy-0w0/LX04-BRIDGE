@@ -630,8 +630,13 @@ class HostApp:
         self._save_routes()
 
     def _on_loopback_pcm(self, pcm: bytes, muted: bool) -> None:
-        self.play_peak = self.loopback.peak
-        self.client.send_play(pcm, muted=muted)
+        silent = muted or (self.volume_sync.get() and win_volume.is_silent())
+        if silent:
+            pcm = b"\x00" * len(pcm)
+            self.play_peak = 0.0
+        else:
+            self.play_peak = self.loopback.peak
+        self.client.send_play(pcm, muted=silent)
 
     def _restore_render(self) -> None:
         self.loopback.stop()

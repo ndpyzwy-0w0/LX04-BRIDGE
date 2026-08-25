@@ -12,6 +12,21 @@ def get_scalar() -> float | None:
         return None
 
 
+def is_silent() -> bool:
+    volume = _endpoint_volume()
+    if volume is None:
+        return False
+    try:
+        if int(volume.GetMute()):
+            return True
+    except Exception:
+        pass
+    try:
+        return float(volume.GetMasterVolumeLevelScalar()) <= 0.001
+    except Exception:
+        return False
+
+
 def set_scalar(level: float) -> bool:
     volume = _endpoint_volume()
     if volume is None:

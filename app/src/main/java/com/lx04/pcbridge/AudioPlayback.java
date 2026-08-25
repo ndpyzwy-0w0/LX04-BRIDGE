@@ -79,8 +79,9 @@ final class AudioPlayback {
             return;
         }
         byte[] copy = pcm.clone();
-        if (muted) {
+        if (muted || BridgeService.STATE.volume <= 0.001f) {
             java.util.Arrays.fill(copy, (byte) 0);
+            peak = 0f;
         }
         if (!queue.offer(copy)) {
             queue.poll();
