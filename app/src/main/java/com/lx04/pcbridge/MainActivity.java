@@ -30,8 +30,21 @@ public class MainActivity extends Activity {
                 | WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED);
         BridgeService.STATE.apkVersion = AppVersion.read(this);
         hud = new StatusHudView(this);
-        hud.setListener(BridgeService::toggleMute);
+        hud.setListener(new StatusHudView.Listener() {
+            @Override
+            public void onMuteTap() {
+                BridgeService.toggleMute();
+            }
+
+            @Override
+            public void onRotateTap() {
+                boolean next = !DisplayPrefs.isUpsideDown(MainActivity.this);
+                DisplayPrefs.setUpsideDown(MainActivity.this, next);
+                applyDisplayRotation(next);
+            }
+        });
         setContentView(hud);
+        applyDisplayRotation(DisplayPrefs.isUpsideDown(this));
         hideSystemUi();
         ensurePermissionAndStart();
     }
@@ -75,6 +88,15 @@ public class MainActivity extends Activity {
         BridgeService.STATE.permissionDenied = false;
         Intent service = new Intent(this, BridgeService.class);
         startForegroundService(service);
+    }
+
+    private void applyDisplayRotation(boolean upsideDown) {
+        hud.setUpsideDown(upsideDown);
+        hud.post(() -> {
+            hud.setPivotX(hud.getWidth() / 2f);
+            hud.setPivotY(hud.getHeight() / 2f);
+            hud.setRotation(upsideDown ? 180f : 0f);
+        });
     }
 
     private void hideSystemUi() {

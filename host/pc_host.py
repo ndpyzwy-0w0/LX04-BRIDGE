@@ -56,8 +56,11 @@ class BridgeClient:
         self._thread: threading.Thread | None = None
         self._send_lock = threading.Lock()
         self._seq_lock = threading.Lock()
+        self.generation = 0
 
     def connect(self, host: str, port: int) -> None:
+        self.generation += 1
+        gen = self.generation
         self.close()
         sock = socket.create_connection((host, port), timeout=5)
         sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
@@ -65,7 +68,7 @@ class BridgeClient:
         self.sock = sock
         self.alive = True
         self.seq = 0
-        self._thread = threading.Thread(target=self._loop, daemon=True)
+        self._thread = threading.Thread(target=self._loop, args=(gen,), daemon=True)
         self._thread.start()
 
     def close(self) -> None:
@@ -102,7 +105,7 @@ class BridgeClient:
             except OSError:
                 self.alive = False
 
-    def _loop(self) -> None:
+    def _loop(self, gen: int) -> None:
         sock = self.sock
         if sock is None:
             return
@@ -122,11 +125,12 @@ class BridgeClient:
                     last_ping = now
                     self._send(protocol.encode(protocol.PING, seq=self._next_seq()))
         except Exception as exc:
-            if self.alive:
+            if self.alive and gen == self.generation:
                 self.on_event("error", str(exc))
         finally:
             self.alive = False
-            self.on_event("disconnected", "")
+            if gen == self.generation:
+                self.on_event("disconnected", "")
 
     def _handle(self, frame: protocol.Frame) -> None:
         if frame.type == protocol.HELLO:
@@ -167,6 +171,8 @@ class HostApp:
         self.adb = adb_usb.find_adb()
         self.devices: list[str] = []
         self.connected = False
+        self._session = False
+        self._reviving = False
         self._serial = ""
         self._gain_sent_at = 0.0
         self._prev_render: tuple[str, str] | None = None
@@ -745,8 +751,10 @@ class HostApp:
                 self._log("USB 功能: " + " ".join(gadget.split()))
             mic = adb_usb.take_speaker_mic(self.adb, serial)
             self._log(mic)
+            self._log(adb_usb.ensure_bridge_running(self.adb, serial))
             adb_usb.usb_forward(self.adb, serial)
-            self.client.connect("127.0.0.1", protocol.PORT)
+            self._connect_tcp(serial)
+            self._session = True
             self.connected = True
             self._serial = serial
             if self.mic_enabled.get():
@@ -763,6 +771,7 @@ class HostApp:
                 self._log("扬声器通路已关闭。可用「音箱试音」检查喇叭。")
             self.headline.configure(text="USB 已连接")
         except Exception as exc:
+            self._session = False
             self.connected = False
             self._restore_render()
             try:
@@ -780,7 +789,22 @@ class HostApp:
             messagebox.showerror("LX04", str(exc))
             self._log("连接失败: " + str(exc))
 
+    def _connect_tcp(self, serial: str) -> None:
+        last_err: Exception | None = None
+        for attempt in range(3):
+            try:
+                if attempt:
+                    self._log(adb_usb.ensure_bridge_running(self.adb, serial))
+                    adb_usb.usb_forward(self.adb, serial)
+                    time.sleep(0.35 * attempt)
+                self.client.connect("127.0.0.1", protocol.PORT)
+                return
+            except Exception as exc:
+                last_err = exc
+        raise last_err if last_err else RuntimeError("无法连上音箱后台服务")
+
     def disconnect(self) -> None:
+        self._session = False
         self.client.close()
         self.hw.stop(self.adb, self._serial)
         self.sink.stop()
@@ -793,6 +817,89 @@ class HostApp:
                 self._log("恢复小爱麦失败: " + str(exc))
         self.headline.configure(text="已断开")
         self.detail.configure(text="可以重新点连接。")
+        self._draw_meter(self.meter, 0)
+        self._draw_meter(self.spk_meter, 0)
+
+    def _begin_revive(self) -> None:
+        if self._reviving or not self._session:
+            return
+        self._reviving = True
+        threading.Thread(target=self._revive_worker, daemon=True).start()
+
+    def _revive_worker(self) -> None:
+        last_err = "unknown"
+        try:
+            for attempt in range(8):
+                if not self._session:
+                    self._reviving = False
+                    return
+                try:
+                    serial = self._serial
+                    status = adb_usb.ensure_bridge_running(self.adb, serial)
+                    self.root.after(0, lambda s=status: self._log(s))
+                    try:
+                        adb_usb.take_speaker_mic(self.adb, serial)
+                    except Exception:
+                        pass
+                    adb_usb.usb_forward(self.adb, serial)
+                    time.sleep(0.4)
+                    if not self._session:
+                        self._reviving = False
+                        return
+                    self.client.connect("127.0.0.1", protocol.PORT)
+                    if not self._session:
+                        self.client.close()
+                        self._reviving = False
+                        return
+                    self.root.after(0, self._on_revived)
+                    return
+                except Exception as exc:
+                    last_err = str(exc)
+                    n = attempt + 1
+                    self.root.after(0, lambda e=last_err, n=n: self._log(f"拉起失败 ({n}/8): {e}"))
+                    time.sleep(min(6.0, 0.45 * (2 ** attempt)))
+            self.root.after(0, lambda: self._revive_gave_up(last_err))
+        except Exception as exc:
+            self.root.after(0, lambda e=str(exc): self._revive_gave_up(e))
+
+    def _on_revived(self) -> None:
+        self._reviving = False
+        if not self._session:
+            return
+        self.connected = True
+        self.headline.configure(text="USB 已连接")
+        self.detail.configure(text="后台服务已恢复，音箱窗口无需打开。")
+        self._log("已重新拉起音箱后台服务（未打开窗口）")
+        try:
+            if self.mic_enabled.get():
+                if self.hw.running():
+                    self.client.send_control("stop_mic")
+                elif self.sink.running():
+                    self.client.send_control("start_mic")
+                else:
+                    self._apply_mic_route()
+            self._on_gain()
+            self.client.send_control("gain", gain=round(self.sink.gain, 3))
+            if self.volume_sync.get():
+                self._push_pc_volume(force=True)
+        except Exception as exc:
+            self._log("重连后恢复通路失败: " + str(exc))
+
+    def _revive_gave_up(self, err: str) -> None:
+        self._reviving = False
+        self._session = False
+        self.connected = False
+        self.hw.stop(self.adb, self._serial)
+        self.sink.stop()
+        self._restore_render()
+        if self.adb and self._serial:
+            try:
+                adb_usb.release_speaker_mic(self.adb, self._serial)
+            except Exception:
+                pass
+        self.headline.configure(text="USB 已断开")
+        self.detail.configure(text="多次拉起失败。请检查 USB，或在音箱上打开一次应用。")
+        self._log("无法拉起后台服务: " + err)
         self._draw_meter(self.meter, 0)
         self._draw_meter(self.spk_meter, 0)
 
@@ -881,18 +988,16 @@ class HostApp:
             self._log("链路错误: " + str(data))
         elif kind == "disconnected":
             self.connected = False
-            self.hw.stop(self.adb, self._serial)
-            self.sink.stop()
-            self._restore_render()
-            if self.adb and self._serial:
-                try:
-                    adb_usb.release_speaker_mic(self.adb, self._serial)
-                except Exception:
-                    pass
-            self.headline.configure(text="USB 已断开")
-            self.detail.configure(text="检查数据线后重新连接。")
             self._draw_meter(self.meter, 0)
             self._draw_meter(self.spk_meter, 0)
+            if not self._session:
+                return
+            if self._reviving:
+                return
+            self.headline.configure(text="音箱后台被杀，正在拉起…")
+            self.detail.configure(text="不用打开音箱窗口，电脑会自动重启服务。")
+            self._log("与音箱 TCP 断开，尝试无窗口拉起后台服务")
+            self._begin_revive()
 
     def _tick(self) -> None:
         spk = self.loopback.peak if self.loopback.running() else self.play_peak
