@@ -39,3 +39,6 @@ host/hificable.zip
 host/hificable/*.zip
 host/hificable/pack/
 host/audio_routes.json
+host/hud_preview.json
+dist/audio_routes.json
+dist/hud_preview.json

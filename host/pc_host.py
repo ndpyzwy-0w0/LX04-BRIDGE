@@ -27,6 +27,7 @@ if not getattr(sys, "frozen", False) and str(HOST_DIR) not in sys.path:
 import adb_usb
 import afterburner
 import hifi_cable
+import hud_preview
 import pc_stats
 import protocol
 import vb_cable
@@ -467,6 +468,9 @@ class HostApp:
             stats_row, self.disk_var, self._on_disk_change, combo_bg, combo_fg, padx=0
         )
         ttk.Button(
+            stats_row, text="预览屏幕", command=self._open_hud_preview
+        ).pack(side="right", padx=(0, 6))
+        ttk.Button(
             stats_row, text="CPU 温度 / Afterburner", command=self._on_afterburner
         ).pack(side="right")
 
@@ -839,6 +843,9 @@ class HostApp:
         if not messagebox.askokcancel("LX04", afterburner.DOWNLOAD_TEXT):
             return
         self._log(afterburner.open_download())
+
+    def _open_hud_preview(self) -> None:
+        hud_preview.open_window(self.root, light=bool(self.light_theme.get()))
 
     def _start_inject(self) -> None:
         selected = self._selected_inject()
