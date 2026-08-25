@@ -35,7 +35,7 @@ public class StatusHudView extends View {
         public void run() {
             if (pressSlot >= 0) {
                 menu.close();
-                editor.open(pressSlot);
+                editor.open(pressSlot, cardRects[pressSlot]);
                 pressSlot = -1;
             }
         }
@@ -393,7 +393,7 @@ public class StatusHudView extends View {
     public void computeScroll() {
         super.computeScroll();
         boolean more = false;
-        if (editor.isOpen() && editor.advanceFling()) {
+        if (editor.advance()) {
             more = true;
         }
         if (!editor.isOpen() && menu.advance()) {
