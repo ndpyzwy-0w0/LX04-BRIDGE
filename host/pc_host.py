@@ -30,6 +30,7 @@ import protocol
 import vb_cable
 import win_endpoint
 import win_mic
+import win_volume
 from audio_out import AudioSink, find_hidden_cable_ks_output
 from hw_capture import HardwareMic
 from speaker_loopback import SpeakerLoopback
@@ -173,11 +174,16 @@ class HostApp:
         self.mic_enabled = tk.BooleanVar(value=True)
         self.spk_enabled = tk.BooleanVar(value=False)
         self.set_default_spk = tk.BooleanVar(value=True)
+        self.volume_sync = tk.BooleanVar(value=False)
         self.inject_var = tk.StringVar()
         self.spk_dev_var = tk.StringVar()
         self._inject_devices: list[tuple[str, str | int, str]] = []
         self._spk_devices: list[tuple[str, str]] = []
         self._routes_ready = False
+        self._spk_volume = None
+        self._pc_volume = None
+        self._vol_ignore_pc_until = 0.0
+        self._vol_ignore_spk_until = 0.0
         self._build()
         self._load_routes()
         self.refresh_devices()
@@ -188,7 +194,7 @@ class HostApp:
     def _build(self) -> None:
         self.root.title("LX04 上位机")
         self.root.configure(bg=BG)
-        self.root.geometry("860x760")
+        self.root.geometry("860x800")
         self.root.minsize(760, 640)
 
         style = ttk.Style()
@@ -300,6 +306,27 @@ class HostApp:
             font=("Segoe UI", 10),
         ).pack(side="left")
 
+        vol_row = ttk.Frame(card, style="Card.TFrame")
+        vol_row.pack(fill="x", padx=16, pady=(0, 8))
+        tk.Checkbutton(
+            vol_row,
+            text="同步系统音量",
+            variable=self.volume_sync,
+            command=self._on_volume_sync_change,
+            bg=PANEL,
+            fg=TEXT,
+            selectcolor="#1E2A44",
+            activebackground=PANEL,
+            activeforeground=TEXT,
+            highlightthickness=0,
+            font=("Segoe UI", 10),
+        ).pack(side="left")
+        ttk.Label(
+            vol_row,
+            text="开了后电脑和音箱音量一起变；关掉则各自调节、互不影响。",
+            style="CardDim.TLabel",
+        ).pack(side="left", padx=8)
+
         row2 = ttk.Frame(card, style="Card.TFrame")
         row2.pack(fill="x", padx=16, pady=(0, 8))
         ttk.Button(row2, text="试音", command=self._on_test_tone).pack(side="left")
@@ -392,6 +419,7 @@ class HostApp:
         self.mic_enabled.set(bool(data.get("mic_enabled", True)))
         self.spk_enabled.set(bool(data.get("spk_enabled", False)))
         self.set_default_spk.set(bool(data.get("set_default_spk", True)))
+        self.volume_sync.set(bool(data.get("volume_sync", False)))
         self._saved_inject = str(data.get("inject") or "")
         self._saved_spk = str(data.get("speaker") or "")
 
@@ -400,6 +428,7 @@ class HostApp:
             "mic_enabled": bool(self.mic_enabled.get()),
             "spk_enabled": bool(self.spk_enabled.get()),
             "set_default_spk": bool(self.set_default_spk.get()),
+            "volume_sync": bool(self.volume_sync.get()),
             "inject": self.inject_var.get(),
             "speaker": self.spk_dev_var.get(),
         }
@@ -465,6 +494,54 @@ class HostApp:
             self._apply_speaker_route()
         except Exception as exc:
             self._log("切换扬声器通路失败: " + str(exc))
+
+    def _on_volume_sync_change(self) -> None:
+        if not self._routes_ready:
+            return
+        self._save_routes()
+        if not self.volume_sync.get():
+            self._log("音量同步已关闭，电脑和音箱可各自调节。")
+            return
+        if not self.connected:
+            self._log("音量同步已打开，连接音箱后会跟着电脑系统音量走。")
+            return
+        self._push_pc_volume(force=True)
+        self._log("音量同步已打开：调节电脑或音箱音量会一起变。")
+
+    def _push_pc_volume(self, force: bool = False) -> None:
+        if not self.connected or not self.volume_sync.get():
+            return
+        now = time.monotonic()
+        if not force and now < self._vol_ignore_pc_until:
+            return
+        pc = win_volume.get_scalar()
+        if pc is None:
+            return
+        if (
+            not force
+            and self._pc_volume is not None
+            and abs(pc - self._pc_volume) < 0.03
+        ):
+            return
+        self._pc_volume = pc
+        self._spk_volume = pc
+        self._vol_ignore_spk_until = now + 0.45
+        self.client.send_control("volume", level=round(pc, 3))
+
+    def _apply_speaker_volume(self, level: float) -> None:
+        if not self.connected or not self.volume_sync.get():
+            self._spk_volume = level
+            return
+        now = time.monotonic()
+        if now < self._vol_ignore_spk_until:
+            self._spk_volume = level
+            return
+        if self._spk_volume is not None and abs(level - self._spk_volume) < 0.03:
+            return
+        self._spk_volume = level
+        self._pc_volume = level
+        self._vol_ignore_pc_until = now + 0.45
+        win_volume.set_scalar(level)
 
     def _apply_mic_route(self) -> None:
         if not self.mic_enabled.get():
@@ -670,6 +747,8 @@ class HostApp:
                 self._log("麦克风通路已关闭。")
             self._on_gain()
             self.client.send_control("gain", gain=round(self.sink.gain, 3))
+            if self.volume_sync.get():
+                self._push_pc_volume(force=True)
             if self.spk_enabled.get():
                 self._apply_speaker_route()
             else:
@@ -741,6 +820,11 @@ class HostApp:
             if self.sink.running() and not self.hw.running():
                 self.sink.push(data.payload, muted=data.muted)
         elif kind == "status":
+            if "volume" in data:
+                try:
+                    self._apply_speaker_volume(float(data.get("volume") or 0))
+                except (TypeError, ValueError):
+                    pass
             self.loopback.muted = bool(data.get("muted"))
             if self.loopback.error:
                 self._log("扬声器环回: " + self.loopback.error)
@@ -808,6 +892,7 @@ class HostApp:
         self._draw_meter(self.spk_meter, spk if self.connected else 0)
         if not self.loopback.running():
             self.play_peak *= 0.82
+        self._push_pc_volume()
         self.root.after(80, self._tick)
 
     def _draw_meter(self, canvas: tk.Canvas, level: float) -> None:

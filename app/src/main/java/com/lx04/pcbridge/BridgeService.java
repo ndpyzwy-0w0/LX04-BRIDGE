@@ -6,6 +6,7 @@ import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.app.Service;
 import android.content.Intent;
+import android.media.AudioManager;
 import android.os.IBinder;
 import android.os.PowerManager;
 import android.os.SystemClock;
@@ -21,6 +22,7 @@ public class BridgeService extends Service {
     private UsbMonitor usbMonitor;
     private PowerManager.WakeLock wakeLock;
     private long lastAudioMs;
+    private static AudioManager audioManager;
 
     @Override
     public void onCreate() {
@@ -36,6 +38,7 @@ public class BridgeService extends Service {
         }
         capture = new AudioCapture(this::onAudio);
         playback = new AudioPlayback();
+        audioManager = (AudioManager) getSystemService(AUDIO_SERVICE);
         server = new TcpBridgeServer(STATE, new TcpBridgeServer.Callbacks() {
             @Override
             public void prepareForClient() {
@@ -47,12 +50,8 @@ public class BridgeService extends Service {
                 STATE.pcName = helloAckName == null ? "" : helloAckName;
                 if (connected) {
                     playback.start();
-                    android.media.AudioManager am =
-                            (android.media.AudioManager) getSystemService(AUDIO_SERVICE);
-                    if (am != null) {
-                        am.setStreamMute(android.media.AudioManager.STREAM_MUSIC, false);
-                        am.setStreamVolume(android.media.AudioManager.STREAM_MUSIC,
-                                am.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC), 0);
+                    if (audioManager != null) {
+                        audioManager.setStreamMute(AudioManager.STREAM_MUSIC, false);
                     }
                     refreshHeadline();
                 } else {
@@ -90,6 +89,8 @@ public class BridgeService extends Service {
                     startMic();
                 } else if ("stop_mic".equals(cmd)) {
                     stopMic();
+                } else if ("volume".equals(cmd)) {
+                    setMusicVolume((float) json.optDouble("level", STATE.volume));
                 }
                 refreshHeadline();
             }
@@ -147,6 +148,47 @@ public class BridgeService extends Service {
                 STATE.headline = "电脑扬声器 \u2192 音箱";
             }
         }
+    }
+
+    public static float musicVolume() {
+        AudioManager am = audioManager;
+        if (am == null) {
+            return STATE.volume;
+        }
+        int max = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC);
+        if (max <= 0) {
+            return STATE.volume;
+        }
+        STATE.volume = am.getStreamVolume(AudioManager.STREAM_MUSIC) / (float) max;
+        return STATE.volume;
+    }
+
+    private void setMusicVolume(float level) {
+        if (level < 0f) {
+            level = 0f;
+        } else if (level > 1f) {
+            level = 1f;
+        }
+        AudioManager am = audioManager;
+        if (am == null) {
+            am = (AudioManager) getSystemService(AUDIO_SERVICE);
+            audioManager = am;
+        }
+        if (am == null) {
+            return;
+        }
+        int max = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC);
+        if (max <= 0) {
+            return;
+        }
+        int index = Math.round(level * max);
+        if (index < 0) {
+            index = 0;
+        } else if (index > max) {
+            index = max;
+        }
+        am.setStreamVolume(AudioManager.STREAM_MUSIC, index, 0);
+        STATE.volume = index / (float) max;
     }
 
     private void startMic() {
