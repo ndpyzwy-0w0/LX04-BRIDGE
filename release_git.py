@@ -13,7 +13,9 @@ COMMIT_PATHS = [
     "README.md",
     "build_host_exe.py",
     "build_apk.py",
+    "pack_release.py",
     "release_git.py",
+    "启动上位机.bat",
     ".gitignore",
     ".cursor/rules",
     "app",
@@ -51,7 +53,7 @@ def commit_usable_version(version: int, summary: str = "") -> bool:
         message = (
             f"Release v{version}: {why}\n"
             "\n"
-            "Keep versioned dist/LX04-PC-Bridge-Host-vN.exe on disk only."
+            "Rollback is git history of the current host EXE and APK."
         )
         subprocess.check_call(["git", "commit", "-m", message], cwd=ROOT)
         print("Committed git snapshot for v" + str(version))

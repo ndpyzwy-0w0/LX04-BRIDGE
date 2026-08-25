@@ -218,7 +218,13 @@ public class BridgeService extends Service {
         STATE.pcRamUsed = (float) json.optDouble("ramU", 0);
         STATE.pcRamTotal = (float) json.optDouble("ramT", 0);
         STATE.pcDisk = (float) json.optDouble("disk", 0);
+        STATE.pcDiskUsed = (float) json.optDouble("diskU", 0);
+        STATE.pcDiskTotal = (float) json.optDouble("diskT", 0);
         STATE.pcDiskIo = optNum(json, "diskIo");
+        String diskName = json.optString("diskN", "");
+        if (!diskName.isEmpty()) {
+            STATE.pcDiskName = diskName;
+        }
         STATE.pcNetDown = (float) json.optDouble("netD", 0);
         STATE.pcNetUp = (float) json.optDouble("netU", 0);
         STATE.pcUptime = json.optLong("up", 0);

@@ -183,6 +183,8 @@ class HostApp:
         self.set_default_spk = tk.BooleanVar(value=True)
         self.volume_sync = tk.BooleanVar(value=False)
         self.pc_stats_enabled = tk.BooleanVar(value=True)
+        self.disk_var = tk.StringVar()
+        self._saved_disk = ""
         self.inject_var = tk.StringVar()
         self.spk_dev_var = tk.StringVar()
         self._inject_devices: list[tuple[str, str | int, str]] = []
@@ -354,11 +356,10 @@ class HostApp:
             highlightthickness=0,
             font=("Segoe UI", 10),
         ).pack(side="left")
-        ttk.Label(
-            stats_row,
-            text="CPU / GPU 温度和使用率、内存、磁盘、网速会出现在音箱屏幕上。",
-            style="CardDim.TLabel",
-        ).pack(side="left", padx=8)
+        ttk.Label(stats_row, text="磁盘", style="Card.TLabel").pack(side="left", padx=(12, 4))
+        self.disk_combo = ttk.Combobox(stats_row, textvariable=self.disk_var, width=28, state="readonly")
+        self.disk_combo.pack(side="left")
+        self.disk_combo.bind("<<ComboboxSelected>>", lambda _e: self._on_disk_change())
 
         row2 = ttk.Frame(card, style="Card.TFrame")
         row2.pack(fill="x", padx=16, pady=(0, 8))
@@ -458,6 +459,8 @@ class HostApp:
         self.pc_stats_enabled.set(bool(data.get("pc_stats", True)))
         self._saved_inject = str(data.get("inject") or "")
         self._saved_spk = str(data.get("speaker") or "")
+        self._saved_disk = str(data.get("pc_disk") or "")
+        self._refresh_disks()
 
     def _save_routes(self) -> None:
         payload = {
@@ -466,6 +469,7 @@ class HostApp:
             "set_default_spk": bool(self.set_default_spk.get()),
             "volume_sync": bool(self.volume_sync.get()),
             "pc_stats": bool(self.pc_stats_enabled.get()),
+            "pc_disk": self._selected_disk(),
             "inject": self.inject_var.get(),
             "speaker": self.spk_dev_var.get(),
         }
@@ -532,6 +536,41 @@ class HostApp:
         except Exception as exc:
             self._log("切换扬声器通路失败: " + str(exc))
 
+    def _on_disk_change(self) -> None:
+        if not self._routes_ready:
+            return
+        self._save_routes()
+        if self.connected and self.pc_stats_enabled.get():
+            self._push_pc_stats(force=True)
+
+    def _selected_disk(self) -> str:
+        label = (self.disk_var.get() or "").strip()
+        if label:
+            token = label.split()[0].upper()
+            if token[:1].isalpha():
+                return token[:1] + ":"
+        saved = str(getattr(self, "_saved_disk", "") or "").strip()
+        if saved:
+            return saved[:1].upper() + ":" if saved[:1].isalpha() else saved
+        return pc_stats.default_disk()
+
+    def _refresh_disks(self) -> None:
+        previous = self._selected_disk()
+        items = pc_stats.list_disks()
+        labels = [pc_stats.disk_choice_label(item) for item in items]
+        self.disk_combo["values"] = labels
+        chosen = ""
+        want = (previous or getattr(self, "_saved_disk", "") or "").upper()[:2]
+        for item, label in zip(items, labels):
+            if str(item.get("letter") or "").upper()[:2] == want:
+                chosen = label
+                break
+        if not chosen:
+            system = next((label for item, label in zip(items, labels) if item.get("system")), "")
+            chosen = system or (labels[0] if labels else "")
+        if chosen:
+            self.disk_var.set(chosen)
+
     def _on_pc_stats_change(self) -> None:
         if not self._routes_ready:
             return
@@ -546,7 +585,7 @@ class HostApp:
         if not self.connected or not self.pc_stats_enabled.get():
             return
         try:
-            snap = pc_stats.snapshot()
+            snap = pc_stats.snapshot(self._selected_disk())
             payload = {key: value for key, value in snap.items() if value is not None and value != ""}
             self.client.send_control("pc_stats", **payload)
             self.pc_line.configure(text=pc_stats.format_line(snap))
@@ -784,6 +823,7 @@ class HostApp:
         if not self.adb:
             self.device_combo["values"] = ["未找到 adb"]
             self.device_var.set("未找到 adb")
+            self._refresh_disks()
             return
         try:
             self.devices = adb_usb.list_devices(self.adb)
@@ -795,6 +835,7 @@ class HostApp:
         self.device_var.set(labels[0])
         self._log("USB 设备: " + (", ".join(self.devices) if self.devices else "无"))
         self.refresh_audio_devices(log=False)
+        self._refresh_disks()
 
     def connect(self) -> None:
         if not self.adb:

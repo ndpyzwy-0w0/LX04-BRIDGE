@@ -1,20 +1,23 @@
 ---
-description: Commit each usable packaged version; keep git free of historical EXEs
+description: After usable host/APK work, always pack, bump, and commit locally
 alwaysApply: true
 ---
 
 # Versioned releases
 
-After a **usable** host or APK build, commit once locally (no push).
+After a **usable** host or APK change, pack and commit **by default**. Do not wait to be asked. Do not skip packaging. Do not make a second empty commit if the packer already committed.
 
-- Host: `python build_host_exe.py -m "why this version is usable"` → packs EXE + auto-commit
-- APK only: `python build_apk.py -m "why"` (optional `--bump` for VERSION.txt)
+- Both host and APK changed: `python pack_release.py --bump -m "why this version is usable"`
+- Host only: `python build_host_exe.py --bump -m "why"`
+- APK only: `python build_apk.py --bump -m "why"`
+- Either single packer accepts `--no-commit` so a combined pack can commit once
 - Shared helper: `release_git.py`
 
-- Bump/keep `VERSION.txt` in sync with `dist/LX04-PC-Bridge-Host-vN.exe`
-- Commit source, `VERSION.txt`, `dist/LX04-PC-Bridge-Host.exe` (current only), and `dist/LX04-PC-Bridge.apk` (current only; git history is the APK rollback)
+- Keep `VERSION.txt` as the release number (APK `versionCode` / commit title). Use `--bump` for each usable release
+- Commit source, `VERSION.txt`, `dist/LX04-PC-Bridge-Host.exe` (current only), and `dist/LX04-PC-Bridge.apk` (current only)
+- Rollback is git history of those two current artifacts. Do **not** write `dist/LX04-PC-Bridge-Host-v*.exe`
 - Do **not** `git add` `dist/LX04-PC-Bridge-Host-v*.exe`, `dist/vbcable/`, `driver/`, or `host/lx04mic/`
-- Versioned EXEs may remain on disk for rollback; they are gitignored
 - VB-CABLE lives once under `host/vbcable/` (official pack). Do not duplicate it into git via `dist/`
 - Commit message: `Release vN: <why this version is usable>`
-- If the packer already created that commit, do not commit again with an empty or duplicate message
+- If an LX04 is on USB, install the new APK after packing (`host/安装到音箱.bat`, or `adb_usb.install_apk` with an **absolute** APK path)
+- No `git push` unless the user asks

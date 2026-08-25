@@ -39,6 +39,11 @@ def main() -> int:
         action="store_true",
         help="Increment VERSION.txt before building.",
     )
+    parser.add_argument(
+        "--no-commit",
+        action="store_true",
+        help="Pack only; skip the local git snapshot.",
+    )
     args = parser.parse_args()
 
     version = bump_version() if args.bump else current_version()
@@ -61,7 +66,8 @@ def main() -> int:
     latest = DIST / "LX04-PC-Bridge.apk"
     shutil.copy2(built, latest)
     print("Wrote", latest)
-    commit_usable_version(version, args.message or "APK build snapshot")
+    if not args.no_commit:
+        commit_usable_version(version, args.message or "APK build snapshot")
     return 0
 
 

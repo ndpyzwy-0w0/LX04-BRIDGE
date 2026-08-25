@@ -162,11 +162,15 @@ public class StatusHudView extends View {
                 : "";
         drawStatCard(canvas, left + (cardW + gap) * 2, top, cardW, cardH, "内存",
                 formatPct(s.pcRam), ramSub, "", s.pcRam, Float.NaN);
-        String diskSub = !Float.isNaN(s.pcDiskIo)
-                ? ("占用  ·  IO " + Math.round(s.pcDiskIo) + "%")
-                : "系统盘占用";
-        drawStatCard(canvas, left + (cardW + gap) * 3, top, cardW, cardH, "磁盘",
-                formatPct(s.pcDisk), diskSub, "", s.pcDisk, Float.NaN);
+        String diskTitle = (s.pcDiskName == null || s.pcDiskName.isEmpty()) ? "磁盘" : s.pcDiskName;
+        String diskSub = (s.pcDiskTotal > 0)
+                ? String.format("%.0f / %.0f GB", s.pcDiskUsed, s.pcDiskTotal)
+                : "占用";
+        String diskFoot = !Float.isNaN(s.pcDiskIo)
+                ? ("IO " + Math.round(s.pcDiskIo) + "%")
+                : "";
+        drawStatCard(canvas, left + (cardW + gap) * 3, top, cardW, cardH, diskTitle,
+                formatPct(s.pcDisk), diskSub, diskFoot, s.pcDisk, Float.NaN);
 
         dim.setTextSize(dp(13));
         canvas.drawText("↓ " + formatRate(s.pcNetDown) + "   ↑ " + formatRate(s.pcNetUp),

@@ -23,6 +23,34 @@ FILE_MAP_READ = 0x0004
 kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
 pdh = ctypes.WinDLL("pdh")
 
+kernel32.GetLogicalDriveStringsW.argtypes = [wintypes.DWORD, wintypes.LPWSTR]
+kernel32.GetLogicalDriveStringsW.restype = wintypes.DWORD
+kernel32.GetDriveTypeW.argtypes = [wintypes.LPCWSTR]
+kernel32.GetDriveTypeW.restype = wintypes.UINT
+kernel32.GetVolumeInformationW.argtypes = [
+    wintypes.LPCWSTR,
+    wintypes.LPWSTR,
+    wintypes.DWORD,
+    ctypes.POINTER(wintypes.DWORD),
+    ctypes.POINTER(wintypes.DWORD),
+    ctypes.POINTER(wintypes.DWORD),
+    wintypes.LPWSTR,
+    wintypes.DWORD,
+]
+kernel32.GetVolumeInformationW.restype = wintypes.BOOL
+kernel32.GetDiskFreeSpaceExW.argtypes = [
+    wintypes.LPCWSTR,
+    ctypes.c_void_p,
+    ctypes.c_void_p,
+    ctypes.c_void_p,
+]
+kernel32.GetDiskFreeSpaceExW.restype = wintypes.BOOL
+
+DRIVE_REMOVABLE = 2
+DRIVE_FIXED = 3
+DRIVE_REMOTE = 4
+DRIVE_RAMDISK = 6
+
 kernel32.OpenFileMappingW.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.LPCWSTR]
 kernel32.OpenFileMappingW.restype = wintypes.HANDLE
 kernel32.MapViewOfFile.argtypes = [
@@ -177,12 +205,61 @@ _lock = threading.Lock()
 _sampler: "_Sampler | None" = None
 
 
-def snapshot() -> dict[str, Any]:
+def snapshot(drive: str | None = None) -> dict[str, Any]:
     global _sampler
     with _lock:
         if _sampler is None:
             _sampler = _Sampler()
-        return _sampler.sample()
+        return _sampler.sample(drive)
+
+
+def list_disks() -> list[dict[str, Any]]:
+    """Fixed / removable / network volumes with a drive letter."""
+    items: list[dict[str, Any]] = []
+    system = _drive_letter(None)
+    for root in _logical_roots():
+        kind = int(kernel32.GetDriveTypeW(root))
+        if kind not in (DRIVE_REMOVABLE, DRIVE_FIXED, DRIVE_REMOTE, DRIVE_RAMDISK):
+            continue
+        usage = _disk_usage(root)
+        if usage is None:
+            continue
+        percent, used, total = usage
+        letter = root[:2].upper()
+        items.append(
+            {
+                "letter": letter,
+                "label": _volume_label(root),
+                "percent": percent,
+                "used": used,
+                "total": total,
+                "system": letter == system,
+            }
+        )
+    if not items:
+        usage = _disk_usage(_drive_root(None))
+        letter = _drive_letter(None)
+        percent, used, total = usage if usage else (0.0, 0.0, 0.0)
+        items.append(
+            {
+                "letter": letter,
+                "label": "",
+                "percent": percent,
+                "used": used,
+                "total": total,
+                "system": True,
+            }
+        )
+    return items
+
+
+def disk_choice_label(item: dict[str, Any]) -> str:
+    letter = str(item.get("letter") or "C:")
+    name = str(item.get("label") or "").strip()
+    mark = "  (系统)" if item.get("system") else ""
+    if name:
+        return f"{letter}  {name}{mark}"
+    return f"{letter}{mark}"
 
 
 def format_line(data: dict[str, Any]) -> str:
@@ -210,8 +287,76 @@ def format_line(data: dict[str, Any]) -> str:
         parts.append(ram_s)
     disk = data.get("disk")
     if isinstance(disk, (int, float)):
-        parts.append(f"磁盘 {int(round(disk))}%")
+        disk_n = str(data.get("diskN") or "磁盘").strip() or "磁盘"
+        disk_s = f"{disk_n} {int(round(disk))}%"
+        used = data.get("diskU")
+        total = data.get("diskT")
+        if isinstance(used, (int, float)) and isinstance(total, (int, float)):
+            disk_s += f" {used:.0f}/{total:.0f}G"
+        parts.append(disk_s)
     return "  ·  ".join(parts)
+
+
+def _drive_root(drive: str | None) -> str:
+    text = (drive or "").strip()
+    if not text:
+        text = os.environ.get("SystemDrive") or "C:"
+    letter = text[:1].upper()
+    if not letter.isalpha():
+        letter = "C"
+    return letter + ":\\"
+
+
+def _drive_letter(drive: str | None) -> str:
+    return _drive_root(drive)[:2]
+
+
+def default_disk() -> str:
+    return _drive_letter(None)
+
+
+def _logical_roots() -> list[str]:
+    buf = (ctypes.c_wchar * 512)()
+    n = int(kernel32.GetLogicalDriveStringsW(512, buf) or 0)
+    if n <= 0:
+        return [_drive_root(None)]
+    blob = "".join(buf[i] for i in range(min(n, 512)))
+    return [part for part in blob.split("\x00") if part]
+
+
+def _volume_label(root: str) -> str:
+    label = ctypes.create_unicode_buffer(261)
+    try:
+        if kernel32.GetVolumeInformationW(root, label, 261, None, None, None, None, 0):
+            return (label.value or "").strip()
+    except Exception:
+        return ""
+    return ""
+
+
+def _disk_usage(root: str) -> tuple[float, float, float] | None:
+    """Return percent, used GiB, total GiB, or None if the volume is unusable."""
+    max_gib = 1024.0 * 1024.0  # 1 PiB: skip stub network mappings with garbage sizes
+    if psutil is not None:
+        try:
+            usage = psutil.disk_usage(root)
+            used = usage.used / (1024 ** 3)
+            total = usage.total / (1024 ** 3)
+            if 0 < total <= max_gib:
+                return float(usage.percent), used, total
+        except Exception:
+            pass
+    free = ctypes.c_uint64()
+    total_b = ctypes.c_uint64()
+    if not kernel32.GetDiskFreeSpaceExW(root, None, ctypes.byref(total_b), ctypes.byref(free)):
+        return None
+    if total_b.value <= 0:
+        return None
+    total = total_b.value / (1024 ** 3)
+    if total > max_gib:
+        return None
+    used = (total_b.value - free.value) / (1024 ** 3)
+    return 100.0 * used / total, used, total
 
 
 class _Sampler:
@@ -228,10 +373,16 @@ class _Sampler:
         self._read_cpu_times()
         self._pdh.collect()
 
-    def sample(self) -> dict[str, Any]:
+    def sample(self, drive: str | None = None) -> dict[str, Any]:
         cpu = self._cpu_usage()
         ram = self._ram()
-        disk = self._disk_space()
+        root = _drive_root(drive)
+        usage = _disk_usage(root)
+        if usage is None:
+            usage = _disk_usage(_drive_root(None)) or (0.0, 0.0, 0.0)
+            root = _drive_root(None)
+        disk, disk_used, disk_total = usage
+        letter = root[:2]
         net_down, net_up = self._net()
         pdh = self._pdh.collect()
         overlay = self._mahm.read()
@@ -247,6 +398,9 @@ class _Sampler:
             "ramU": round(ram[1], 1),
             "ramT": round(ram[2], 1),
             "disk": round(disk, 1),
+            "diskN": letter,
+            "diskU": round(disk_used, 1),
+            "diskT": round(disk_total, 1),
             "netD": int(net_down),
             "netU": int(net_up),
             "up": int(self._uptime()),
@@ -315,23 +469,6 @@ class _Sampler:
         avail = info.ullAvailPhys / (1024 ** 3)
         used = max(0.0, total - avail)
         return float(info.dwMemoryLoad), used, total
-
-    def _disk_space(self) -> float:
-        drive = os.environ.get("SystemDrive") or "C:"
-        if not drive.endswith("\\"):
-            drive = drive + "\\"
-        if psutil is not None:
-            try:
-                return float(psutil.disk_usage(drive).percent)
-            except Exception:
-                pass
-        free = ctypes.c_uint64()
-        total = ctypes.c_uint64()
-        if not kernel32.GetDiskFreeSpaceExW(drive, None, ctypes.byref(total), ctypes.byref(free)):
-            return 0.0
-        if total.value <= 0:
-            return 0.0
-        return 100.0 * (total.value - free.value) / total.value
 
     def _net(self) -> tuple[float, float]:
         now = time.monotonic()
