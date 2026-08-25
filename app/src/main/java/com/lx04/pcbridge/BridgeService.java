@@ -29,6 +29,7 @@ public class BridgeService extends Service {
         super.onCreate();
         STATE.androidRelease = android.os.Build.VERSION.RELEASE;
         STATE.apkVersion = AppVersion.read(this);
+        STATE.upsideDown = DisplayPrefs.isUpsideDown(this);
         startAsForeground();
         PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
         if (pm != null) {
@@ -100,6 +101,10 @@ public class BridgeService extends Service {
                     stopMic();
                 } else if ("volume".equals(cmd)) {
                     setMusicVolume((float) json.optDouble("level", STATE.volume));
+                } else if ("upside_down".equals(cmd)) {
+                    STATE.upsideDown = json.optBoolean("on", !STATE.upsideDown);
+                    DisplayPrefs.setUpsideDown(BridgeService.this, STATE.upsideDown);
+                    return;
                 } else if ("pc_stats".equals(cmd)) {
                     applyPcStats(json);
                     return;

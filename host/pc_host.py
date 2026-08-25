@@ -247,6 +247,7 @@ class HostApp:
         self.set_default_spk = tk.BooleanVar(value=True)
         self.volume_sync = tk.BooleanVar(value=False)
         self.pc_stats_enabled = tk.BooleanVar(value=True)
+        self.upside_down = tk.BooleanVar(value=False)
         self.disk_var = tk.StringVar()
         self._saved_disk = ""
         self.inject_var = tk.StringVar()
@@ -348,6 +349,20 @@ class HostApp:
         ttk.Button(row, text="刷新", command=self.refresh_devices).pack(side="left")
         ttk.Button(row, text="连接", command=self.connect).pack(side="left", padx=6)
         ttk.Button(row, text="断开", command=self.disconnect).pack(side="left")
+        tk.Checkbutton(
+            row,
+            text="吊装",
+            variable=self.upside_down,
+            command=self._on_upside_down_change,
+            bg=PANEL,
+            fg=TEXT,
+            selectcolor="#1E2A44",
+            activebackground=PANEL,
+            activeforeground=TEXT,
+            highlightthickness=0,
+            font=("Segoe UI", 10),
+        ).pack(side="right")
+        ttk.Label(row, text="倒转音箱屏幕", style="CardDim.TLabel").pack(side="right", padx=(0, 8))
 
         mic_row = ttk.Frame(card, style="Card.TFrame")
         mic_row.pack(fill="x", padx=16, pady=(0, 8))
@@ -533,6 +548,7 @@ class HostApp:
         self.set_default_spk.set(bool(data.get("set_default_spk", True)))
         self.volume_sync.set(bool(data.get("volume_sync", False)))
         self.pc_stats_enabled.set(bool(data.get("pc_stats", True)))
+        self.upside_down.set(bool(data.get("upside_down", False)))
         self._saved_inject = str(data.get("inject") or "")
         self._saved_spk = str(data.get("speaker") or "")
         self._saved_disk = str(data.get("pc_disk") or "")
@@ -545,6 +561,7 @@ class HostApp:
             "set_default_spk": bool(self.set_default_spk.get()),
             "volume_sync": bool(self.volume_sync.get()),
             "pc_stats": bool(self.pc_stats_enabled.get()),
+            "upside_down": bool(self.upside_down.get()),
             "pc_disk": self._selected_disk(),
             "inject": self.inject_var.get(),
             "speaker": self.spk_dev_var.get(),
@@ -611,6 +628,19 @@ class HostApp:
             self._apply_speaker_route()
         except Exception as exc:
             self._log("切换扬声器通路失败: " + str(exc))
+
+    def _on_upside_down_change(self) -> None:
+        if not self._routes_ready:
+            return
+        self._save_routes()
+        self._push_upside_down()
+        if self.connected:
+            self._log("音箱屏幕: " + ("吊装倒转" if self.upside_down.get() else "正向"))
+
+    def _push_upside_down(self) -> None:
+        if not self.connected:
+            return
+        self.client.send_control("upside_down", on=bool(self.upside_down.get()))
 
     def _on_disk_change(self) -> None:
         if not self._routes_ready:
@@ -942,6 +972,7 @@ class HostApp:
             if self.volume_sync.get():
                 self._push_pc_volume(force=True)
             self._push_pc_stats(force=True)
+            self._push_upside_down()
             if self.spk_enabled.get():
                 self._apply_speaker_route()
             else:
@@ -1061,6 +1092,7 @@ class HostApp:
             if self.volume_sync.get():
                 self._push_pc_volume(force=True)
             self._push_pc_stats(force=True)
+            self._push_upside_down()
         except Exception as exc:
             self._log("重连后恢复通路失败: " + str(exc))
 

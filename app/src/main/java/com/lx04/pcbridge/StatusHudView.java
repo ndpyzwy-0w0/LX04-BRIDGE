@@ -14,12 +14,9 @@ public class StatusHudView extends View {
         void onMicMuteTap();
 
         void onSpkMuteTap();
-
-        void onRotateTap();
     }
 
     private Listener listener;
-    private boolean upsideDown;
     private final Paint bg = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint panel = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint cardPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -32,7 +29,6 @@ public class StatusHudView extends View {
     private final RectF playRect = new RectF();
     private final RectF micMuteRect = new RectF();
     private final RectF spkMuteRect = new RectF();
-    private final RectF rotateRect = new RectF();
     private final RectF tmpRect = new RectF();
     private float pulse;
 
@@ -48,11 +44,6 @@ public class StatusHudView extends View {
 
     public void setListener(Listener listener) {
         this.listener = listener;
-    }
-
-    public void setUpsideDown(boolean upsideDown) {
-        this.upsideDown = upsideDown;
-        invalidate();
     }
 
     private void init() {
@@ -95,28 +86,16 @@ public class StatusHudView extends View {
         dim.setTextSize(dp(12));
         canvas.drawText(s.formatLink(), dp(36), dp(27), dim);
 
-        float rotateW = dp(64);
-        float rotateH = dp(28);
-        rotateRect.set(w - dp(18) - rotateW, dp(10), w - dp(18), dp(10) + rotateH);
-        button.setColor(upsideDown ? 0xFF2A4A3A : 0xFF223154);
-        canvas.drawRoundRect(rotateRect, dp(8), dp(8), button);
-        text.setTextSize(dp(12));
-        text.setColor(0xFFE8EEF8);
-        String rotateLabel = upsideDown ? "吊装 ✓" : "旋转";
-        float rlW = text.measureText(rotateLabel);
-        canvas.drawText(rotateLabel, rotateRect.left + (rotateRect.width() - rlW) / 2f,
-                rotateRect.top + rotateRect.height() * 0.68f, text);
-
         dim.setTextSize(dp(11));
         String ver = formatVersion(s.apkVersion);
         float verW = dim.measureText(ver);
-        canvas.drawText(ver, rotateRect.left - dp(8) - verW, dp(28), dim);
+        canvas.drawText(ver, w - dp(22) - verW, dp(27), dim);
 
         if (s.hasPcStats()) {
             String host = s.pcName.isEmpty() ? "电脑" : s.pcName;
             String up = formatUptime(s.pcUptime);
             String mid = host + (up.isEmpty() ? "" : "  ·  " + up);
-            canvas.drawText(clip(mid, rotateRect.left - dp(120)), dp(110), dp(27), dim);
+            canvas.drawText(clip(mid, w - dp(80) - verW - dp(110)), dp(110), dp(27), dim);
         }
 
         float muteTop = h - dp(64);
@@ -251,13 +230,6 @@ public class StatusHudView extends View {
         if (event.getAction() == MotionEvent.ACTION_UP) {
             float x = event.getX();
             float y = event.getY();
-            if (rotateRect.contains(x, y)) {
-                if (listener != null) {
-                    listener.onRotateTap();
-                }
-                invalidate();
-                return true;
-            }
             if (micMuteRect.contains(x, y)) {
                 if (listener != null) {
                     listener.onMicMuteTap();
