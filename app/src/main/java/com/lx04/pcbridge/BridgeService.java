@@ -178,28 +178,24 @@ public class BridgeService extends Service {
 
     public static void resetHudStyle(android.content.Context context) {
         STATE.hudStyle.clear();
+        STATE.hudStyle.bumpRev();
         STATE.lightTheme = false;
         if (context != null) {
-            DisplayPrefs.clearHudStyle(context);
+            persistHudStyle(context);
             DisplayPrefs.setLightTheme(context, false);
         }
     }
 
-    private void applyHudStyle(JSONObject json) {
-        if (json.optBoolean("reset", false)) {
-            STATE.hudStyle.clear();
-            DisplayPrefs.clearHudStyle(this);
+    public static void persistHudStyle(android.content.Context context) {
+        if (context == null) {
             return;
         }
+        DisplayPrefs.setHudStyleJson(context, STATE.hudStyle.toStoreJson().toString());
+    }
+
+    private void applyHudStyle(JSONObject json) {
         STATE.hudStyle.applyJson(json);
-        JSONObject store = new JSONObject();
-        try {
-            if (json.has("cards")) {
-                store.put("cards", json.get("cards"));
-            }
-        } catch (Exception ignored) {
-        }
-        DisplayPrefs.setHudStyleJson(this, store.toString());
+        persistHudStyle(this);
     }
 
     private static void refreshHeadlineStatic() {

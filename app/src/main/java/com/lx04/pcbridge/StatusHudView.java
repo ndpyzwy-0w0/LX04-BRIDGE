@@ -16,9 +16,28 @@ public class StatusHudView extends View {
         void onSpkMuteTap();
 
         void onResetStyleTap();
+
+        void onHudStyleChanged();
     }
 
     private Listener listener;
+    private final CardEditor editor = new CardEditor(this);
+    private final RectF[] cardRects = new RectF[] {
+            new RectF(), new RectF(), new RectF(), new RectF()
+    };
+    private final android.os.Handler touchHandler = new android.os.Handler(android.os.Looper.getMainLooper());
+    private int pressSlot = -1;
+    private float pressX;
+    private float pressY;
+    private final Runnable longPress = new Runnable() {
+        @Override
+        public void run() {
+            if (pressSlot >= 0) {
+                editor.open(pressSlot);
+                pressSlot = -1;
+            }
+        }
+    };
     private final Paint bg = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint panel = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint cardPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -152,6 +171,15 @@ public class StatusHudView extends View {
                 s.micMuted ? "麦克风已静音" : "麦克风");
         drawMuteButton(canvas, spkMuteRect, s.spkMuted,
                 s.spkMuted ? "扬声器已静音" : "扬声器");
+        if (editor.isOpen()) {
+            editor.draw(canvas, w, h, lightTheme);
+        }
+    }
+
+    void onHudEdited() {
+        if (listener != null) {
+            listener.onHudStyleChanged();
+        }
     }
 
     private void drawMuteButton(Canvas canvas, RectF rect, boolean muted, String label) {
@@ -186,10 +214,12 @@ public class StatusHudView extends View {
         float cardH = bottom - top;
         float cardW = (right - left - gap * 3) / 4f;
         for (int i = 0; i < 4; i++) {
+            float x = left + (cardW + gap) * i;
+            cardRects[i].set(x, top, x + cardW, top + cardH);
             String metric = s.hudStyle.metric(i);
             String subMetric = s.hudStyle.subMetric(i);
             String title = s.hudStyle.title(i, HudStyle.fallbackTitle(metric, s.pcDiskName));
-            drawStatCard(canvas, left + (cardW + gap) * i, top, cardW, cardH, title,
+            drawStatCard(canvas, x, top, cardW, cardH, title,
                     formatMetricValue(s, metric), formatMetricValue(s, subMetric),
                     formatMetricFoot(s, metric), metricUsage(s, metric), metricTemp(s, metric), i);
         }
@@ -280,9 +310,36 @@ public class StatusHudView extends View {
 
     @Override
     public boolean onTouchEvent(MotionEvent event) {
-        if (event.getAction() == MotionEvent.ACTION_UP) {
-            float x = event.getX();
-            float y = event.getY();
+        if (editor.isOpen()) {
+            return editor.onTouch(event);
+        }
+        float x = event.getX();
+        float y = event.getY();
+        int action = event.getAction();
+        if (action == MotionEvent.ACTION_DOWN) {
+            pressSlot = cardIndexAt(x, y);
+            pressX = x;
+            pressY = y;
+            if (pressSlot >= 0) {
+                touchHandler.postDelayed(longPress, 450);
+            }
+            return true;
+        }
+        if (action == MotionEvent.ACTION_MOVE) {
+            if (pressSlot >= 0 && (Math.abs(x - pressX) > dp(12) || Math.abs(y - pressY) > dp(12))) {
+                touchHandler.removeCallbacks(longPress);
+                pressSlot = -1;
+            }
+            return true;
+        }
+        if (action == MotionEvent.ACTION_CANCEL) {
+            touchHandler.removeCallbacks(longPress);
+            pressSlot = -1;
+            return true;
+        }
+        if (action == MotionEvent.ACTION_UP) {
+            touchHandler.removeCallbacks(longPress);
+            pressSlot = -1;
             if (micMuteRect.contains(x, y)) {
                 if (listener != null) {
                     listener.onMicMuteTap();
@@ -304,8 +361,21 @@ public class StatusHudView extends View {
                 invalidate();
                 return true;
             }
+            return true;
         }
         return super.onTouchEvent(event);
+    }
+
+    private int cardIndexAt(float x, float y) {
+        if (!BridgeService.STATE.hasPcStats()) {
+            return -1;
+        }
+        for (int i = 0; i < cardRects.length; i++) {
+            if (cardRects[i].contains(x, y)) {
+                return i;
+            }
+        }
+        return -1;
     }
 
     private static String formatVersion(String apkVersion) {
@@ -487,7 +557,7 @@ public class StatusHudView extends View {
         return 0xFF3DDC97;
     }
 
-    private float dp(float v) {
+    float dp(float v) {
         return v * getResources().getDisplayMetrics().density;
     }
 }

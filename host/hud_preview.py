@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import sys
+import time
 from pathlib import Path
 from tkinter import colorchooser, ttk
 import tkinter as tk
@@ -163,7 +164,12 @@ def default_state(light: bool = False) -> dict:
                 "value_color_set": False,
             }
         )
-    return {"light": light, "cards": cards}
+    return {"light": light, "cards": cards, "rev": 0}
+
+
+def bump_rev(state: dict) -> None:
+    now = int(time.time() * 1000)
+    state["rev"] = max(int(state.get("rev") or 0) + 1, now)
 
 
 def load_state(light: bool = False) -> dict:
@@ -195,6 +201,9 @@ def load_state(light: bool = False) -> dict:
         card["value_color_set"] = bool(extra.get("value_color_set")) or (
             bool(_hex(extra.get("value_color"))) and card["value_color"] != OK
         )
+    base["rev"] = int(data.get("rev") or 0)
+    if base["rev"] <= 0 and not style_is_default(base):
+        base["rev"] = 1
     return base
 
 
@@ -222,8 +231,9 @@ def style_is_default(state: dict) -> bool:
 
 
 def control_payload(state: dict) -> dict:
+    rev = int(state.get("rev") or 0)
     if style_is_default(state):
-        return {"reset": True}
+        return {"reset": True, "rev": rev}
     defaults = default_state(bool(state.get("light")))
     cards = []
     for card, default in zip(state.get("cards") or [], defaults["cards"]):
@@ -248,7 +258,47 @@ def control_payload(state: dict) -> dict:
         elif value_color and value_color != default["value_color"]:
             item["valueColor"] = value_color
         cards.append(item)
-    return {"cards": cards, "reset": False}
+    return {"cards": cards, "reset": False, "rev": rev}
+
+
+def state_from_payload(payload: dict, light: bool) -> dict:
+    if not isinstance(payload, dict) or payload.get("reset"):
+        state = default_state(light)
+        state["rev"] = int((payload or {}).get("rev") or 0)
+        return state
+    state = default_state(light)
+    state["rev"] = int(payload.get("rev") or 0)
+    saved = {item.get("key"): item for item in payload.get("cards") or [] if isinstance(item, dict)}
+    colors = palette(light)
+    for card in state["cards"]:
+        extra = saved.get(card["key"]) or {}
+        if extra.get("title"):
+            card["title"] = str(extra["title"])[:8]
+        metric = str(extra.get("metric") or "")
+        if metric in METRIC_LABEL:
+            card["metric"] = metric
+        sub_metric = str(extra.get("sub_metric") or extra.get("subMetric") or "")
+        if is_metric(sub_metric):
+            card["sub_metric"] = sub_metric
+        if _hex(extra.get("titleColor") or extra.get("title_color")):
+            card["title_color"] = _hex(extra.get("titleColor") or extra.get("title_color"))
+            card["title_color_set"] = card["title_color"] != colors["dim"]
+        if _hex(extra.get("valueColor") or extra.get("value_color")):
+            card["value_color"] = _hex(extra.get("valueColor") or extra.get("value_color"))
+            card["value_color_set"] = card["value_color"] != OK
+    return state
+
+
+def replace_state(state: dict) -> None:
+    save_state(state)
+    win = _open_win
+    if win is None:
+        return
+    try:
+        if win.root.winfo_exists():
+            win.apply_state(state)
+    except tk.TclError:
+        pass
 
 
 def _hex(value: object) -> str:
@@ -444,6 +494,7 @@ class PreviewWindow:
         self.root.resizable(False, False)
         self.state = load_state(light)
         self._saving = False
+        self._remote = False
         self.light_var = tk.BooleanVar(value=bool(self.state["light"]))
         self.title_vars: list[tk.StringVar] = []
         self.metric_vars: list[tk.StringVar] = []
@@ -452,7 +503,7 @@ class PreviewWindow:
 
         hint = ttk.Label(
             self.root,
-            text="每个格子分别选大字和小字要监视的数据，只改颜色和标题。预览里用示意数字。",
+            text="每个格子分别选大字和小字。音箱上长按栏目也能改，两边会同步。预览里用示意数字。",
             style="Dim.TLabel",
         )
         hint.pack(anchor="w", padx=16, pady=(12, 6))
@@ -530,6 +581,20 @@ class PreviewWindow:
         self._paint_swatches()
         self._redraw()
 
+    def apply_state(self, state: dict) -> None:
+        self._remote = True
+        try:
+            self.state = state
+            self.light_var.set(bool(state.get("light")))
+            for index, card in enumerate(self.state["cards"]):
+                self.title_vars[index].set(str(card.get("title") or DEFAULT_SLOTS[index][1]))
+                self.metric_vars[index].set(metric_label(str(card.get("metric") or DEFAULT_SLOTS[index][2])))
+                self.sub_metric_vars[index].set(sub_metric_label(str(card.get("sub_metric") or DEFAULT_SLOTS[index][3])))
+            self._paint_swatches()
+            self._redraw()
+        finally:
+            self._remote = False
+
     def _metric_menu(self, drop, variable, combo_bg, combo_fg, command, include_none: bool = False) -> tk.Menu:
         menu = tk.Menu(
             drop,
@@ -569,11 +634,15 @@ class PreviewWindow:
         self._on_text(index)
 
     def _on_text(self, _index: int) -> None:
+        if self._remote:
+            return
         self._cards_from_vars()
         self._redraw()
         self._schedule_save()
 
     def _on_light(self) -> None:
+        if self._remote:
+            return
         self.state["light"] = bool(self.light_var.get())
         self._redraw()
         self._schedule_save()
@@ -592,6 +661,7 @@ class PreviewWindow:
 
     def _reset(self) -> None:
         self.state = default_state(bool(self.light_var.get()))
+        bump_rev(self.state)
         self.light_var.set(bool(self.state["light"]))
         for index, card in enumerate(self.state["cards"]):
             self.metric_vars[index].set(metric_label(str(card.get("metric") or DEFAULT_SLOTS[index][2])))
@@ -621,7 +691,10 @@ class PreviewWindow:
 
     def _flush_save(self) -> None:
         self._saving = False
+        if self._remote:
+            return
         self._cards_from_vars()
+        bump_rev(self.state)
         save_state(self.state)
         self._emit(reset=False)
 

@@ -94,6 +94,8 @@ final class TcpBridgeServer {
             o.put("channels", state.channels);
             o.put("playLevel", state.playLevel);
             o.put("volume", BridgeService.musicVolume());
+            o.put("lightTheme", state.lightTheme);
+            o.put("hudStyle", state.hudStyle.toStatusJson());
             enqueue(Protocol.STATUS, (byte) 0, o.toString().getBytes(StandardCharsets.UTF_8));
         } catch (Exception ignored) {
         }
