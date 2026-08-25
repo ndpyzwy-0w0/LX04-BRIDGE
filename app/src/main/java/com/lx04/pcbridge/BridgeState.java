@@ -8,6 +8,7 @@ final class BridgeState {
     volatile boolean micMuted;
     volatile boolean spkMuted;
     volatile boolean upsideDown;
+    volatile boolean lightTheme;
     volatile boolean permissionDenied;
     volatile float level;
     volatile float playLevel;
