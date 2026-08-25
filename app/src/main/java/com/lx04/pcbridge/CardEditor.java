@@ -4,6 +4,7 @@ import android.graphics.Canvas;
 import android.graphics.Paint;
 import android.graphics.RectF;
 import android.graphics.Typeface;
+import android.os.SystemClock;
 import android.view.MotionEvent;
 import android.view.VelocityTracker;
 import android.view.ViewConfiguration;
@@ -48,6 +49,11 @@ final class CardEditor {
     private float dragScroll;
     private boolean dragging;
     private boolean light;
+    private boolean hasSource;
+    private float appear;
+    private float appearTarget;
+    private long lastAnimMs;
+    private final RectF source = new RectF();
     private VelocityTracker velocity;
 
     CardEditor(StatusHudView view) {
@@ -69,22 +75,50 @@ final class CardEditor {
         return slot >= 0;
     }
 
-    void open(int slot) {
+    void open(int slot, RectF from) {
         this.slot = slot;
         page = PAGE_MAIN;
         mainScroll = 0;
         listScroll = 0;
         dragging = false;
         scroller.forceFinished(true);
-        view.invalidate();
+        hasSource = from != null && from.width() > 8f && from.height() > 8f;
+        if (hasSource) {
+            source.set(from);
+        }
+        appear = 0f;
+        appearTarget = 1f;
+        lastAnimMs = SystemClock.uptimeMillis();
+        view.postInvalidateOnAnimation();
     }
 
     void close() {
-        slot = -1;
-        page = PAGE_MAIN;
+        if (slot < 0) {
+            return;
+        }
+        appearTarget = 0f;
+        lastAnimMs = SystemClock.uptimeMillis();
         recycleVelocity();
         scroller.forceFinished(true);
-        view.invalidate();
+        view.postInvalidateOnAnimation();
+    }
+
+    boolean advance() {
+        boolean fling = advanceFling();
+        if (Math.abs(appear - appearTarget) < 0.012f) {
+            appear = appearTarget;
+            if (appear <= 0f && slot >= 0) {
+                finishClose();
+            }
+            return fling;
+        }
+        long now = SystemClock.uptimeMillis();
+        float dt = Math.min(0.05f, (now - lastAnimMs) / 1000f);
+        lastAnimMs = now;
+        float diff = appearTarget - appear;
+        float step = Math.max(3.4f, Math.abs(diff) * 9f) * dt;
+        appear += Math.signum(diff) * Math.min(Math.abs(diff), step);
+        return true;
     }
 
     boolean advanceFling() {
@@ -95,15 +129,41 @@ final class CardEditor {
         return true;
     }
 
+    private void finishClose() {
+        slot = -1;
+        page = PAGE_MAIN;
+        appear = 0f;
+        appearTarget = 0f;
+        hasSource = false;
+        view.invalidate();
+    }
+
     void draw(Canvas canvas, int w, int h, boolean lightTheme) {
         if (!isOpen()) {
             return;
         }
         light = lightTheme;
         applyPalette(lightTheme);
+        float visual = appearTarget >= 1f ? easeOut(appear) : easeIn(appear);
+        dim.setAlpha(Math.round(0x99 * visual));
         canvas.drawRect(0, 0, w, h, dim);
         float p = dp(10);
         panelRect.set(p, p, w - p, h - p);
+        boolean transformed = visual < 0.995f;
+        if (transformed) {
+            canvas.save();
+            float fromW = hasSource ? source.width() : panelRect.width() * 0.88f;
+            float fromH = hasSource ? source.height() : panelRect.height() * 0.88f;
+            float fromCx = hasSource ? source.centerX() : w / 2f;
+            float fromCy = hasSource ? source.centerY() : h / 2f;
+            float sx = lerp(fromW / Math.max(1f, panelRect.width()), 1f, visual);
+            float sy = lerp(fromH / Math.max(1f, panelRect.height()), 1f, visual);
+            float cx = lerp(fromCx, panelRect.centerX(), visual);
+            float cy = lerp(fromCy, panelRect.centerY(), visual);
+            canvas.translate(cx, cy);
+            canvas.scale(sx, sy);
+            canvas.translate(-panelRect.centerX(), -panelRect.centerY());
+        }
         canvas.drawRoundRect(panelRect, dp(16), dp(16), panel);
 
         headerRect.set(panelRect.left, panelRect.top, panelRect.right, panelRect.top + dp(44));
@@ -124,6 +184,9 @@ final class CardEditor {
             drawMain(canvas);
         } else {
             drawList(canvas, page == PAGE_SUB);
+        }
+        if (transformed) {
+            canvas.restore();
         }
     }
 
@@ -316,6 +379,9 @@ final class CardEditor {
         if (!isOpen()) {
             return false;
         }
+        if (appear < 0.97f || appearTarget < 1f) {
+            return true;
+        }
         float x = event.getX();
         float y = event.getY();
         int action = event.getActionMasked();
@@ -477,6 +543,31 @@ final class CardEditor {
 
     private float maxScroll() {
         return Math.max(0, contentHeight - viewport.height());
+    }
+
+    private static float lerp(float a, float b, float t) {
+        return a + (b - a) * t;
+    }
+
+    private static float easeOut(float t) {
+        if (t <= 0f) {
+            return 0f;
+        }
+        if (t >= 1f) {
+            return 1f;
+        }
+        float u = 1f - t;
+        return 1f - u * u;
+    }
+
+    private static float easeIn(float t) {
+        if (t <= 0f) {
+            return 0f;
+        }
+        if (t >= 1f) {
+            return 1f;
+        }
+        return t * t;
     }
 
     private static float clamp(float value, float max) {
