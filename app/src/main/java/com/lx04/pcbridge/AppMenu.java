@@ -26,7 +26,6 @@ final class AppMenu {
     private final Path chevron = new Path();
     private final RectF drawerRect = new RectF();
     private final RectF settingsRow = new RectF();
-    private final RectF handleRect = new RectF();
     private final RectF backRect = new RectF();
     private final RectF darkRect = new RectF();
     private final RectF lightRect = new RectF();
@@ -129,7 +128,6 @@ final class AppMenu {
         }
         float shown = Math.max(0f, Math.min(drawerW, offset));
         if (shown < 0.5f) {
-            drawHandle(canvas, w, h);
             return;
         }
         float t = shown / drawerW;
@@ -159,13 +157,6 @@ final class AppMenu {
         dim.setTextSize(dp(11));
         float vw = dim.measureText(ver);
         canvas.drawText(ver, drawerRect.centerX() - vw / 2f, h - dp(18), dim);
-    }
-
-    private void drawHandle(Canvas canvas, int w, int h) {
-        applyPanelColor();
-        float hh = dp(56);
-        handleRect.set(w - dp(18), h / 2f - hh / 2f, w + dp(4), h / 2f + hh / 2f);
-        canvas.drawRoundRect(handleRect, dp(8), dp(8), panel);
     }
 
     private void drawSettings(Canvas canvas, int w, int h) {
@@ -250,7 +241,7 @@ final class AppMenu {
         animating = false;
         obtainVelocity().addMovement(event);
         drawerW = drawerWidth(w);
-        boolean edge = x >= w - edgeWidth(w) || handleRect.contains(x, y);
+        boolean edge = x >= w - edgeWidth(w);
         tracking = blocksHud() || edge;
         return tracking;
     }
