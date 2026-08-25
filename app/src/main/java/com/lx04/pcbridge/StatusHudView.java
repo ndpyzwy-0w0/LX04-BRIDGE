@@ -69,7 +69,8 @@ public class StatusHudView extends View {
         canvas.drawRoundRect(card, dp(18), dp(18), panel);
 
         pulse = (pulse + 0.08f) % ((float) (Math.PI * 2));
-        boolean live = s.clientConnected && !s.muted && (s.recording || s.playLevel > 0.02f);
+        boolean live = s.clientConnected && !s.muted
+                && (s.recording || s.hwCapture || s.playLevel > 0.02f);
         int usbColor = !s.usbConnected ? 0xFFFF5C7A : (s.clientConnected ? 0xFF3DDC97 : 0xFFFFB020);
         accent.setColor(usbColor);
         float usbAlpha = live ? 0.65f + 0.35f * (float) Math.abs(Math.sin(pulse)) : 1f;

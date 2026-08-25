@@ -56,6 +56,7 @@ public class BridgeService extends Service {
                     }
                     refreshHeadline();
                 } else {
+                    STATE.hwCapture = false;
                     stopMic();
                     playback.stop();
                     refreshHeadline();
@@ -87,9 +88,28 @@ public class BridgeService extends Service {
                 } else if ("toggle_mute".equals(cmd)) {
                     STATE.muted = !STATE.muted;
                 } else if ("start_mic".equals(cmd)) {
+                    STATE.hwCapture = false;
                     startMic();
                 } else if ("stop_mic".equals(cmd)) {
                     stopMic();
+                    STATE.hwCapture = json.optBoolean("hw", false);
+                } else if ("mic_level".equals(cmd)) {
+                    boolean hw = json.optBoolean("hw", true);
+                    boolean changed = hw != STATE.hwCapture;
+                    STATE.hwCapture = hw;
+                    if (hw) {
+                        STATE.level = (float) json.optDouble("level", 0);
+                        STATE.sampleRate = 48000;
+                        STATE.channels = 1;
+                        STATE.audioSource = "tinycap";
+                        lastAudioMs = SystemClock.elapsedRealtime();
+                    } else {
+                        STATE.level = 0f;
+                    }
+                    if (changed) {
+                        refreshHeadline();
+                    }
+                    return;
                 }
                 refreshHeadline();
             }
@@ -141,7 +161,7 @@ public class BridgeService extends Service {
         if (STATE.clientConnected) {
             if (STATE.muted) {
                 STATE.headline = "已静音";
-            } else if (STATE.recording) {
+            } else if (STATE.recording || STATE.hwCapture) {
                 STATE.headline = "正在拾音";
             } else {
                 STATE.headline = "电脑扬声器 \u2192 音箱";
@@ -183,7 +203,9 @@ public class BridgeService extends Service {
             capture.stop();
         }
         STATE.recording = false;
-        STATE.level = 0f;
+        if (!STATE.hwCapture) {
+            STATE.level = 0f;
+        }
     }
 
     private void onAudio(byte[] pcm, int length, float peak) {
@@ -222,7 +244,7 @@ public class BridgeService extends Service {
         }
         if (STATE.muted) {
             STATE.headline = "已静音";
-        } else if (STATE.recording) {
+        } else if (STATE.recording || STATE.hwCapture) {
             STATE.headline = "正在拾音";
         } else {
             STATE.headline = "电脑扬声器 → 音箱";
@@ -231,7 +253,7 @@ public class BridgeService extends Service {
         long silence = lastAudioMs == 0 ? 0 : SystemClock.elapsedRealtime() - lastAudioMs;
         STATE.detail = pc + " · " + STATE.formatLink() + " · " + STATE.formatAudio()
                 + " · 增益 " + Math.round(STATE.gain * 100) + "%"
-                + (silence > 1500 && STATE.recording ? " · 无声音输入" : "");
+                + (silence > 1500 && (STATE.recording || STATE.hwCapture) ? " · 无声音输入" : "");
     }
 
     private void startAsForeground() {
