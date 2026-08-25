@@ -1082,6 +1082,19 @@ class HostApp:
         self._draw_meter(self.meter, 0)
         self._draw_meter(self.spk_meter, 0)
 
+    def _apply_mute_headline(self, mic_muted: bool, spk_muted: bool) -> None:
+        if mic_muted and spk_muted:
+            self.headline.configure(text="音箱麦克风和扬声器已静音")
+        elif mic_muted:
+            self.headline.configure(text="音箱麦克风已静音")
+        elif spk_muted:
+            self.headline.configure(text="音箱扬声器已静音")
+        elif self.connected:
+            if self.hw.running():
+                self.headline.configure(text="正在把 LX04 硬件麦送给语音软件")
+            else:
+                self.headline.configure(text="正在把 LX04 麦克风送给语音软件")
+
     def _on_bridge_event(self, kind: str, data) -> None:
         self.root.after(0, lambda: self._handle_event(kind, data))
 
@@ -1119,21 +1132,23 @@ class HostApp:
                     self._apply_speaker_volume(float(data.get("volume") or 0))
                 except (TypeError, ValueError):
                     pass
-            self.loopback.muted = bool(data.get("muted"))
+            fallback = bool(data.get("muted"))
+            mic_muted = bool(data["micMuted"]) if "micMuted" in data else fallback
+            spk_muted = bool(data["spkMuted"]) if "spkMuted" in data else fallback
+            self.loopback.muted = spk_muted
             if self.loopback.error:
                 self._log("扬声器环回: " + self.loopback.error)
                 self.loopback.error = ""
             if self.hw.running():
-                self.hw.muted = bool(data.get("muted"))
-                muted = "静音" if data.get("muted") else "拾音中"
+                self.hw.muted = mic_muted
+                muted = "麦静音" if mic_muted else "拾音中"
+                if spk_muted:
+                    muted += " · 喇叭静音"
                 usb = "USB" if data.get("usbConnected") else "USB断开"
                 self.detail.configure(
                     text=f"{usb} · {muted} · 硬件麦 48kHz · 电平 {self.sink.peak:.2f} · 扬声器 {float(data.get('playLevel') or self.play_peak):.2f}"
                 )
-                if data.get("muted"):
-                    self.headline.configure(text="音箱已静音")
-                elif self.connected:
-                    self.headline.configure(text="正在把 LX04 硬件麦送给语音软件")
+                self._apply_mute_headline(mic_muted, spk_muted)
                 if self.sink.callback_error:
                     self._log("音频回调: " + self.sink.callback_error)
                     self.sink.callback_error = ""
@@ -1151,15 +1166,14 @@ class HostApp:
                 except Exception as exc:
                     self._log("按新采样率打开注入失败: " + str(exc))
             self.sink.peak = min(1.0, float(data.get("level") or 0) * self.sink.gain)
-            muted = "静音" if data.get("muted") else "拾音中"
+            muted = "麦静音" if mic_muted else "拾音中"
+            if spk_muted:
+                muted += " · 喇叭静音"
             usb = "USB" if data.get("usbConnected") else "USB断开"
             self.detail.configure(
                 text=f"{usb} · {muted} · 电平 {float(data.get('level') or 0):.2f} · 扬声器 {float(data.get('playLevel') or self.play_peak):.2f} · 丢帧 {data.get('dropped', 0)}"
             )
-            if data.get("muted"):
-                self.headline.configure(text="音箱已静音")
-            elif self.connected:
-                self.headline.configure(text="正在把 LX04 麦克风送给语音软件")
+            self._apply_mute_headline(mic_muted, spk_muted)
             if self.sink.callback_error:
                 self._log("音频回调: " + self.sink.callback_error)
                 self.sink.callback_error = ""
