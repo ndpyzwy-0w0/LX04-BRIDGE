@@ -51,8 +51,7 @@ def commit_usable_version(version: int, summary: str = "") -> bool:
         message = (
             f"Release v{version}: {why}\n"
             "\n"
-            "Keep versioned dist/LX04-PC-Bridge-Host-vN.exe and "
-            "dist/LX04-PC-Bridge-vN.apk on disk only."
+            "Keep versioned dist/LX04-PC-Bridge-Host-vN.exe on disk only."
         )
         subprocess.check_call(["git", "commit", "-m", message], cwd=ROOT)
         print("Committed git snapshot for v" + str(version))
