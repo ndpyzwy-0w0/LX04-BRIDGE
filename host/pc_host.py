@@ -185,6 +185,7 @@ class HostApp:
         self.pc_stats_enabled = tk.BooleanVar(value=True)
         self.disk_var = tk.StringVar()
         self._saved_disk = ""
+        self._disk_labels: list[str] = []
         self.inject_var = tk.StringVar()
         self.spk_dev_var = tk.StringVar()
         self._inject_devices: list[tuple[str, str | int, str]] = []
@@ -248,6 +249,21 @@ class HostApp:
         self.root.option_add("*TCombobox*Listbox.selectBackground", "#3DDC97")
         self.root.option_add("*TCombobox*Listbox.selectForeground", "#0B1220")
         self.root.option_add("*TCombobox*Listbox.font", "Segoe UI 10")
+        style.configure(
+            "Disk.TMenubutton",
+            background=combo_bg,
+            foreground=combo_fg,
+            arrowcolor=combo_fg,
+            padding=4,
+            font=("Segoe UI", 10),
+            relief="raised",
+        )
+        style.map(
+            "Disk.TMenubutton",
+            background=[("active", combo_bg), ("pressed", combo_bg)],
+            foreground=[("active", combo_fg)],
+            arrowcolor=[("active", combo_fg)],
+        )
 
         ttk.Label(self.root, text="LX04 PC Bridge", style="Title.TLabel").pack(anchor="w", padx=20, pady=(16, 4))
         ttk.Label(
@@ -357,10 +373,26 @@ class HostApp:
             font=("Segoe UI", 10),
         ).pack(side="left")
         ttk.Label(stats_row, text="磁盘", style="Card.TLabel").pack(side="left", padx=(12, 4))
-        self.disk_combo = ttk.Combobox(stats_row, textvariable=self.disk_var, width=28, state="readonly")
-        self.disk_combo.pack(side="left", fill="x", expand=True)
-        self.disk_combo.bind("<<ComboboxSelected>>", lambda _e: self._on_disk_change())
-        self.disk_combo.bind("<ButtonPress-1>", _post_combobox)
+        self.disk_btn = ttk.Menubutton(
+            stats_row,
+            textvariable=self.disk_var,
+            style="Disk.TMenubutton",
+            direction="below",
+        )
+        self.disk_menu = tk.Menu(
+            self.disk_btn,
+            tearoff=False,
+            font=("Segoe UI", 10),
+            bg=combo_bg,
+            fg=combo_fg,
+            activebackground="#C5E9D6",
+            activeforeground=combo_fg,
+            relief="solid",
+            borderwidth=1,
+        )
+        self.disk_btn["menu"] = self.disk_menu
+        self.disk_btn.pack(side="left", fill="x", expand=True)
+        self.disk_btn.bind("<MouseWheel>", self._on_disk_wheel)
 
         row2 = ttk.Frame(card, style="Card.TFrame")
         row2.pack(fill="x", padx=16, pady=(0, 8))
@@ -559,7 +591,15 @@ class HostApp:
         previous = self._selected_disk()
         items = pc_stats.list_disks()
         labels = [pc_stats.disk_choice_label(item) for item in items]
-        self.disk_combo["values"] = labels
+        self._disk_labels = labels
+        self.disk_menu.delete(0, "end")
+        for label in labels:
+            self.disk_menu.add_radiobutton(
+                label=label,
+                variable=self.disk_var,
+                value=label,
+                command=self._on_disk_change,
+            )
         chosen = ""
         want = (previous or getattr(self, "_saved_disk", "") or "").upper()[:2]
         for item, label in zip(items, labels):
@@ -571,6 +611,20 @@ class HostApp:
             chosen = system or (labels[0] if labels else "")
         if chosen:
             self.disk_var.set(chosen)
+
+    def _on_disk_wheel(self, event: tk.Event) -> str:
+        labels = self._disk_labels
+        if not labels:
+            return "break"
+        current = self.disk_var.get()
+        try:
+            idx = labels.index(current)
+        except ValueError:
+            idx = 0
+        idx = (idx + (-1 if event.delta > 0 else 1)) % len(labels)
+        self.disk_var.set(labels[idx])
+        self._on_disk_change()
+        return "break"
 
     def _on_pc_stats_change(self) -> None:
         if not self._routes_ready:
@@ -1126,17 +1180,6 @@ class HostApp:
     def _log(self, line: str) -> None:
         self.log.insert("end", line + "\n")
         self.log.see("end")
-
-
-def _post_combobox(event: tk.Event) -> str:
-    """Open a readonly Combobox even if the clam-theme arrow hit-test fails."""
-    combo = event.widget
-    try:
-        combo.focus_set()
-        combo.tk.call("ttk::combobox::Post", combo)
-    except tk.TclError:
-        combo.event_generate("<Down>")
-    return "break"
 
 
 def _pick_label(labels: list[str], saved: str, fallback: str | None) -> str:
