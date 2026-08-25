@@ -8,10 +8,12 @@ import org.json.JSONObject;
 final class HudStyle {
     static final String[] KEYS = {"cpu", "gpu", "ram", "disk"};
     static final String[] DEFAULT_METRICS = {"cpu", "gpu", "ram", "disk"};
+    static final String[] DEFAULT_SUB_METRICS = {"cpuT", "gpuT", "ramGB", "diskGB"};
     static final String[] DEFAULT_TITLES = {"CPU", "GPU", "内存", "磁盘"};
 
     private final String[] titles = new String[] {"", "", "", ""};
     private final String[] metrics = new String[] {"", "", "", ""};
+    private final String[] subMetrics = new String[] {"", "", "", ""};
     private final int[] titleColors = new int[4];
     private final int[] valueColors = new int[4];
 
@@ -19,6 +21,7 @@ final class HudStyle {
         for (int i = 0; i < 4; i++) {
             titles[i] = "";
             metrics[i] = "";
+            subMetrics[i] = "";
             titleColors[i] = 0;
             valueColors[i] = 0;
         }
@@ -46,6 +49,7 @@ final class HudStyle {
             }
             titles[index] = card.optString("title", "");
             metrics[index] = card.optString("metric", "");
+            subMetrics[index] = card.optString("subMetric", "");
             titleColors[index] = parseColor(card.optString("titleColor", ""));
             valueColors[index] = parseColor(card.optString("valueColor", ""));
         }
@@ -60,6 +64,17 @@ final class HudStyle {
             return custom;
         }
         return DEFAULT_METRICS[index];
+    }
+
+    synchronized String subMetric(int index) {
+        if (index < 0 || index >= 4) {
+            return DEFAULT_SUB_METRICS[0];
+        }
+        String custom = subMetrics[index];
+        if (isKnown(custom)) {
+            return custom;
+        }
+        return DEFAULT_SUB_METRICS[index];
     }
 
     synchronized String title(int index, String fallback) {
@@ -95,22 +110,24 @@ final class HudStyle {
         return "cpu".equals(metric) || "cpuT".equals(metric)
                 || "gpu".equals(metric) || "gpuT".equals(metric)
                 || "gpuW".equals(metric) || "gpuFan".equals(metric) || "vram".equals(metric)
-                || "ram".equals(metric) || "disk".equals(metric) || "diskIo".equals(metric)
-                || "netD".equals(metric) || "netU".equals(metric);
+                || "ram".equals(metric) || "ramGB".equals(metric)
+                || "disk".equals(metric) || "diskGB".equals(metric) || "diskIo".equals(metric)
+                || "netD".equals(metric) || "netU".equals(metric)
+                || "cores".equals(metric) || "gpuN".equals(metric) || "none".equals(metric);
     }
 
     static boolean isDefaultTitle(String metric, String title) {
         if (title == null || title.isEmpty()) {
             return true;
         }
-        if ("disk".equals(metric) && ("D:".equals(title) || "磁盘".equals(title))) {
+        if (("disk".equals(metric) || "diskGB".equals(metric)) && ("D:".equals(title) || "磁盘".equals(title))) {
             return true;
         }
         return fallbackTitle(metric, "").equals(title);
     }
 
     static String fallbackTitle(String metric, String diskName) {
-        if ("disk".equals(metric)) {
+        if ("disk".equals(metric) || "diskGB".equals(metric)) {
             if (diskName != null && !diskName.isEmpty()) {
                 return diskName;
             }
@@ -131,7 +148,7 @@ final class HudStyle {
         if ("vram".equals(metric)) {
             return "显存";
         }
-        if ("ram".equals(metric)) {
+        if ("ram".equals(metric) || "ramGB".equals(metric)) {
             return "内存";
         }
         if ("diskIo".equals(metric)) {
@@ -142,6 +159,12 @@ final class HudStyle {
         }
         if ("netU".equals(metric)) {
             return "上传";
+        }
+        if ("cores".equals(metric)) {
+            return "核数";
+        }
+        if ("gpuN".equals(metric)) {
+            return "显卡";
         }
         return "CPU";
     }

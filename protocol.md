@@ -77,7 +77,7 @@ adb forward tcp:17890 tcp:17890
 {"cmd": "toggle_spk_mute"}
 {"cmd": "upside_down", "on": true}
 {"cmd": "light_theme", "on": true}
-{"cmd": "hud_style", "cards": [{"key": "cpu", "metric": "cpuT", "titleColor": "#8FA0BE", "valueColor": "#3DDC97"}]}
+{"cmd": "hud_style", "cards": [{"key": "cpu", "metric": "cpuT", "subMetric": "cores", "titleColor": "#8FA0BE", "valueColor": "#3DDC97"}]}
 {"cmd": "hud_style", "reset": true}
 {"cmd": "ping"}
 {"cmd": "volume", "level": 0.55}
@@ -86,6 +86,6 @@ adb forward tcp:17890 tcp:17890
 
 `pc_stats` 由电脑每秒推一次，音箱屏幕画 CPU / GPU / 内存 / 磁盘。占用用打包进 EXE 的采集器 + 系统 API / 显卡驱动，不要求接收方再装 Python 或监控软件。`diskN` / `diskU` / `diskT` 是上位机所选盘符和已用/总量 GB。温度字段在读不到时省略（不要发假的 ACPI 27°C）。GPU 温度优先用本机 NVIDIA NVML；CPU 封装温度仅在本机已开 MSI Afterburner 时补充。上位机可打开 MSI 官网下载页或启动本机已安装的 Afterburner，但不随包分发。
 
-`mute` / `unmute` / `toggle_mute` 只切麦克风。扬声器用 `mute_spk` / `unmute_spk` / `toggle_spk_mute`。STATUS 里 `micMuted` / `spkMuted` 分开报；`muted` 仍表示麦克风静音（兼容旧上位机）。`upside_down` 由上位机切换吊装倒转屏幕。`light_theme` 切换浅色/深色底。`hud_style` 同步各板块标题、大字颜色，以及大字监视的数据（`metric`：cpu / cpuT / gpu / gpuT / gpuW / gpuFan / vram / ram / disk / diskIo / netD / netU）。音箱显示真实读数，预览只用示意数字。`reset: true` 恢复默认。未连接上位机时，音箱等待页有「重置样式」。
+`mute` / `unmute` / `toggle_mute` 只切麦克风。扬声器用 `mute_spk` / `unmute_spk` / `toggle_spk_mute`。STATUS 里 `micMuted` / `spkMuted` 分开报；`muted` 仍表示麦克风静音（兼容旧上位机）。`upside_down` 由上位机切换吊装倒转屏幕。`light_theme` 切换浅色/深色底。`hud_style` 同步各板块标题、大字颜色，以及大字（`metric`）和小字（`subMetric`）监视的数据：cpu / cpuT / gpu / gpuT / gpuW / gpuFan / vram / ram / ramGB / disk / diskGB / diskIo / netD / netU / cores / gpuN；小字还可 `none` 不显示。音箱显示真实读数，预览只用示意数字。`reset: true` 恢复默认。未连接上位机时，音箱等待页有「重置样式」。
 
 `PLAY` 是电脑正在播放的声音，送给音箱喇叭。与 `AUDIO`（音箱麦克风 → 电脑）方向相反。
