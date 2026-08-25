@@ -72,8 +72,6 @@ adb forward tcp:17890 tcp:17890
 {"cmd": "mute"}
 {"cmd": "unmute"}
 {"cmd": "ping"}
-{"cmd": "stop_mic", "hw": true}
-{"cmd": "mic_level", "level": 0.42, "hw": true}
 ```
 
 音频块约 20ms。电脑侧应优先丢旧帧保实时，不要为了可靠传输堆缓冲。
