@@ -11,7 +11,9 @@ import android.view.View;
 
 public class StatusHudView extends View {
     public interface Listener {
-        void onMuteTap();
+        void onMicMuteTap();
+
+        void onSpkMuteTap();
 
         void onRotateTap();
     }
@@ -28,7 +30,8 @@ public class StatusHudView extends View {
     private final Paint meter = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint button = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final RectF playRect = new RectF();
-    private final RectF muteRect = new RectF();
+    private final RectF micMuteRect = new RectF();
+    private final RectF spkMuteRect = new RectF();
     private final RectF rotateRect = new RectF();
     private final RectF tmpRect = new RectF();
     private float pulse;
@@ -80,76 +83,84 @@ public class StatusHudView extends View {
         canvas.drawRoundRect(card, dp(18), dp(18), panel);
 
         pulse = (pulse + 0.08f) % ((float) (Math.PI * 2));
-        boolean live = s.clientConnected && !s.muted && (s.recording || s.playLevel > 0.02f);
+        boolean live = s.clientConnected && (
+                (s.recording && !s.micMuted) || (s.playLevel > 0.02f && !s.spkMuted));
         int usbColor = !s.usbConnected ? 0xFFFF5C7A : (s.clientConnected ? 0xFF3DDC97 : 0xFFFFB020);
         accent.setColor(usbColor);
         float usbAlpha = live ? 0.65f + 0.35f * (float) Math.abs(Math.sin(pulse)) : 1f;
         accent.setAlpha((int) (usbAlpha * 255));
-        canvas.drawCircle(dp(36), dp(36), dp(8), accent);
+        canvas.drawCircle(dp(22), dp(22), dp(7), accent);
         accent.setAlpha(255);
 
-        text.setTextSize(dp(18));
-        text.setColor(0xFFE8EEF8);
-        canvas.drawText("LX04 PC Bridge", dp(54), dp(42), text);
-        String ver = formatVersion(s.apkVersion);
+        dim.setTextSize(dp(12));
+        canvas.drawText(s.formatLink(), dp(36), dp(27), dim);
 
-        float rotateW = dp(72);
-        float rotateH = dp(32);
-        rotateRect.set(w - dp(28) - rotateW, dp(56), w - dp(28), dp(56) + rotateH);
+        float rotateW = dp(64);
+        float rotateH = dp(28);
+        rotateRect.set(w - dp(18) - rotateW, dp(10), w - dp(18), dp(10) + rotateH);
         button.setColor(upsideDown ? 0xFF2A4A3A : 0xFF223154);
         canvas.drawRoundRect(rotateRect, dp(8), dp(8), button);
-        text.setTextSize(dp(13));
+        text.setTextSize(dp(12));
+        text.setColor(0xFFE8EEF8);
         String rotateLabel = upsideDown ? "吊装 ✓" : "旋转";
         float rlW = text.measureText(rotateLabel);
         canvas.drawText(rotateLabel, rotateRect.left + (rotateRect.width() - rlW) / 2f,
                 rotateRect.top + rotateRect.height() * 0.68f, text);
 
-        text.setTextSize(dp(28));
-        text.setColor(0xFF3DDC97);
-        float verW = text.measureText(ver);
-        canvas.drawText(ver, rotateRect.left - dp(8) - verW, dp(48), text);
-        text.setColor(0xFFE8EEF8);
-        dim.setTextSize(dp(14));
-        canvas.drawText(s.formatLink(), dp(54), dp(64), dim);
+        dim.setTextSize(dp(11));
+        String ver = formatVersion(s.apkVersion);
+        float verW = dim.measureText(ver);
+        canvas.drawText(ver, rotateRect.left - dp(8) - verW, dp(28), dim);
 
-        muteRect.set(dp(28), h - dp(70), w - dp(28), h - dp(22));
         if (s.hasPcStats()) {
-            drawHardware(canvas, s, w, h);
-        } else {
-            drawClassic(canvas, s, w, h);
+            String host = s.pcName.isEmpty() ? "电脑" : s.pcName;
+            String up = formatUptime(s.pcUptime);
+            String mid = host + (up.isEmpty() ? "" : "  ·  " + up);
+            canvas.drawText(clip(mid, rotateRect.left - dp(120)), dp(110), dp(27), dim);
         }
 
-        button.setColor(s.muted ? 0xFF5B2A38 : 0xFF223154);
-        canvas.drawRoundRect(muteRect, dp(14), dp(14), button);
-        text.setTextSize(dp(20));
-        text.setColor(0xFFE8EEF8);
-        String muteLabel = s.muted ? "点击取消静音" : "点击静音";
-        float tw = text.measureText(muteLabel);
-        canvas.drawText(muteLabel, (w - tw) / 2f, muteRect.top + muteRect.height() * 0.68f, text);
+        float muteTop = h - dp(64);
+        float muteGap = dp(10);
+        micMuteRect.set(dp(18), muteTop, w / 2f - muteGap / 2f, h - dp(12));
+        spkMuteRect.set(w / 2f + muteGap / 2f, muteTop, w - dp(18), h - dp(12));
+        if (s.hasPcStats()) {
+            drawHardware(canvas, s, w, h, muteTop);
+        } else {
+            drawClassic(canvas, s, w, h, muteTop);
+        }
+
+        drawMuteButton(canvas, micMuteRect, s.micMuted,
+                s.micMuted ? "麦克风已静音" : "麦克风");
+        drawMuteButton(canvas, spkMuteRect, s.spkMuted,
+                s.spkMuted ? "扬声器已静音" : "扬声器");
     }
 
-    private void drawClassic(Canvas canvas, BridgeState s, int w, int h) {
-        text.setTextSize(dp(36));
+    private void drawMuteButton(Canvas canvas, RectF rect, boolean muted, String label) {
+        button.setColor(muted ? 0xFF5B2A38 : 0xFF223154);
+        canvas.drawRoundRect(rect, dp(12), dp(12), button);
+        text.setTextSize(dp(16));
         text.setColor(0xFFE8EEF8);
-        canvas.drawText(s.headline, dp(28), dp(100), text);
+        float tw = text.measureText(label);
+        canvas.drawText(label, rect.centerX() - tw / 2f, rect.top + rect.height() * 0.66f, text);
+    }
+
+    private void drawClassic(Canvas canvas, BridgeState s, int w, int h, float muteTop) {
+        text.setTextSize(dp(32));
+        text.setColor(0xFFE8EEF8);
+        canvas.drawText(s.headline, dp(22), dp(72), text);
         dim.setTextSize(dp(15));
-        canvas.drawText(s.detail, dp(28), dp(132), dim);
-        playRect.set(dp(28), dp(148), w - dp(28), dp(178));
+        canvas.drawText(s.detail, dp(22), dp(102), dim);
+        playRect.set(dp(22), dp(118), w - dp(22), dp(148));
         drawPlayMeter(canvas, s, w);
     }
 
-    private void drawHardware(Canvas canvas, BridgeState s, int w, int h) {
-        dim.setTextSize(dp(13));
-        String host = s.pcName.isEmpty() ? "电脑状态" : s.pcName;
-        String up = formatUptime(s.pcUptime);
-        String line = s.headline + "  ·  " + host + (up.isEmpty() ? "" : "  ·  " + up);
-        canvas.drawText(clip(line, rotateRect.left - dp(36)), dp(28), dp(88), dim);
-
+    private void drawHardware(Canvas canvas, BridgeState s, int w, int h, float muteTop) {
         float gap = dp(8);
-        float left = dp(22);
-        float right = w - dp(22);
-        float top = dp(98);
-        float bottom = muteRect.top - dp(36);
+        float left = dp(16);
+        float right = w - dp(16);
+        float top = dp(44);
+        float meterH = dp(18);
+        float bottom = muteTop - dp(8) - meterH;
         float cardH = bottom - top;
         float cardW = (right - left - gap * 3) / 4f;
         drawStatCard(canvas, left, top, cardW, cardH, "CPU",
@@ -172,10 +183,11 @@ public class StatusHudView extends View {
         drawStatCard(canvas, left + (cardW + gap) * 3, top, cardW, cardH, diskTitle,
                 formatPct(s.pcDisk), diskSub, diskFoot, s.pcDisk, Float.NaN);
 
-        dim.setTextSize(dp(13));
-        canvas.drawText("↓ " + formatRate(s.pcNetDown) + "   ↑ " + formatRate(s.pcNetUp),
-                dp(28), muteRect.top - dp(18), dim);
-        playRect.set(dp(220), muteRect.top - dp(32), w - dp(28), muteRect.top - dp(10));
+        dim.setTextSize(dp(12));
+        float meterTop = muteTop - meterH;
+        canvas.drawText("↓ " + formatRate(s.pcNetDown) + "  ↑ " + formatRate(s.pcNetUp),
+                dp(18), meterTop + dp(14), dim);
+        playRect.set(dp(210), meterTop, w - dp(18), muteTop - dp(4));
         drawPlayMeter(canvas, s, w);
     }
 
@@ -183,18 +195,18 @@ public class StatusHudView extends View {
             String title, String value, String sub, String foot, float usage, float temp) {
         tmpRect.set(x, y, x + cw, y + ch);
         canvas.drawRoundRect(tmpRect, dp(12), dp(12), cardPaint);
-        dim.setTextSize(dp(12));
-        canvas.drawText(title, x + dp(10), y + dp(16), dim);
+        dim.setTextSize(dp(13));
+        canvas.drawText(title, x + dp(10), y + dp(18), dim);
 
         int valueColor = meterColor(usage, temp);
         text.setColor(valueColor);
-        text.setTextSize(dp(24));
-        canvas.drawText(value, x + dp(10), y + dp(44), text);
+        text.setTextSize(dp(28));
+        canvas.drawText(value, x + dp(10), y + dp(52), text);
         text.setColor(0xFFE8EEF8);
 
         if (sub != null && !sub.isEmpty()) {
             dim.setTextSize(dp(11));
-            canvas.drawText(clip(sub, cw - dp(18)), x + dp(10), y + dp(60), dim);
+            canvas.drawText(clip(sub, cw - dp(18)), x + dp(10), y + dp(72), dim);
         }
         if (foot != null && !foot.isEmpty()) {
             dim.setTextSize(dp(11));
@@ -213,7 +225,7 @@ public class StatusHudView extends View {
     private void drawPlayMeter(Canvas canvas, BridgeState s, int w) {
         canvas.drawRoundRect(playRect, dp(10), dp(10), meterBg);
         float play = Math.max(0f, Math.min(1f, s.playLevel * 2.4f));
-        if (s.muted) {
+        if (s.spkMuted) {
             meter.setColor(0xFF5B6B88);
             play = 0.04f;
         } else if (play > 0.85f) {
@@ -246,9 +258,16 @@ public class StatusHudView extends View {
                 invalidate();
                 return true;
             }
-            if (muteRect.contains(x, y)) {
+            if (micMuteRect.contains(x, y)) {
                 if (listener != null) {
-                    listener.onMuteTap();
+                    listener.onMicMuteTap();
+                }
+                invalidate();
+                return true;
+            }
+            if (spkMuteRect.contains(x, y)) {
+                if (listener != null) {
+                    listener.onSpkMuteTap();
                 }
                 invalidate();
                 return true;

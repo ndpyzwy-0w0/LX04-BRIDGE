@@ -67,7 +67,7 @@ public class BridgeService extends Service {
             @Override
             public void onPlay(byte[] pcm, boolean muted) {
                 if (playback != null) {
-                    playback.push(pcm, muted || STATE.muted);
+                    playback.push(pcm, muted || STATE.spkMuted);
                     STATE.playLevel = playback.getPeak();
                 }
             }
@@ -82,12 +82,18 @@ public class BridgeService extends Service {
                     } else if (STATE.gain > 4f) {
                         STATE.gain = 4f;
                     }
-                } else if ("mute".equals(cmd)) {
-                    STATE.muted = true;
-                } else if ("unmute".equals(cmd)) {
-                    STATE.muted = false;
-                } else if ("toggle_mute".equals(cmd)) {
-                    STATE.muted = !STATE.muted;
+                } else if ("mute".equals(cmd) || "mute_mic".equals(cmd)) {
+                    STATE.micMuted = true;
+                } else if ("unmute".equals(cmd) || "unmute_mic".equals(cmd)) {
+                    STATE.micMuted = false;
+                } else if ("toggle_mute".equals(cmd) || "toggle_mic_mute".equals(cmd)) {
+                    STATE.micMuted = !STATE.micMuted;
+                } else if ("mute_spk".equals(cmd)) {
+                    STATE.spkMuted = true;
+                } else if ("unmute_spk".equals(cmd)) {
+                    STATE.spkMuted = false;
+                } else if ("toggle_spk_mute".equals(cmd)) {
+                    STATE.spkMuted = !STATE.spkMuted;
                 } else if ("start_mic".equals(cmd)) {
                     startMic();
                 } else if ("stop_mic".equals(cmd)) {
@@ -116,7 +122,7 @@ public class BridgeService extends Service {
     public int onStartCommand(Intent intent, int flags, int startId) {
         Watchdog.schedule(this);
         if (intent != null && "toggle_mute".equals(intent.getAction())) {
-            STATE.muted = !STATE.muted;
+            STATE.micMuted = !STATE.micMuted;
             refreshHeadline();
         }
         return START_STICKY;
@@ -146,17 +152,37 @@ public class BridgeService extends Service {
         return null;
     }
 
-    public static void toggleMute() {
-        STATE.muted = !STATE.muted;
-        if (STATE.clientConnected) {
-            if (STATE.muted) {
-                STATE.headline = "已静音";
-            } else if (STATE.recording) {
-                STATE.headline = "正在拾音";
-            } else {
-                STATE.headline = "电脑扬声器 \u2192 音箱";
-            }
+    public static void toggleMicMute() {
+        STATE.micMuted = !STATE.micMuted;
+        refreshHeadlineStatic();
+    }
+
+    public static void toggleSpkMute() {
+        STATE.spkMuted = !STATE.spkMuted;
+        refreshHeadlineStatic();
+    }
+
+    private static void refreshHeadlineStatic() {
+        if (!STATE.clientConnected) {
+            return;
         }
+        STATE.headline = muteHeadline();
+    }
+
+    private static String muteHeadline() {
+        if (STATE.micMuted && STATE.spkMuted) {
+            return "麦和喇叭已静音";
+        }
+        if (STATE.micMuted) {
+            return "麦克风已静音";
+        }
+        if (STATE.spkMuted) {
+            return "扬声器已静音";
+        }
+        if (STATE.recording) {
+            return "正在拾音";
+        }
+        return "电脑扬声器 → 音箱";
     }
 
     public static float musicVolume() {
@@ -279,12 +305,12 @@ public class BridgeService extends Service {
         STATE.level = STATE.level * 0.72f + peak * 0.28f;
         STATE.frames++;
         lastAudioMs = SystemClock.elapsedRealtime();
-        if (STATE.muted) {
+        if (STATE.micMuted) {
             java.util.Arrays.fill(pcm, 0, length, (byte) 0);
             STATE.level = 0f;
         }
         if (server != null) {
-            server.sendAudio(pcm, length, STATE.muted);
+            server.sendAudio(pcm, length, STATE.micMuted);
         }
         if (STATE.frames % 25 == 0) {
             refreshHeadline();
@@ -309,8 +335,8 @@ public class BridgeService extends Service {
                     : "请打开 USB 调试后启动电脑上位机";
             return;
         }
-        if (STATE.muted) {
-            STATE.headline = "已静音";
+        if (STATE.micMuted || STATE.spkMuted) {
+            STATE.headline = muteHeadline();
         } else if (STATE.recording) {
             STATE.headline = "正在拾音";
         } else {

@@ -7,7 +7,7 @@
 - 音箱采集双麦阵列里的麦克风，把 PCM 音频经 USB（ADB 隧道）送给电脑
 - 电脑上位机把麦克风灌进 [VB-CABLE](https://vb-audio.com/Cable/)，其它软件把 `CABLE Output` 选成麦克风
 - 电脑正在播放的声音经第二根虚拟线 [Hi-Fi Cable](https://vb-audio.com/Cable/) 环回，再送到音箱喇叭
-- 音箱屏幕显示：USB 是否插上、是否连上上位机、麦克风/扬声器电平、静音、采样率、丢帧
+- 音箱屏幕显示：USB 状态、电脑资源占用、麦克风/扬声器可分别静音
 - 连接后屏幕同时显示电脑 CPU / GPU 温度和使用率、内存、所选磁盘占用、网速（上位机可关、可选监测哪块盘）
 
 官方固件的 Micro USB **默认不能装第三方 APK**，也常被写成“不支持数据传输”。要用本项目，音箱需要已经能装普通 APK（社区官改 / 刷成 X04G / Lineage 等），并且使用 **能传数据的 Micro USB 线**（纯充电线不行）。
@@ -71,7 +71,7 @@ adb shell pm grant com.lx04.pcbridge android.permission.RECORD_AUDIO
 adb shell am start -n com.lx04.pcbridge/.MainActivity
 ```
 
-在音箱屏幕上应看到「等待 USB」或「USB 已连接」。点屏幕下方可静音。
+在音箱屏幕上应看到 USB 指示和电脑状态卡片。下方可分别静音麦克风或扬声器。
 
 ## 打开上位机
 

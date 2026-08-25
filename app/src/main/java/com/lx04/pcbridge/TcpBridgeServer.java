@@ -84,7 +84,9 @@ final class TcpBridgeServer {
             o.put("usbConnected", state.usbConnected);
             o.put("usbAdb", state.usbAdb);
             o.put("recording", state.recording);
-            o.put("muted", state.muted);
+            o.put("muted", state.micMuted);
+            o.put("micMuted", state.micMuted);
+            o.put("spkMuted", state.spkMuted);
             o.put("level", state.level);
             o.put("frames", state.frames);
             o.put("dropped", dropped);

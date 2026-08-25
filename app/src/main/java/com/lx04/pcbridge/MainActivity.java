@@ -32,8 +32,13 @@ public class MainActivity extends Activity {
         hud = new StatusHudView(this);
         hud.setListener(new StatusHudView.Listener() {
             @Override
-            public void onMuteTap() {
-                BridgeService.toggleMute();
+            public void onMicMuteTap() {
+                BridgeService.toggleMicMute();
+            }
+
+            @Override
+            public void onSpkMuteTap() {
+                BridgeService.toggleSpkMute();
             }
 
             @Override

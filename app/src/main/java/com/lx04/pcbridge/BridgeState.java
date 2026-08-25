@@ -5,7 +5,8 @@ final class BridgeState {
     volatile boolean usbAdb;
     volatile boolean clientConnected;
     volatile boolean recording;
-    volatile boolean muted;
+    volatile boolean micMuted;
+    volatile boolean spkMuted;
     volatile boolean permissionDenied;
     volatile float level;
     volatile float playLevel;
