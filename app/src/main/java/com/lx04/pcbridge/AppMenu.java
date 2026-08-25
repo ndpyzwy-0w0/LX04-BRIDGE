@@ -44,6 +44,7 @@ final class AppMenu {
     private boolean animating;
     private boolean light;
     private long lastAnimMs;
+    private long lastOpenMs;
     private VelocityTracker velocity;
 
     AppMenu(StatusHudView view) {
@@ -68,6 +69,37 @@ final class AppMenu {
         dragging = false;
         recycleVelocity();
         animateTo(0);
+        view.invalidate();
+    }
+
+    void handleBack() {
+        if (dragging || tracking) {
+            return;
+        }
+        if (page == PAGE_SETTINGS) {
+            page = PAGE_HUD;
+            view.invalidate();
+            return;
+        }
+        boolean open = offset > 1f || target > 1f;
+        if (open) {
+            if (SystemClock.uptimeMillis() - lastOpenMs < 500) {
+                return;
+            }
+            animateTo(0);
+            view.invalidate();
+            return;
+        }
+        openDrawer();
+    }
+
+    private void openDrawer() {
+        int w = view.getWidth();
+        if (w <= 0) {
+            w = 1;
+        }
+        drawerW = drawerWidth(w);
+        animateTo(drawerW);
         view.invalidate();
     }
 
@@ -131,9 +163,9 @@ final class AppMenu {
 
     private void drawHandle(Canvas canvas, int w, int h) {
         applyPanelColor();
-        float hh = dp(42);
-        handleRect.set(w - dp(8), h / 2f - hh / 2f, w + dp(6), h / 2f + hh / 2f);
-        canvas.drawRoundRect(handleRect, dp(6), dp(6), panel);
+        float hh = dp(56);
+        handleRect.set(w - dp(18), h / 2f - hh / 2f, w + dp(4), h / 2f + hh / 2f);
+        canvas.drawRoundRect(handleRect, dp(8), dp(8), panel);
     }
 
     private void drawSettings(Canvas canvas, int w, int h) {
@@ -218,7 +250,7 @@ final class AppMenu {
         animating = false;
         obtainVelocity().addMovement(event);
         drawerW = drawerWidth(w);
-        boolean edge = x >= w - edgeWidth(w);
+        boolean edge = x >= w - edgeWidth(w) || handleRect.contains(x, y);
         tracking = blocksHud() || edge;
         return tracking;
     }
@@ -326,6 +358,9 @@ final class AppMenu {
     private void animateTo(float value) {
         target = value;
         lastAnimMs = SystemClock.uptimeMillis();
+        if (value > 1f) {
+            lastOpenMs = lastAnimMs;
+        }
         animating = Math.abs(offset - target) > 1f;
         if (!animating) {
             offset = target;

@@ -8,6 +8,7 @@ import android.graphics.drawable.ColorDrawable;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.view.KeyEvent;
 import android.view.View;
 import android.view.WindowManager;
 
@@ -90,6 +91,40 @@ public class MainActivity extends Activity {
         super.onWindowFocusChanged(hasFocus);
         if (hasFocus) {
             hideSystemUi();
+        }
+    }
+
+    @Override
+    public boolean dispatchKeyEvent(KeyEvent event) {
+        if (event.getKeyCode() == KeyEvent.KEYCODE_BACK) {
+            if (event.getAction() == KeyEvent.ACTION_UP && event.getRepeatCount() == 0
+                    && !event.isCanceled()) {
+                consumeSystemExit();
+            }
+            return true;
+        }
+        return super.dispatchKeyEvent(event);
+    }
+
+    @Override
+    public void onBackPressed() {
+        consumeSystemExit();
+    }
+
+    @Override
+    public boolean moveTaskToBack(boolean nonRoot) {
+        consumeSystemExit();
+        return true;
+    }
+
+    @Override
+    public void finish() {
+        consumeSystemExit();
+    }
+
+    private void consumeSystemExit() {
+        if (hud != null) {
+            hud.handleBack();
         }
     }
 

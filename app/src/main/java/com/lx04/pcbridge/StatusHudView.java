@@ -186,6 +186,14 @@ public class StatusHudView extends View {
         }
     }
 
+    void handleBack() {
+        if (editor.isOpen()) {
+            editor.close();
+            return;
+        }
+        menu.handleBack();
+    }
+
     private void drawMuteButton(Canvas canvas, RectF rect, boolean muted, String label) {
         button.setColor(muted ? colButtonMute : colButton);
         canvas.drawRoundRect(rect, dp(12), dp(12), button);
