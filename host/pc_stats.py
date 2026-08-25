@@ -1,4 +1,10 @@
-"""Windows CPU / GPU / RAM / disk / network sample for the LX04 HUD."""
+"""Windows CPU / GPU / RAM / disk / network sample for the LX04 HUD.
+
+No extra overlay is required to ship the host. Occupancy comes from bundled
+psutil plus built-in Windows APIs. GPU numbers use the already-installed
+NVIDIA/AMD driver DLL when present. MSI Afterburner shared memory is optional
+and only improves CPU package temperature.
+"""
 from __future__ import annotations
 
 import ctypes
