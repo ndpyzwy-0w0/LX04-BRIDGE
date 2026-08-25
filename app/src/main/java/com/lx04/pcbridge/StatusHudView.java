@@ -31,6 +31,15 @@ public class StatusHudView extends View {
     private final RectF spkMuteRect = new RectF();
     private final RectF tmpRect = new RectF();
     private float pulse;
+    private boolean lightTheme;
+    private int colText;
+    private int colButton;
+    private int colButtonMute;
+    private int colPlayMute;
+
+    static int windowColor(boolean light) {
+        return light ? 0xFFF3F5F8 : 0xFF0B1220;
+    }
 
     public StatusHudView(Context context) {
         super(context);
@@ -48,23 +57,47 @@ public class StatusHudView extends View {
 
     private void init() {
         setClickable(true);
-        bg.setColor(0xFF0B1220);
-        panel.setColor(0xFF141C2E);
-        cardPaint.setColor(0xFF1A2438);
-        accent.setColor(0xFF3DDC97);
-        meterBg.setColor(0xFF1E2A44);
-        meter.setColor(0xFF3DDC97);
-        button.setColor(0xFF223154);
-        text.setColor(0xFFE8EEF8);
         text.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
-        dim.setColor(0xFF8FA0BE);
         dim.setTypeface(Typeface.create("sans-serif", Typeface.NORMAL));
+        applyPalette(false);
+    }
+
+    private void applyPalette(boolean light) {
+        lightTheme = light;
+        if (light) {
+            bg.setColor(0xFFF3F5F8);
+            panel.setColor(0xFFFFFFFF);
+            cardPaint.setColor(0xFFE8EEF5);
+            meterBg.setColor(0xFFD5DDE8);
+            colButton = 0xFFD3DCE8;
+            colButtonMute = 0xFFE9C9CF;
+            colText = 0xFF1A2438;
+            dim.setColor(0xFF5A6B84);
+            colPlayMute = 0xFF9AABC0;
+        } else {
+            bg.setColor(0xFF0B1220);
+            panel.setColor(0xFF141C2E);
+            cardPaint.setColor(0xFF1A2438);
+            meterBg.setColor(0xFF1E2A44);
+            colButton = 0xFF223154;
+            colButtonMute = 0xFF5B2A38;
+            colText = 0xFFE8EEF8;
+            dim.setColor(0xFF8FA0BE);
+            colPlayMute = 0xFF5B6B88;
+        }
+        button.setColor(colButton);
+        text.setColor(colText);
+        meter.setColor(0xFF3DDC97);
+        accent.setColor(0xFF3DDC97);
     }
 
     @Override
     protected void onDraw(Canvas canvas) {
         super.onDraw(canvas);
         BridgeState s = BridgeService.STATE;
+        if (s.lightTheme != lightTheme) {
+            applyPalette(s.lightTheme);
+        }
         int w = getWidth();
         int h = getHeight();
         canvas.drawRect(0, 0, w, h, bg);
@@ -115,17 +148,17 @@ public class StatusHudView extends View {
     }
 
     private void drawMuteButton(Canvas canvas, RectF rect, boolean muted, String label) {
-        button.setColor(muted ? 0xFF5B2A38 : 0xFF223154);
+        button.setColor(muted ? colButtonMute : colButton);
         canvas.drawRoundRect(rect, dp(12), dp(12), button);
         text.setTextSize(dp(16));
-        text.setColor(0xFFE8EEF8);
+        text.setColor(colText);
         float tw = text.measureText(label);
         canvas.drawText(label, rect.centerX() - tw / 2f, rect.top + rect.height() * 0.66f, text);
     }
 
     private void drawClassic(Canvas canvas, BridgeState s, int w, int h, float muteTop) {
         text.setTextSize(dp(32));
-        text.setColor(0xFFE8EEF8);
+        text.setColor(colText);
         canvas.drawText(s.headline, dp(22), dp(72), text);
         dim.setTextSize(dp(15));
         canvas.drawText(s.detail, dp(22), dp(102), dim);
@@ -181,7 +214,7 @@ public class StatusHudView extends View {
         text.setColor(valueColor);
         text.setTextSize(dp(28));
         canvas.drawText(value, x + dp(10), y + dp(52), text);
-        text.setColor(0xFFE8EEF8);
+        text.setColor(colText);
 
         if (sub != null && !sub.isEmpty()) {
             dim.setTextSize(dp(11));
@@ -205,7 +238,7 @@ public class StatusHudView extends View {
         canvas.drawRoundRect(playRect, dp(10), dp(10), meterBg);
         float play = Math.max(0f, Math.min(1f, s.playLevel * 2.4f));
         if (s.spkMuted) {
-            meter.setColor(0xFF5B6B88);
+            meter.setColor(colPlayMute);
             play = 0.04f;
         } else if (play > 0.85f) {
             meter.setColor(0xFFFF5C7A);

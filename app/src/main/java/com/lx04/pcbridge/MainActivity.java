@@ -4,6 +4,7 @@ import android.Manifest;
 import android.app.Activity;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.graphics.drawable.ColorDrawable;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -13,6 +14,7 @@ import android.view.WindowManager;
 public class MainActivity extends Activity {
     private StatusHudView hud;
     private boolean appliedUpsideDown;
+    private boolean appliedLightTheme;
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final Runnable tick = new Runnable() {
         @Override
@@ -21,6 +23,10 @@ public class MainActivity extends Activity {
                 boolean want = BridgeService.STATE.upsideDown;
                 if (want != appliedUpsideDown) {
                     applyDisplayRotation(want);
+                }
+                boolean light = BridgeService.STATE.lightTheme;
+                if (light != appliedLightTheme) {
+                    applyChromeColors(light);
                 }
                 hud.invalidate();
             }
@@ -48,7 +54,9 @@ public class MainActivity extends Activity {
         });
         setContentView(hud);
         BridgeService.STATE.upsideDown = DisplayPrefs.isUpsideDown(this);
+        BridgeService.STATE.lightTheme = DisplayPrefs.isLightTheme(this);
         applyDisplayRotation(BridgeService.STATE.upsideDown);
+        applyChromeColors(BridgeService.STATE.lightTheme);
         hideSystemUi();
         ensurePermissionAndStart();
     }
@@ -101,6 +109,14 @@ public class MainActivity extends Activity {
             hud.setPivotY(hud.getHeight() / 2f);
             hud.setRotation(upsideDown ? 180f : 0f);
         });
+    }
+
+    private void applyChromeColors(boolean lightTheme) {
+        appliedLightTheme = lightTheme;
+        int color = StatusHudView.windowColor(lightTheme);
+        getWindow().setBackgroundDrawable(new ColorDrawable(color));
+        getWindow().setStatusBarColor(color);
+        getWindow().setNavigationBarColor(color);
     }
 
     private void hideSystemUi() {

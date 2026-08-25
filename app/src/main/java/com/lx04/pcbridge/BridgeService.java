@@ -30,6 +30,7 @@ public class BridgeService extends Service {
         STATE.androidRelease = android.os.Build.VERSION.RELEASE;
         STATE.apkVersion = AppVersion.read(this);
         STATE.upsideDown = DisplayPrefs.isUpsideDown(this);
+        STATE.lightTheme = DisplayPrefs.isLightTheme(this);
         startAsForeground();
         PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
         if (pm != null) {
@@ -104,6 +105,10 @@ public class BridgeService extends Service {
                 } else if ("upside_down".equals(cmd)) {
                     STATE.upsideDown = json.optBoolean("on", !STATE.upsideDown);
                     DisplayPrefs.setUpsideDown(BridgeService.this, STATE.upsideDown);
+                    return;
+                } else if ("light_theme".equals(cmd)) {
+                    STATE.lightTheme = json.optBoolean("on", !STATE.lightTheme);
+                    DisplayPrefs.setLightTheme(BridgeService.this, STATE.lightTheme);
                     return;
                 } else if ("pc_stats".equals(cmd)) {
                     applyPcStats(json);
