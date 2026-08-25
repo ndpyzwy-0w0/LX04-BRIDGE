@@ -162,6 +162,70 @@ def _read_exact(sock: socket.socket, size: int) -> bytes:
     return bytes(chunks)
 
 
+class ChoiceDrop:
+    """Menubutton dropdown; ttk Combobox popdowns close on mouse-up on this UI."""
+
+    def __init__(
+        self,
+        parent: tk.Misc,
+        variable: tk.StringVar,
+        command,
+        bg: str,
+        fg: str,
+        *,
+        padx: int = 8,
+        expand: bool = True,
+        width: int | None = None,
+    ) -> None:
+        self.variable = variable
+        self.command = command
+        self.labels: list[str] = []
+        self.button = ttk.Menubutton(parent, textvariable=variable, style="Drop.TMenubutton", direction="below")
+        if width is not None:
+            self.button.configure(width=width)
+        self.menu = tk.Menu(
+            self.button,
+            tearoff=False,
+            font=("Segoe UI", 10),
+            bg=bg,
+            fg=fg,
+            activebackground="#C5E9D6",
+            activeforeground=fg,
+            relief="solid",
+            borderwidth=1,
+        )
+        self.button["menu"] = self.menu
+        pack: dict[str, object] = {"side": "left", "padx": padx}
+        if expand:
+            pack.update(fill="x", expand=True)
+        self.button.pack(**pack)
+        self.button.bind("<MouseWheel>", self._on_wheel)
+
+    def set_labels(self, labels: list[str]) -> None:
+        self.labels = list(labels)
+        self.menu.delete(0, "end")
+        for label in self.labels:
+            self.menu.add_radiobutton(
+                label=label,
+                variable=self.variable,
+                value=label,
+                command=self.command,
+            )
+
+    def _on_wheel(self, event: tk.Event) -> str:
+        if not self.labels:
+            return "break"
+        current = self.variable.get()
+        try:
+            idx = self.labels.index(current)
+        except ValueError:
+            idx = 0
+        idx = (idx + (-1 if event.delta > 0 else 1)) % len(self.labels)
+        self.variable.set(self.labels[idx])
+        self.command()
+        return "break"
+
+
 class HostApp:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
@@ -185,7 +249,6 @@ class HostApp:
         self.pc_stats_enabled = tk.BooleanVar(value=True)
         self.disk_var = tk.StringVar()
         self._saved_disk = ""
-        self._disk_labels: list[str] = []
         self.inject_var = tk.StringVar()
         self.spk_dev_var = tk.StringVar()
         self._inject_devices: list[tuple[str, str | int, str]] = []
@@ -250,7 +313,7 @@ class HostApp:
         self.root.option_add("*TCombobox*Listbox.selectForeground", "#0B1220")
         self.root.option_add("*TCombobox*Listbox.font", "Segoe UI 10")
         style.configure(
-            "Disk.TMenubutton",
+            "Drop.TMenubutton",
             background=combo_bg,
             foreground=combo_fg,
             arrowcolor=combo_fg,
@@ -259,7 +322,7 @@ class HostApp:
             relief="raised",
         )
         style.map(
-            "Disk.TMenubutton",
+            "Drop.TMenubutton",
             background=[("active", combo_bg), ("pressed", combo_bg)],
             foreground=[("active", combo_fg)],
             arrowcolor=[("active", combo_fg)],
@@ -279,8 +342,9 @@ class HostApp:
         row.pack(fill="x", padx=16, pady=12)
         ttk.Label(row, text="USB 设备", style="Card.TLabel").pack(side="left")
         self.device_var = tk.StringVar()
-        self.device_combo = ttk.Combobox(row, textvariable=self.device_var, width=28, state="readonly")
-        self.device_combo.pack(side="left", padx=8)
+        self.device_drop = ChoiceDrop(
+            row, self.device_var, lambda: None, combo_bg, combo_fg, expand=False, width=28
+        )
         ttk.Button(row, text="刷新", command=self.refresh_devices).pack(side="left")
         ttk.Button(row, text="连接", command=self.connect).pack(side="left", padx=6)
         ttk.Button(row, text="断开", command=self.disconnect).pack(side="left")
@@ -300,9 +364,7 @@ class HostApp:
             highlightthickness=0,
             font=("Segoe UI", 10),
         ).pack(side="left")
-        self.inject_combo = ttk.Combobox(mic_row, textvariable=self.inject_var, width=52, state="readonly")
-        self.inject_combo.pack(side="left", padx=8, fill="x", expand=True)
-        self.inject_combo.bind("<<ComboboxSelected>>", lambda _e: self._on_mic_route_change())
+        self.inject_drop = ChoiceDrop(mic_row, self.inject_var, self._on_mic_route_change, combo_bg, combo_fg)
 
         spk_row = ttk.Frame(card, style="Card.TFrame")
         spk_row.pack(fill="x", padx=16, pady=(0, 8))
@@ -319,9 +381,7 @@ class HostApp:
             highlightthickness=0,
             font=("Segoe UI", 10),
         ).pack(side="left")
-        self.spk_combo = ttk.Combobox(spk_row, textvariable=self.spk_dev_var, width=36, state="readonly")
-        self.spk_combo.pack(side="left", padx=8, fill="x", expand=True)
-        self.spk_combo.bind("<<ComboboxSelected>>", lambda _e: self._on_spk_route_change())
+        self.spk_drop = ChoiceDrop(spk_row, self.spk_dev_var, self._on_spk_route_change, combo_bg, combo_fg)
         tk.Checkbutton(
             spk_row,
             text="设为默认播放",
@@ -373,26 +433,9 @@ class HostApp:
             font=("Segoe UI", 10),
         ).pack(side="left")
         ttk.Label(stats_row, text="磁盘", style="Card.TLabel").pack(side="left", padx=(12, 4))
-        self.disk_btn = ttk.Menubutton(
-            stats_row,
-            textvariable=self.disk_var,
-            style="Disk.TMenubutton",
-            direction="below",
+        self.disk_drop = ChoiceDrop(
+            stats_row, self.disk_var, self._on_disk_change, combo_bg, combo_fg, padx=0
         )
-        self.disk_menu = tk.Menu(
-            self.disk_btn,
-            tearoff=False,
-            font=("Segoe UI", 10),
-            bg=combo_bg,
-            fg=combo_fg,
-            activebackground="#C5E9D6",
-            activeforeground=combo_fg,
-            relief="solid",
-            borderwidth=1,
-        )
-        self.disk_btn["menu"] = self.disk_menu
-        self.disk_btn.pack(side="left", fill="x", expand=True)
-        self.disk_btn.bind("<MouseWheel>", self._on_disk_wheel)
 
         row2 = ttk.Frame(card, style="Card.TFrame")
         row2.pack(fill="x", padx=16, pady=(0, 8))
@@ -529,14 +572,14 @@ class HostApp:
             inject_items.append(("sd", index, name))
         self._inject_devices = inject_items
         inject_labels = [label for _kind, _handle, label in inject_items]
-        self.inject_combo["values"] = inject_labels
+        self.inject_drop.set_labels(inject_labels)
         preferred = inject_labels[0] if inject_labels else None
         chosen = _pick_label(inject_labels, previous_inject, preferred)
         if chosen:
             self.inject_var.set(chosen)
         self._spk_devices = win_endpoint.list_render_endpoints()
         spk_labels = [name for _device_id, name in self._spk_devices]
-        self.spk_combo["values"] = spk_labels
+        self.spk_drop.set_labels(spk_labels)
         hifi = next((name for _device_id, name in self._spk_devices if hifi_cable.is_hifi_render(name)), None)
         chosen_spk = _pick_label(spk_labels, previous_spk, hifi)
         if chosen_spk:
@@ -591,15 +634,7 @@ class HostApp:
         previous = self._selected_disk()
         items = pc_stats.list_disks()
         labels = [pc_stats.disk_choice_label(item) for item in items]
-        self._disk_labels = labels
-        self.disk_menu.delete(0, "end")
-        for label in labels:
-            self.disk_menu.add_radiobutton(
-                label=label,
-                variable=self.disk_var,
-                value=label,
-                command=self._on_disk_change,
-            )
+        self.disk_drop.set_labels(labels)
         chosen = ""
         want = (previous or getattr(self, "_saved_disk", "") or "").upper()[:2]
         for item, label in zip(items, labels):
@@ -611,20 +646,6 @@ class HostApp:
             chosen = system or (labels[0] if labels else "")
         if chosen:
             self.disk_var.set(chosen)
-
-    def _on_disk_wheel(self, event: tk.Event) -> str:
-        labels = self._disk_labels
-        if not labels:
-            return "break"
-        current = self.disk_var.get()
-        try:
-            idx = labels.index(current)
-        except ValueError:
-            idx = 0
-        idx = (idx + (-1 if event.delta > 0 else 1)) % len(labels)
-        self.disk_var.set(labels[idx])
-        self._on_disk_change()
-        return "break"
 
     def _on_pc_stats_change(self) -> None:
         if not self._routes_ready:
@@ -876,7 +897,7 @@ class HostApp:
 
     def refresh_devices(self) -> None:
         if not self.adb:
-            self.device_combo["values"] = ["未找到 adb"]
+            self.device_drop.set_labels(["未找到 adb"])
             self.device_var.set("未找到 adb")
             self._refresh_disks()
             return
@@ -886,7 +907,7 @@ class HostApp:
             self._log("读取 adb 设备失败: " + str(exc))
             self.devices = []
         labels = self.devices or ["没有 USB 设备（检查数据线 / USB 调试）"]
-        self.device_combo["values"] = labels
+        self.device_drop.set_labels(labels)
         self.device_var.set(labels[0])
         self._log("USB 设备: " + (", ".join(self.devices) if self.devices else "无"))
         self.refresh_audio_devices(log=False)
