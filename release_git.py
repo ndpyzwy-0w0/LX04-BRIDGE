@@ -1,0 +1,51 @@
+"""Local git snapshot after a usable host or APK build."""
+from __future__ import annotations
+
+import subprocess
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent
+
+COMMIT_PATHS = [
+    "VERSION.txt",
+    "README.md",
+    "build_host_exe.py",
+    "build_apk.py",
+    "release_git.py",
+    ".gitignore",
+    ".cursor/rules",
+    "app",
+    "host",
+    "protocol.md",
+    "local.properties.example",
+    "dist/LX04-PC-Bridge-Host.exe",
+]
+
+
+def commit_usable_version(version: int, summary: str = "") -> bool:
+    """Commit source (+ current host EXE when present). Returns True if a commit was created."""
+    if not (ROOT / ".git").is_dir():
+        print("Not a git repo; skip commit.")
+        return False
+    try:
+        subprocess.check_call(["git", "add", "--", *COMMIT_PATHS], cwd=ROOT)
+        staged = subprocess.check_output(
+            ["git", "diff", "--cached", "--name-only"],
+            cwd=ROOT,
+            text=True,
+        ).strip()
+        if not staged:
+            print("Nothing to commit.")
+            return False
+        why = (summary or "snapshot source and current host EXE").strip()
+        message = (
+            f"Release v{version}: {why}\n"
+            "\n"
+            "Keep versioned dist/LX04-PC-Bridge-Host-vN.exe on disk only."
+        )
+        subprocess.check_call(["git", "commit", "-m", message], cwd=ROOT)
+        print("Committed git snapshot for v" + str(version))
+        return True
+    except subprocess.CalledProcessError as exc:
+        print("Git commit skipped:", exc)
+        return False
