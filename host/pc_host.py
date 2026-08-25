@@ -26,6 +26,7 @@ if not getattr(sys, "frozen", False) and str(HOST_DIR) not in sys.path:
 
 import adb_usb
 import hifi_cable
+import pc_stats
 import protocol
 import vb_cable
 import win_endpoint
@@ -181,6 +182,7 @@ class HostApp:
         self.spk_enabled = tk.BooleanVar(value=False)
         self.set_default_spk = tk.BooleanVar(value=True)
         self.volume_sync = tk.BooleanVar(value=False)
+        self.pc_stats_enabled = tk.BooleanVar(value=True)
         self.inject_var = tk.StringVar()
         self.spk_dev_var = tk.StringVar()
         self._inject_devices: list[tuple[str, str | int, str]] = []
@@ -191,7 +193,10 @@ class HostApp:
         self._pc_muted = False
         self._vol_ignore_pc_until = 0.0
         self._vol_ignore_spk_until = 0.0
+        self._stats_ticks = 0
+        self._stats_logged = False
         self._build()
+        threading.Thread(target=pc_stats.snapshot, daemon=True).start()
         self._load_routes()
         self.refresh_devices()
         self.refresh_audio_devices()
@@ -334,6 +339,27 @@ class HostApp:
             style="CardDim.TLabel",
         ).pack(side="left", padx=8)
 
+        stats_row = ttk.Frame(card, style="Card.TFrame")
+        stats_row.pack(fill="x", padx=16, pady=(0, 8))
+        tk.Checkbutton(
+            stats_row,
+            text="音箱显示电脑状态",
+            variable=self.pc_stats_enabled,
+            command=self._on_pc_stats_change,
+            bg=PANEL,
+            fg=TEXT,
+            selectcolor="#1E2A44",
+            activebackground=PANEL,
+            activeforeground=TEXT,
+            highlightthickness=0,
+            font=("Segoe UI", 10),
+        ).pack(side="left")
+        ttk.Label(
+            stats_row,
+            text="CPU / GPU 温度和使用率、内存、磁盘、网速会出现在音箱屏幕上。",
+            style="CardDim.TLabel",
+        ).pack(side="left", padx=8)
+
         row2 = ttk.Frame(card, style="Card.TFrame")
         row2.pack(fill="x", padx=16, pady=(0, 8))
         ttk.Button(row2, text="试音", command=self._on_test_tone).pack(side="left")
@@ -382,7 +408,9 @@ class HostApp:
         self.meter.pack(fill="x", padx=16, pady=(0, 8))
         ttk.Label(card, text="扬声器", style="CardDim.TLabel").pack(anchor="w", padx=16)
         self.spk_meter = tk.Canvas(card, height=22, bg="#1E2A44", highlightthickness=0)
-        self.spk_meter.pack(fill="x", padx=16, pady=(0, 16))
+        self.spk_meter.pack(fill="x", padx=16, pady=(0, 8))
+        self.pc_line = ttk.Label(card, text="电脑状态：连接音箱后显示在音箱屏幕上。", style="CardDim.TLabel")
+        self.pc_line.pack(anchor="w", padx=16, pady=(0, 16))
 
         self.log = tk.Text(
             self.root,
@@ -427,6 +455,7 @@ class HostApp:
         self.spk_enabled.set(bool(data.get("spk_enabled", False)))
         self.set_default_spk.set(bool(data.get("set_default_spk", True)))
         self.volume_sync.set(bool(data.get("volume_sync", False)))
+        self.pc_stats_enabled.set(bool(data.get("pc_stats", True)))
         self._saved_inject = str(data.get("inject") or "")
         self._saved_spk = str(data.get("speaker") or "")
 
@@ -436,6 +465,7 @@ class HostApp:
             "spk_enabled": bool(self.spk_enabled.get()),
             "set_default_spk": bool(self.set_default_spk.get()),
             "volume_sync": bool(self.volume_sync.get()),
+            "pc_stats": bool(self.pc_stats_enabled.get()),
             "inject": self.inject_var.get(),
             "speaker": self.spk_dev_var.get(),
         }
@@ -501,6 +531,35 @@ class HostApp:
             self._apply_speaker_route()
         except Exception as exc:
             self._log("切换扬声器通路失败: " + str(exc))
+
+    def _on_pc_stats_change(self) -> None:
+        if not self._routes_ready:
+            return
+        self._save_routes()
+        if not self.pc_stats_enabled.get():
+            self.pc_line.configure(text="电脑状态：已关闭，音箱屏幕只显示桥接信息。")
+            return
+        if self.connected:
+            self._push_pc_stats(force=True)
+
+    def _push_pc_stats(self, force: bool = False) -> None:
+        if not self.connected or not self.pc_stats_enabled.get():
+            return
+        try:
+            snap = pc_stats.snapshot()
+            payload = {key: value for key, value in snap.items() if value is not None and value != ""}
+            self.client.send_control("pc_stats", **payload)
+            self.pc_line.configure(text=pc_stats.format_line(snap))
+            if not self._stats_logged:
+                self._stats_logged = True
+                extra = ""
+                if "cpuT" not in payload:
+                    extra = "（CPU 温度未读到：开着 MSI Afterburner 时更准）"
+                self._log("已向音箱发送电脑状态" + extra)
+        except Exception as exc:
+            self.pc_line.configure(text="电脑状态读取失败: " + str(exc))
+            if force:
+                self._log("电脑状态: " + str(exc))
 
     def _on_volume_sync_change(self) -> None:
         if not self._routes_ready:
@@ -765,6 +824,7 @@ class HostApp:
             self.client.send_control("gain", gain=round(self.sink.gain, 3))
             if self.volume_sync.get():
                 self._push_pc_volume(force=True)
+            self._push_pc_stats(force=True)
             if self.spk_enabled.get():
                 self._apply_speaker_route()
             else:
@@ -810,6 +870,7 @@ class HostApp:
         self.sink.stop()
         self._restore_render()
         self.connected = False
+        self._stats_logged = False
         if self.adb and self._serial:
             try:
                 self._log(adb_usb.release_speaker_mic(self.adb, self._serial))
@@ -882,6 +943,7 @@ class HostApp:
             self.client.send_control("gain", gain=round(self.sink.gain, 3))
             if self.volume_sync.get():
                 self._push_pc_volume(force=True)
+            self._push_pc_stats(force=True)
         except Exception as exc:
             self._log("重连后恢复通路失败: " + str(exc))
 
@@ -1006,6 +1068,10 @@ class HostApp:
         if not self.loopback.running():
             self.play_peak *= 0.82
         self._push_pc_volume()
+        self._stats_ticks += 1
+        if self._stats_ticks >= 12:
+            self._stats_ticks = 0
+            self._push_pc_stats()
         self.root.after(80, self._tick)
 
     def _draw_meter(self, canvas: tk.Canvas, level: float) -> None:
