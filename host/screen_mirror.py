@@ -102,6 +102,11 @@ MONITORENUMPROC = ctypes.WINFUNCTYPE(
     wintypes.LPARAM,
 )
 
+try:
+    user32.SetThreadDpiAwarenessContext.argtypes = [ctypes.c_void_p]
+    user32.SetThreadDpiAwarenessContext.restype = ctypes.c_void_p
+except AttributeError:
+    pass
 user32.EnumDisplayMonitors.argtypes = [wintypes.HDC, ctypes.c_void_p, MONITORENUMPROC, wintypes.LPARAM]
 user32.GetMonitorInfoW.argtypes = [wintypes.HMONITOR, ctypes.POINTER(MONITORINFOEXW)]
 user32.GetDC.argtypes = [wintypes.HWND]
@@ -148,6 +153,8 @@ _gdiplus_lock = threading.Lock()
 
 
 def _thread_dpi() -> None:
+    """Per-monitor DPI for capture threads only. Never call this on the Tk UI thread:
+    changing awareness after Tk() creates a window detaches the frame from the widgets."""
     try:
         user32.SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2)
     except Exception:
@@ -182,8 +189,7 @@ class Monitor:
         return f"{self.index}  {self.width}×{self.height}{tag}"
 
 
-def list_monitors() -> list[Monitor]:
-    _thread_dpi()
+def _enum_monitors() -> list[Monitor]:
     found: list[Monitor] = []
 
     def _enum(hmon, _hdc, _rect, _lparam):
@@ -213,6 +219,29 @@ def list_monitors() -> list[Monitor]:
     return found
 
 
+def list_monitors() -> list[Monitor]:
+    if threading.current_thread() is not threading.main_thread():
+        _thread_dpi()
+        return _enum_monitors()
+    box: list[object] = []
+
+    def worker() -> None:
+        try:
+            _thread_dpi()
+            box.append(_enum_monitors())
+        except BaseException as exc:
+            box.append(exc)
+
+    thread = threading.Thread(target=worker, daemon=True)
+    thread.start()
+    thread.join(timeout=2.0)
+    if not box:
+        return []
+    if isinstance(box[0], BaseException):
+        raise box[0]
+    return list(box[0])  # type: ignore[arg-type]
+
+
 def pick_monitor(monitors: list[Monitor], saved_key: str = "") -> Monitor | None:
     if not monitors:
         return None
@@ -230,7 +259,6 @@ def pick_monitor(monitors: list[Monitor], saved_key: str = "") -> Monitor | None
 
 
 def capture_jpeg(monitor: Monitor, quality: int = JPEG_QUALITY) -> bytes:
-    _thread_dpi()
     _ensure_gdiplus()
     src_dc = user32.GetDC(None)
     if not src_dc:
@@ -375,6 +403,7 @@ class ScreenSender:
             thread.join(timeout=1.2)
 
     def _loop(self, key: str) -> None:
+        _thread_dpi()
         while self._alive:
             started = time.monotonic()
             try:
