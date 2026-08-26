@@ -12,16 +12,16 @@ COLORONCOLOR = 3
 MONITORINFOF_PRIMARY = 1
 CCHDEVICENAME = 32
 ENCODER_PARAMETER_LONG = 4
-JPEG_QUALITY = 34
-JPEG_QUALITY_SMALL = 24
-MAX_JPEG = 56 * 1024
+JPEG_QUALITY = 16
+JPEG_QUALITY_SMALL = 12
+MAX_JPEG = 28 * 1024
 TARGET_W = 800
 TARGET_H = 480
-FRAME_INTERVAL = 0.05
-FRAME_INTERVAL_SLOW = 0.12
+FRAME_INTERVAL = 0.07
+FRAME_INTERVAL_SLOW = 0.14
 MONITOR_REFRESH = 2.0
 GRABBER_REOPEN_FRAMES = 400
-STALE_FRAME_S = 0.07
+ACK_WAIT_S = 0.12
 
 user32 = ctypes.WinDLL("user32", use_last_error=True)
 gdi32 = ctypes.WinDLL("gdi32", use_last_error=True)
@@ -502,6 +502,7 @@ class ScreenSender:
         self._latest: bytes | None = None
         self._latest_at = 0.0
         self._new_frame = threading.Event()
+        self._ack = threading.Event()
         self._send_s = FRAME_INTERVAL
         self.monitor_key = ""
         self.title = ""
@@ -526,6 +527,7 @@ class ScreenSender:
             self._latest = None
             self._latest_at = 0.0
         self._new_frame.clear()
+        self._ack.clear()
         self._alive = True
         self._capture_thread = threading.Thread(
             target=self._capture_loop, args=(chosen.key,), daemon=True, name="lx04-mirror-cap"
@@ -539,6 +541,7 @@ class ScreenSender:
 
     def stop(self) -> None:
         self._alive = False
+        self._ack.set()
         self._new_frame.set()
         threads = [self._capture_thread, self._send_thread]
         self._capture_thread = None
@@ -548,6 +551,9 @@ class ScreenSender:
         for thread in threads:
             if thread is not None and thread.is_alive() and thread is not threading.current_thread():
                 thread.join(timeout=1.0)
+
+    def note_ack(self) -> None:
+        self._ack.set()
 
     def _put(self, jpeg: bytes) -> None:
         with self._slot:
@@ -587,7 +593,7 @@ class ScreenSender:
                             self.title = chosen.label()
                     if chosen is None:
                         raise RuntimeError("显示器已断开")
-                    quality = JPEG_QUALITY_SMALL if self._send_s > 0.055 else None
+                    quality = JPEG_QUALITY_SMALL if self._send_s > 0.08 else None
                     jpeg = grabber.grab(chosen, quality)
                     if self._alive and jpeg:
                         self._put(jpeg)
@@ -612,17 +618,18 @@ class ScreenSender:
         while self._alive:
             self._new_frame.wait(timeout=0.2)
             self._new_frame.clear()
-            jpeg, captured_at = self._take()
+            jpeg, _captured_at = self._take()
             if not jpeg or not self._alive:
                 continue
-            newer, newer_at = self._take()
+            newer, _newer_at = self._take()
             if newer is not None:
-                jpeg, captured_at = newer, newer_at
-            if time.monotonic() - captured_at > STALE_FRAME_S:
-                continue
+                jpeg = newer
+            self._ack.clear()
             t0 = time.monotonic()
             try:
                 self._send_jpeg(jpeg)
             except Exception as exc:
                 self.error = str(exc)
+            if self._alive:
+                self._ack.wait(timeout=ACK_WAIT_S)
             self._send_s = self._send_s * 0.65 + (time.monotonic() - t0) * 0.35
