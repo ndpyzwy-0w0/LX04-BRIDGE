@@ -16,7 +16,9 @@ final class ScreenMirror {
     private final Paint paint = new Paint();
     private final RectF dest = new RectF();
     private final BitmapFactory.Options options = new BitmapFactory.Options();
-    private Bitmap bitmap;
+    private final byte[] decodeScratch = new byte[32 * 1024];
+    private Bitmap shown;
+    private Bitmap scratch;
     private long frameAt;
     private byte[] pending;
     private Thread decoder;
@@ -27,6 +29,8 @@ final class ScreenMirror {
         options.inPreferredConfig = Bitmap.Config.RGB_565;
         options.inDither = false;
         options.inScaled = false;
+        options.inMutable = true;
+        options.inTempStorage = decodeScratch;
         paint.setFilterBitmap(false);
     }
 
@@ -61,34 +65,35 @@ final class ScreenMirror {
             }
         }
         synchronized (lock) {
-            if (bitmap != null) {
-                bitmap.recycle();
-                bitmap = null;
-            }
+            recycle(shown);
+            recycle(scratch);
+            shown = null;
+            scratch = null;
             frameAt = 0;
         }
     }
 
     boolean hasFrame() {
         synchronized (lock) {
-            return bitmap != null && !bitmap.isRecycled();
+            return shown != null && !shown.isRecycled();
         }
     }
 
     boolean stale() {
-        long at = frameAt;
-        return at != 0 && SystemClock.elapsedRealtime() - at > 1500;
+        synchronized (lock) {
+            return frameAt != 0 && SystemClock.elapsedRealtime() - frameAt > 1500;
+        }
     }
 
     void draw(Canvas canvas, int w, int h) {
         synchronized (lock) {
-            if (bitmap == null || bitmap.isRecycled()) {
+            if (shown == null || shown.isRecycled()) {
                 return;
             }
             dest.set(0, 0, w, h);
-            boolean scale = bitmap.getWidth() != w || bitmap.getHeight() != h;
+            boolean scale = shown.getWidth() != w || shown.getHeight() != h;
             paint.setFilterBitmap(scale);
-            canvas.drawBitmap(bitmap, null, dest, paint);
+            canvas.drawBitmap(shown, null, dest, paint);
         }
     }
 
@@ -120,30 +125,47 @@ final class ScreenMirror {
             if (!running || jpeg == null) {
                 continue;
             }
-            Bitmap next = BitmapFactory.decodeByteArray(jpeg, 0, jpeg.length, options);
-            if (next == null) {
-                continue;
+            Bitmap reuse;
+            synchronized (lock) {
+                reuse = scratch;
             }
-            if (!running) {
-                next.recycle();
+            options.inBitmap = (reuse != null && !reuse.isRecycled() && reuse.isMutable()) ? reuse : null;
+            Bitmap decoded = BitmapFactory.decodeByteArray(jpeg, 0, jpeg.length, options);
+            if (decoded == null && options.inBitmap != null) {
+                options.inBitmap = null;
+                decoded = BitmapFactory.decodeByteArray(jpeg, 0, jpeg.length, options);
+            }
+            if (decoded == null || !running) {
+                if (decoded != null && decoded != reuse) {
+                    decoded.recycle();
+                }
                 continue;
             }
             synchronized (lock) {
                 if (!running) {
-                    next.recycle();
+                    if (decoded != shown && decoded != scratch) {
+                        decoded.recycle();
+                    }
                     continue;
                 }
-                Bitmap old = bitmap;
-                bitmap = next;
-                frameAt = SystemClock.elapsedRealtime();
-                if (old != null && old != next) {
-                    old.recycle();
+                Bitmap oldShown = shown;
+                shown = decoded;
+                if (reuse != null && reuse != decoded && reuse != oldShown) {
+                    recycle(reuse);
                 }
+                scratch = (oldShown != null && oldShown != decoded) ? oldShown : null;
+                frameAt = SystemClock.elapsedRealtime();
             }
             View view = host;
             if (view != null) {
                 view.postInvalidate();
             }
+        }
+    }
+
+    private static void recycle(Bitmap bitmap) {
+        if (bitmap != null && !bitmap.isRecycled()) {
+            bitmap.recycle();
         }
     }
 }

@@ -12,13 +12,16 @@ COLORONCOLOR = 3
 MONITORINFOF_PRIMARY = 1
 CCHDEVICENAME = 32
 ENCODER_PARAMETER_LONG = 4
-JPEG_QUALITY = 38
-JPEG_QUALITY_SMALL = 26
-MAX_JPEG = 72 * 1024
+JPEG_QUALITY = 34
+JPEG_QUALITY_SMALL = 24
+MAX_JPEG = 56 * 1024
 TARGET_W = 800
 TARGET_H = 480
-FRAME_INTERVAL = 0.04
+FRAME_INTERVAL = 0.05
+FRAME_INTERVAL_SLOW = 0.12
 MONITOR_REFRESH = 2.0
+GRABBER_REOPEN_FRAMES = 400
+STALE_FRAME_S = 0.07
 
 user32 = ctypes.WinDLL("user32", use_last_error=True)
 gdi32 = ctypes.WinDLL("gdi32", use_last_error=True)
@@ -141,11 +144,90 @@ gdiplus.GdipSaveImageToStream.argtypes = [
 ]
 ole32.CreateStreamOnHGlobal.argtypes = [wintypes.HGLOBAL, wintypes.BOOL, ctypes.POINTER(ctypes.c_void_p)]
 ole32.GetHGlobalFromStream.argtypes = [ctypes.c_void_p, ctypes.POINTER(wintypes.HGLOBAL)]
+ole32.CoInitializeEx.argtypes = [ctypes.c_void_p, ctypes.c_uint]
+ole32.CoUninitialize.argtypes = []
 kernel32.GlobalSize.argtypes = [wintypes.HGLOBAL]
 kernel32.GlobalSize.restype = ctypes.c_size_t
 kernel32.GlobalLock.argtypes = [wintypes.HGLOBAL]
 kernel32.GlobalLock.restype = ctypes.c_void_p
 kernel32.GlobalUnlock.argtypes = [wintypes.HGLOBAL]
+
+STREAM_SEEK_SET = 0
+STATFLAG_NONAME = 1
+COINIT_MULTITHREADED = 0
+
+
+class FILETIME(ctypes.Structure):
+    _fields_ = [("dwLowDateTime", wintypes.DWORD), ("dwHighDateTime", wintypes.DWORD)]
+
+
+class STATSTG(ctypes.Structure):
+    _fields_ = [
+        ("pwcsName", ctypes.c_void_p),
+        ("type", wintypes.DWORD),
+        ("cbSize", ctypes.c_uint64),
+        ("mtime", FILETIME),
+        ("ctime", FILETIME),
+        ("atime", FILETIME),
+        ("grfMode", wintypes.DWORD),
+        ("grfLocksSupported", wintypes.DWORD),
+        ("clsid", GUID),
+        ("grfStateBits", wintypes.DWORD),
+        ("reserved", wintypes.DWORD),
+    ]
+
+
+def _com_vtbl(ptr) -> ctypes.POINTER(ctypes.c_void_p):
+    return ctypes.cast(ptr, ctypes.POINTER(ctypes.POINTER(ctypes.c_void_p))).contents
+
+
+def _istream_release(ptr) -> None:
+    fn = ctypes.WINFUNCTYPE(ctypes.c_ulong, ctypes.c_void_p)(_com_vtbl(ptr)[2])
+    fn(ptr)
+
+
+def _istream_seek0(ptr) -> None:
+    fn = ctypes.WINFUNCTYPE(
+        ctypes.c_long,
+        ctypes.c_void_p,
+        ctypes.c_int64,
+        ctypes.c_uint,
+        ctypes.POINTER(ctypes.c_uint64),
+    )(_com_vtbl(ptr)[5])
+    pos = ctypes.c_uint64()
+    hr = fn(ptr, 0, STREAM_SEEK_SET, ctypes.byref(pos))
+    if hr != 0:
+        raise RuntimeError("JPEG 流定位失败")
+
+
+def _istream_setsize(ptr, size: int) -> None:
+    fn = ctypes.WINFUNCTYPE(ctypes.c_long, ctypes.c_void_p, ctypes.c_uint64)(_com_vtbl(ptr)[6])
+    hr = fn(ptr, size)
+    if hr != 0:
+        raise RuntimeError("JPEG 流重置失败")
+
+
+def _istream_size(ptr) -> int:
+    fn = ctypes.WINFUNCTYPE(
+        ctypes.c_long,
+        ctypes.c_void_p,
+        ctypes.POINTER(STATSTG),
+        ctypes.c_uint,
+    )(_com_vtbl(ptr)[12])
+    st = STATSTG()
+    hr = fn(ptr, ctypes.byref(st), STATFLAG_NONAME)
+    if hr != 0:
+        raise RuntimeError("JPEG 流长度失败")
+    return int(st.cbSize)
+
+
+def _new_istream() -> ctypes.c_void_p:
+    stream = ctypes.c_void_p()
+    hr = ole32.CreateStreamOnHGlobal(None, True, ctypes.byref(stream))
+    if hr != 0 or not stream:
+        raise RuntimeError("无法写入 JPEG")
+    return stream
+
 
 _gdiplus_token = ctypes.c_ulong(0)
 _gdiplus_ready = False
@@ -281,6 +363,8 @@ class _Grabber:
         self.bmp = None
         self.old = None
         self.brush = None
+        self.stream = None
+        self.frames = 0
 
     def open(self) -> None:
         _ensure_gdiplus()
@@ -292,9 +376,11 @@ class _Grabber:
         self.old = gdi32.SelectObject(self.dst_dc, self.bmp)
         self.brush = gdi32.CreateSolidBrush(0x000000)
         gdi32.SetStretchBltMode(self.dst_dc, COLORONCOLOR)
+        self.stream = _new_istream()
 
     def grab(self, monitor: Monitor, quality: int | None = None) -> bytes:
-        if not self.dst_dc:
+        if not self.dst_dc or self.frames >= GRABBER_REOPEN_FRAMES:
+            self.close()
             self.open()
         fill = RECT(0, 0, TARGET_W, TARGET_H)
         user32.FillRect(self.dst_dc, ctypes.byref(fill), self.brush)
@@ -319,12 +405,35 @@ class _Grabber:
         if not ok:
             raise RuntimeError("截取屏幕失败")
         q = JPEG_QUALITY if quality is None else quality
-        data = _hbitmap_to_jpeg(self.bmp, q)
+        data = self._encode(q)
         if quality is None and len(data) > MAX_JPEG:
-            data = _hbitmap_to_jpeg(self.bmp, JPEG_QUALITY_SMALL)
+            data = self._encode(JPEG_QUALITY_SMALL)
+        self.frames += 1
         return data
 
+    def _encode(self, quality: int) -> bytes:
+        if not self.stream:
+            self.stream = _new_istream()
+        try:
+            _istream_setsize(self.stream, 0)
+            _istream_seek0(self.stream)
+            return _hbitmap_to_jpeg(self.bmp, quality, self.stream)
+        except Exception:
+            if self.stream:
+                try:
+                    _istream_release(self.stream)
+                except Exception:
+                    pass
+            self.stream = _new_istream()
+            return _hbitmap_to_jpeg(self.bmp, quality, self.stream)
+
     def close(self) -> None:
+        if self.stream:
+            try:
+                _istream_release(self.stream)
+            except Exception:
+                pass
+            self.stream = None
         if self.dst_dc and self.old:
             gdi32.SelectObject(self.dst_dc, self.old)
         if self.brush:
@@ -336,14 +445,14 @@ class _Grabber:
         if self.src_dc:
             user32.ReleaseDC(None, self.src_dc)
         self.src_dc = self.dst_dc = self.bmp = self.old = self.brush = None
+        self.frames = 0
 
 
-def _hbitmap_to_jpeg(hbitmap, quality: int) -> bytes:
+def _hbitmap_to_jpeg(hbitmap, quality: int, stream) -> bytes:
     image = ctypes.c_void_p()
     status = gdiplus.GdipCreateBitmapFromHBITMAP(hbitmap, None, ctypes.byref(image))
     if status != 0 or not image:
         raise RuntimeError("无法编码屏幕画面")
-    stream = ctypes.c_void_p()
     quality_value = ctypes.c_uint32(max(15, min(80, int(quality))))
     params = EncoderParameters()
     params.Count = 1
@@ -352,9 +461,6 @@ def _hbitmap_to_jpeg(hbitmap, quality: int) -> bytes:
     params.Parameter[0].Type = ENCODER_PARAMETER_LONG
     params.Parameter[0].Value = ctypes.cast(ctypes.byref(quality_value), ctypes.c_void_p)
     try:
-        hr = ole32.CreateStreamOnHGlobal(None, True, ctypes.byref(stream))
-        if hr != 0 or not stream:
-            raise RuntimeError("无法写入 JPEG")
         status = gdiplus.GdipSaveImageToStream(
             image, stream, ctypes.byref(JPEG_CLSID), ctypes.byref(params)
         )
@@ -364,38 +470,26 @@ def _hbitmap_to_jpeg(hbitmap, quality: int) -> bytes:
         hr = ole32.GetHGlobalFromStream(stream, ctypes.byref(hglobal))
         if hr != 0 or not hglobal:
             raise RuntimeError("无法读取 JPEG")
-        size = int(kernel32.GlobalSize(hglobal))
+        try:
+            size = _istream_size(stream)
+        except Exception:
+            size = int(kernel32.GlobalSize(hglobal))
+        alloc = int(kernel32.GlobalSize(hglobal))
+        if size <= 0 or alloc <= 0:
+            raise RuntimeError("JPEG 为空")
+        size = min(size, alloc)
         ptr = kernel32.GlobalLock(hglobal)
-        if not ptr or size <= 0:
+        if not ptr:
             raise RuntimeError("JPEG 为空")
         try:
             data = ctypes.string_at(ptr, size)
         finally:
             kernel32.GlobalUnlock(hglobal)
+        if len(data) < 24 or data[:2] != b"\xff\xd8":
+            raise RuntimeError("JPEG 损坏")
         return data
     finally:
         gdiplus.GdipDisposeImage(image)
-        if stream:
-            try:
-                _release_istream(stream)
-            except Exception:
-                pass
-
-
-def _release_istream(stream) -> None:
-    class IUnknown(ctypes.Structure):
-        pass
-
-    class IUnknownVTable(ctypes.Structure):
-        _fields_ = [
-            ("QueryInterface", ctypes.c_void_p),
-            ("AddRef", ctypes.WINFUNCTYPE(ctypes.c_ulong, ctypes.c_void_p)),
-            ("Release", ctypes.WINFUNCTYPE(ctypes.c_ulong, ctypes.c_void_p)),
-        ]
-
-    IUnknown._fields_ = [("lpVtbl", ctypes.POINTER(IUnknownVTable))]
-    obj = ctypes.cast(stream, ctypes.POINTER(IUnknown))
-    obj.contents.lpVtbl.contents.Release(obj)
 
 
 class ScreenSender:
@@ -404,8 +498,11 @@ class ScreenSender:
         self._alive = False
         self._capture_thread: threading.Thread | None = None
         self._send_thread: threading.Thread | None = None
+        self._slot = threading.Lock()
         self._latest: bytes | None = None
+        self._latest_at = 0.0
         self._new_frame = threading.Event()
+        self._send_s = FRAME_INTERVAL
         self.monitor_key = ""
         self.title = ""
         self.error = ""
@@ -424,7 +521,10 @@ class ScreenSender:
         self.title = chosen.label()
         self.error = ""
         self.frames = 0
-        self._latest = None
+        self._send_s = FRAME_INTERVAL
+        with self._slot:
+            self._latest = None
+            self._latest_at = 0.0
         self._new_frame.clear()
         self._alive = True
         self._capture_thread = threading.Thread(
@@ -443,12 +543,30 @@ class ScreenSender:
         threads = [self._capture_thread, self._send_thread]
         self._capture_thread = None
         self._send_thread = None
-        self._latest = None
+        with self._slot:
+            self._latest = None
         for thread in threads:
             if thread is not None and thread.is_alive() and thread is not threading.current_thread():
                 thread.join(timeout=1.0)
 
+    def _put(self, jpeg: bytes) -> None:
+        with self._slot:
+            self._latest = jpeg
+            self._latest_at = time.monotonic()
+        self._new_frame.set()
+
+    def _take(self) -> tuple[bytes | None, float]:
+        with self._slot:
+            jpeg = self._latest
+            at = self._latest_at
+            self._latest = None
+            return jpeg, at
+
     def _capture_loop(self, key: str) -> None:
+        try:
+            ole32.CoInitializeEx(None, COINIT_MULTITHREADED)
+        except Exception:
+            pass
         _thread_dpi()
         grabber = _Grabber()
         chosen: Monitor | None = None
@@ -456,6 +574,11 @@ class ScreenSender:
         try:
             while self._alive:
                 started = time.monotonic()
+                with self._slot:
+                    waiting = self._latest is not None
+                if waiting:
+                    time.sleep(0.004)
+                    continue
                 try:
                     if chosen is None or started - last_enum >= MONITOR_REFRESH:
                         chosen = pick_monitor(_enum_monitors(), key)
@@ -464,30 +587,42 @@ class ScreenSender:
                             self.title = chosen.label()
                     if chosen is None:
                         raise RuntimeError("显示器已断开")
-                    jpeg = grabber.grab(chosen)
+                    quality = JPEG_QUALITY_SMALL if self._send_s > 0.055 else None
+                    jpeg = grabber.grab(chosen, quality)
                     if self._alive and jpeg:
-                        self._latest = jpeg
-                        self._new_frame.set()
+                        self._put(jpeg)
                         self.frames += 1
                 except Exception as exc:
                     self.error = str(exc)
                     grabber.close()
                     time.sleep(0.4)
                     continue
-                remain = FRAME_INTERVAL - (time.monotonic() - started)
+                interval = min(FRAME_INTERVAL_SLOW, max(FRAME_INTERVAL, self._send_s * 1.4))
+                remain = interval - (time.monotonic() - started)
                 if remain > 0:
                     time.sleep(remain)
         finally:
             grabber.close()
+            try:
+                ole32.CoUninitialize()
+            except Exception:
+                pass
 
     def _send_loop(self) -> None:
         while self._alive:
             self._new_frame.wait(timeout=0.2)
             self._new_frame.clear()
-            jpeg = self._latest
-            self._latest = None
-            if jpeg and self._alive:
-                try:
-                    self._send_jpeg(jpeg)
-                except Exception as exc:
-                    self.error = str(exc)
+            jpeg, captured_at = self._take()
+            if not jpeg or not self._alive:
+                continue
+            newer, newer_at = self._take()
+            if newer is not None:
+                jpeg, captured_at = newer, newer_at
+            if time.monotonic() - captured_at > STALE_FRAME_S:
+                continue
+            t0 = time.monotonic()
+            try:
+                self._send_jpeg(jpeg)
+            except Exception as exc:
+                self.error = str(exc)
+            self._send_s = self._send_s * 0.65 + (time.monotonic() - t0) * 0.35
