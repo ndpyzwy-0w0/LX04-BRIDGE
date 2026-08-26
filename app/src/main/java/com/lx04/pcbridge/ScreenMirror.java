@@ -158,7 +158,7 @@ final class ScreenMirror {
             }
             View view = host;
             if (view != null) {
-                view.postInvalidate();
+                view.postInvalidateOnAnimation();
             }
         }
     }

@@ -69,8 +69,8 @@ class BridgeClient:
         sock = socket.create_connection((host, port), timeout=5)
         sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
         try:
-            sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 32 * 1024)
-            sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 32 * 1024)
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 16 * 1024)
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 16 * 1024)
         except OSError:
             pass
         sock.settimeout(8)
@@ -163,6 +163,8 @@ class BridgeClient:
             self.on_event("status", self.status)
         elif frame.type == protocol.PING:
             self._send(protocol.encode(protocol.PONG, seq=self._next_seq()))
+        elif frame.type == protocol.VIDEO_ACK:
+            self.on_event("video_ack", frame.seq)
 
 
 def _read_exact(sock: socket.socket, size: int) -> bytes:
@@ -1378,6 +1380,9 @@ class HostApp:
                 self.headline.configure(text="正在把 LX04 麦克风送给语音软件")
 
     def _on_bridge_event(self, kind: str, data) -> None:
+        if kind == "video_ack":
+            self.mirror.note_ack()
+            return
         self.root.after(0, lambda: self._handle_event(kind, data))
 
     def _handle_event(self, kind: str, data) -> None:
