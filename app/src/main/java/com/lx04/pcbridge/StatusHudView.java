@@ -85,6 +85,7 @@ public class StatusHudView extends View {
         text.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
         dim.setTypeface(Typeface.create("sans-serif", Typeface.NORMAL));
         applyPalette(false);
+        ScreenMirror.INSTANCE.attach(this);
     }
 
     private void applyPalette(boolean light) {

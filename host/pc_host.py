@@ -68,6 +68,11 @@ class BridgeClient:
         self.close()
         sock = socket.create_connection((host, port), timeout=5)
         sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        try:
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 32 * 1024)
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 32 * 1024)
+        except OSError:
+            pass
         sock.settimeout(8)
         self.sock = sock
         self.alive = True
@@ -816,6 +821,8 @@ class HostApp:
 
     def _push_pc_stats(self, force: bool = False) -> None:
         if not self.connected or not self.pc_stats_enabled.get():
+            return
+        if self.mirror.running() and not force:
             return
         try:
             snap = pc_stats.snapshot(self._selected_disk())

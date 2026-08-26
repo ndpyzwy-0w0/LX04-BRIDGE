@@ -8,17 +8,17 @@ from ctypes import wintypes
 from dataclasses import dataclass
 
 SRCCOPY = 0x00CC0020
-HALFTONE = 4
-CAPTUREBLT = 0x40000000
+COLORONCOLOR = 3
 MONITORINFOF_PRIMARY = 1
 CCHDEVICENAME = 32
 ENCODER_PARAMETER_LONG = 4
-JPEG_QUALITY = 42
-JPEG_QUALITY_SMALL = 28
-MAX_JPEG = 96 * 1024
+JPEG_QUALITY = 38
+JPEG_QUALITY_SMALL = 26
+MAX_JPEG = 72 * 1024
 TARGET_W = 800
 TARGET_H = 480
-FRAME_INTERVAL = 0.10
+FRAME_INTERVAL = 0.04
+MONITOR_REFRESH = 2.0
 
 user32 = ctypes.WinDLL("user32", use_last_error=True)
 gdi32 = ctypes.WinDLL("gdi32", use_last_error=True)
@@ -259,51 +259,83 @@ def pick_monitor(monitors: list[Monitor], saved_key: str = "") -> Monitor | None
 
 
 def capture_jpeg(monitor: Monitor, quality: int = JPEG_QUALITY) -> bytes:
-    _ensure_gdiplus()
-    src_dc = user32.GetDC(None)
-    if not src_dc:
-        raise RuntimeError("无法读取屏幕")
-    dst_dc = gdi32.CreateCompatibleDC(src_dc)
-    bmp = gdi32.CreateCompatibleBitmap(src_dc, TARGET_W, TARGET_H)
-    old = gdi32.SelectObject(dst_dc, bmp)
-    brush = gdi32.CreateSolidBrush(0x000000)
+    grabber = _Grabber()
     try:
+        return grabber.grab(monitor, quality)
+    finally:
+        grabber.close()
+
+
+def capture_jpeg_fit(monitor: Monitor) -> bytes:
+    grabber = _Grabber()
+    try:
+        return grabber.grab(monitor)
+    finally:
+        grabber.close()
+
+
+class _Grabber:
+    def __init__(self) -> None:
+        self.src_dc = None
+        self.dst_dc = None
+        self.bmp = None
+        self.old = None
+        self.brush = None
+
+    def open(self) -> None:
+        _ensure_gdiplus()
+        self.src_dc = user32.GetDC(None)
+        if not self.src_dc:
+            raise RuntimeError("无法读取屏幕")
+        self.dst_dc = gdi32.CreateCompatibleDC(self.src_dc)
+        self.bmp = gdi32.CreateCompatibleBitmap(self.src_dc, TARGET_W, TARGET_H)
+        self.old = gdi32.SelectObject(self.dst_dc, self.bmp)
+        self.brush = gdi32.CreateSolidBrush(0x000000)
+        gdi32.SetStretchBltMode(self.dst_dc, COLORONCOLOR)
+
+    def grab(self, monitor: Monitor, quality: int | None = None) -> bytes:
+        if not self.dst_dc:
+            self.open()
         fill = RECT(0, 0, TARGET_W, TARGET_H)
-        user32.FillRect(dst_dc, ctypes.byref(fill), brush)
+        user32.FillRect(self.dst_dc, ctypes.byref(fill), self.brush)
         scale = min(TARGET_W / monitor.width, TARGET_H / monitor.height)
         dest_w = max(1, int(monitor.width * scale))
         dest_h = max(1, int(monitor.height * scale))
         dest_x = (TARGET_W - dest_w) // 2
         dest_y = (TARGET_H - dest_h) // 2
-        gdi32.SetStretchBltMode(dst_dc, HALFTONE)
-        gdi32.SetBrushOrgEx(dst_dc, 0, 0, None)
         ok = gdi32.StretchBlt(
-            dst_dc, dest_x, dest_y, dest_w, dest_h,
-            src_dc, monitor.left, monitor.top, monitor.width, monitor.height,
-            SRCCOPY | CAPTUREBLT,
+            self.dst_dc, dest_x, dest_y, dest_w, dest_h,
+            self.src_dc, monitor.left, monitor.top, monitor.width, monitor.height,
+            SRCCOPY,
         )
         if not ok:
+            self.close()
+            self.open()
             ok = gdi32.StretchBlt(
-                dst_dc, dest_x, dest_y, dest_w, dest_h,
-                src_dc, monitor.left, monitor.top, monitor.width, monitor.height,
+                self.dst_dc, dest_x, dest_y, dest_w, dest_h,
+                self.src_dc, monitor.left, monitor.top, monitor.width, monitor.height,
                 SRCCOPY,
             )
         if not ok:
             raise RuntimeError("截取屏幕失败")
-        return _hbitmap_to_jpeg(bmp, quality)
-    finally:
-        gdi32.SelectObject(dst_dc, old)
-        gdi32.DeleteObject(brush)
-        gdi32.DeleteObject(bmp)
-        gdi32.DeleteDC(dst_dc)
-        user32.ReleaseDC(None, src_dc)
+        q = JPEG_QUALITY if quality is None else quality
+        data = _hbitmap_to_jpeg(self.bmp, q)
+        if quality is None and len(data) > MAX_JPEG:
+            data = _hbitmap_to_jpeg(self.bmp, JPEG_QUALITY_SMALL)
+        return data
 
-
-def capture_jpeg_fit(monitor: Monitor) -> bytes:
-    data = capture_jpeg(monitor, JPEG_QUALITY)
-    if len(data) > MAX_JPEG:
-        data = capture_jpeg(monitor, JPEG_QUALITY_SMALL)
-    return data
+    def close(self) -> None:
+        if self.dst_dc and self.old:
+            gdi32.SelectObject(self.dst_dc, self.old)
+        if self.brush:
+            gdi32.DeleteObject(self.brush)
+        if self.bmp:
+            gdi32.DeleteObject(self.bmp)
+        if self.dst_dc:
+            gdi32.DeleteDC(self.dst_dc)
+        if self.src_dc:
+            user32.ReleaseDC(None, self.src_dc)
+        self.src_dc = self.dst_dc = self.bmp = self.old = self.brush = None
 
 
 def _hbitmap_to_jpeg(hbitmap, quality: int) -> bytes:
@@ -370,8 +402,10 @@ class ScreenSender:
     def __init__(self, send_jpeg) -> None:
         self._send_jpeg = send_jpeg
         self._alive = False
-        self._thread: threading.Thread | None = None
-        self._lock = threading.Lock()
+        self._capture_thread: threading.Thread | None = None
+        self._send_thread: threading.Thread | None = None
+        self._latest: bytes | None = None
+        self._new_frame = threading.Event()
         self.monitor_key = ""
         self.title = ""
         self.error = ""
@@ -390,36 +424,70 @@ class ScreenSender:
         self.title = chosen.label()
         self.error = ""
         self.frames = 0
+        self._latest = None
+        self._new_frame.clear()
         self._alive = True
-        self._thread = threading.Thread(target=self._loop, args=(chosen.key,), daemon=True)
-        self._thread.start()
+        self._capture_thread = threading.Thread(
+            target=self._capture_loop, args=(chosen.key,), daemon=True, name="lx04-mirror-cap"
+        )
+        self._send_thread = threading.Thread(
+            target=self._send_loop, daemon=True, name="lx04-mirror-send"
+        )
+        self._capture_thread.start()
+        self._send_thread.start()
         return chosen
 
     def stop(self) -> None:
         self._alive = False
-        thread = self._thread
-        self._thread = None
-        if thread is not None and thread.is_alive() and thread is not threading.current_thread():
-            thread.join(timeout=1.2)
+        self._new_frame.set()
+        threads = [self._capture_thread, self._send_thread]
+        self._capture_thread = None
+        self._send_thread = None
+        self._latest = None
+        for thread in threads:
+            if thread is not None and thread.is_alive() and thread is not threading.current_thread():
+                thread.join(timeout=1.0)
 
-    def _loop(self, key: str) -> None:
+    def _capture_loop(self, key: str) -> None:
         _thread_dpi()
+        grabber = _Grabber()
+        chosen: Monitor | None = None
+        last_enum = 0.0
+        try:
+            while self._alive:
+                started = time.monotonic()
+                try:
+                    if chosen is None or started - last_enum >= MONITOR_REFRESH:
+                        chosen = pick_monitor(_enum_monitors(), key)
+                        last_enum = started
+                        if chosen is not None:
+                            self.title = chosen.label()
+                    if chosen is None:
+                        raise RuntimeError("显示器已断开")
+                    jpeg = grabber.grab(chosen)
+                    if self._alive and jpeg:
+                        self._latest = jpeg
+                        self._new_frame.set()
+                        self.frames += 1
+                except Exception as exc:
+                    self.error = str(exc)
+                    grabber.close()
+                    time.sleep(0.4)
+                    continue
+                remain = FRAME_INTERVAL - (time.monotonic() - started)
+                if remain > 0:
+                    time.sleep(remain)
+        finally:
+            grabber.close()
+
+    def _send_loop(self) -> None:
         while self._alive:
-            started = time.monotonic()
-            try:
-                monitors = list_monitors()
-                chosen = pick_monitor(monitors, key)
-                if chosen is None:
-                    raise RuntimeError("显示器已断开")
-                self.title = chosen.label()
-                jpeg = capture_jpeg_fit(chosen)
-                if self._alive and jpeg:
+            self._new_frame.wait(timeout=0.2)
+            self._new_frame.clear()
+            jpeg = self._latest
+            self._latest = None
+            if jpeg and self._alive:
+                try:
                     self._send_jpeg(jpeg)
-                    self.frames += 1
-            except Exception as exc:
-                self.error = str(exc)
-                time.sleep(0.8)
-                continue
-            remain = FRAME_INTERVAL - (time.monotonic() - started)
-            if remain > 0:
-                time.sleep(remain)
+                except Exception as exc:
+                    self.error = str(exc)
