@@ -19,6 +19,7 @@ public class BridgeService extends Service {
     private AudioCapture capture;
     private AudioPlayback playback;
     private TcpBridgeServer server;
+    private TcpVideoServer videoServer;
     private UsbMonitor usbMonitor;
     private PowerManager.WakeLock wakeLock;
     private long lastAudioMs;
@@ -43,6 +44,11 @@ public class BridgeService extends Service {
         capture = new AudioCapture(this::onAudio);
         playback = new AudioPlayback();
         audioManager = (AudioManager) getSystemService(AUDIO_SERVICE);
+        videoServer = new TcpVideoServer(jpeg -> {
+            if (STATE.screenMirror) {
+                ScreenMirror.INSTANCE.accept(jpeg);
+            }
+        });
         server = new TcpBridgeServer(STATE, new TcpBridgeServer.Callbacks() {
             @Override
             public void prepareForClient() {
@@ -75,13 +81,6 @@ public class BridgeService extends Service {
                 if (playback != null) {
                     playback.push(pcm, muted || STATE.spkMuted);
                     STATE.playLevel = playback.getPeak();
-                }
-            }
-
-            @Override
-            public void onVideo(byte[] jpeg) {
-                if (STATE.screenMirror) {
-                    ScreenMirror.INSTANCE.accept(jpeg);
                 }
             }
 
@@ -142,6 +141,7 @@ public class BridgeService extends Service {
         });
         usbMonitor.start();
         server.start();
+        videoServer.start();
         Watchdog.schedule(this);
         refreshHeadline();
     }
@@ -161,6 +161,9 @@ public class BridgeService extends Service {
         Watchdog.schedule(this);
         if (usbMonitor != null) {
             usbMonitor.stop();
+        }
+        if (videoServer != null) {
+            videoServer.stop();
         }
         if (server != null) {
             server.stop();

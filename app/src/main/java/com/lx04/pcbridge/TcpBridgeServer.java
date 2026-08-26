@@ -21,19 +21,16 @@ final class TcpBridgeServer {
         void onClient(boolean connected, String helloAckName);
         void onControl(JSONObject json);
         void onPlay(byte[] pcm, boolean muted);
-        void onVideo(byte[] jpeg);
     }
 
     private final BridgeState state;
     private final Callbacks callbacks;
     private final ArrayBlockingQueue<byte[]> outbound = new ArrayBlockingQueue<>(12);
     private final AtomicInteger seq = new AtomicInteger();
-    private final Object outLock = new Object();
     private volatile boolean running;
     private ServerSocket server;
     private Thread acceptThread;
     private volatile Socket client;
-    private volatile OutputStream clientOut;
     private volatile long dropped;
 
     TcpBridgeServer(BridgeState state, Callbacks callbacks) {
@@ -57,7 +54,6 @@ final class TcpBridgeServer {
 
     synchronized void stop() {
         running = false;
-        clientOut = null;
         closeQuietly(client);
         client = null;
         if (server != null) {
@@ -148,16 +144,16 @@ final class TcpBridgeServer {
             socket.setTcpNoDelay(true);
             socket.setSoTimeout(15000);
             try {
-                socket.setReceiveBufferSize(24 * 1024);
-                socket.setSendBufferSize(16 * 1024);
+                socket.setReceiveBufferSize(64 * 1024);
+                socket.setSendBufferSize(64 * 1024);
             } catch (Exception ignored) {
             }
             callbacks.prepareForClient();
             OutputStream out = socket.getOutputStream();
             InputStream in = socket.getInputStream();
-            clientOut = out;
-            writeFrame(out, Protocol.encode(Protocol.HELLO, (byte) 0, seq.incrementAndGet(),
+            out.write(Protocol.encode(Protocol.HELLO, (byte) 0, seq.incrementAndGet(),
                     SystemClock.elapsedRealtime(), helloPayload()));
+            out.flush();
             callbacks.onClient(true, "");
             Thread reader = new Thread(() -> readLoop(in), "lx04-tcp-in");
             reader.start();
@@ -170,13 +166,12 @@ final class TcpBridgeServer {
                 }
                 byte[] frame = outbound.poll();
                 if (frame != null) {
-                    writeFrame(out, frame);
+                    out.write(frame);
                 } else {
-                    Thread.sleep(state.screenMirror ? 8 : 4);
+                    Thread.sleep(4);
                 }
                 long now = SystemClock.elapsedRealtime();
-                long statusEvery = state.screenMirror ? 800 : 250;
-                if (now - lastStatus > statusEvery) {
+                if (now - lastStatus > 250) {
                     lastStatus = now;
                     sendStatus();
                 }
@@ -184,7 +179,6 @@ final class TcpBridgeServer {
             reader.interrupt();
         } catch (Exception ignored) {
         } finally {
-            clientOut = null;
             closeQuietly(socket);
         }
     }
@@ -237,34 +231,6 @@ final class TcpBridgeServer {
             }
             if (frame.type == Protocol.PLAY && frame.payload != null) {
                 callbacks.onPlay(frame.payload, (frame.flags & Protocol.FLAG_MUTED) != 0);
-                return;
-            }
-            if (frame.type == Protocol.VIDEO && frame.payload != null) {
-                sendVideoAck(frame.seq);
-                callbacks.onVideo(frame.payload);
-            }
-        } catch (Exception ignored) {
-        }
-    }
-
-    private void sendVideoAck(int videoSeq) {
-        OutputStream out = clientOut;
-        if (out == null) {
-            return;
-        }
-        byte[] ack = Protocol.encode(Protocol.VIDEO_ACK, (byte) 0, videoSeq,
-                SystemClock.elapsedRealtime(), new byte[0]);
-        writeFrame(out, ack);
-    }
-
-    private void writeFrame(OutputStream out, byte[] frame) {
-        if (out == null || frame == null) {
-            return;
-        }
-        try {
-            synchronized (outLock) {
-                out.write(frame);
-                out.flush();
             }
         } catch (Exception ignored) {
         }
@@ -283,6 +249,7 @@ final class TcpBridgeServer {
             o.put("bits", 16);
             o.put("encoding", "pcm_s16le");
             o.put("port", Protocol.PORT);
+            o.put("videoPort", Protocol.VIDEO_PORT);
             return o.toString().getBytes(StandardCharsets.UTF_8);
         } catch (Exception e) {
             return "{}".getBytes(StandardCharsets.UTF_8);
