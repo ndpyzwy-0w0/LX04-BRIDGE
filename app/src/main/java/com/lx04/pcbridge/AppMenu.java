@@ -26,6 +26,7 @@ final class AppMenu {
     private final Path chevron = new Path();
     private final RectF drawerRect = new RectF();
     private final RectF settingsRow = new RectF();
+    private final RectF hudRow = new RectF();
     private final RectF mirrorRow = new RectF();
     private final RectF backRect = new RectF();
     private final RectF darkRect = new RectF();
@@ -155,28 +156,10 @@ final class AppMenu {
         drawChevron(canvas, settingsRow.right - dp(18), settingsRow.centerY(), dp(8), colDim(), false);
 
         boolean mirroring = BridgeService.STATE.screenMirror;
-        mirrorRow.set(drawerRect.left + dp(10), dp(118), drawerRect.right - dp(10), dp(180));
-        if (mirroring) {
-            card.setColor(light ? 0xFFD7F6E7 : 0xFF1C3A32);
-            stroke.setStyle(Paint.Style.STROKE);
-            stroke.setStrokeWidth(dp(2));
-            stroke.setColor(0xFF3DDC97);
-            canvas.drawRoundRect(mirrorRow, dp(12), dp(12), card);
-            canvas.drawRoundRect(mirrorRow, dp(12), dp(12), stroke);
-        } else {
-            card.setColor(colCard());
-            canvas.drawRoundRect(mirrorRow, dp(12), dp(12), card);
-        }
-        text.setTextSize(dp(16));
-        text.setColor(mirroring ? 0xFF3DDC97 : colText());
-        canvas.drawText("屏幕镜像", mirrorRow.left + dp(14), mirrorRow.top + dp(32), text);
-        dim.setColor(mirroring ? 0xFF3DDC97 : colDim());
-        dim.setTextSize(dp(11));
-        String mirrorHint = mirroring
-                ? (BridgeService.STATE.clientConnected ? "已开启 · 再点关闭" : "已开启 · 等待电脑")
-                : "把电脑画面投到音箱";
-        canvas.drawText(mirrorHint, mirrorRow.left + dp(14), mirrorRow.top + dp(50), dim);
-        text.setColor(colText());
+        hudRow.set(drawerRect.left + dp(10), dp(118), drawerRect.right - dp(10), dp(180));
+        mirrorRow.set(drawerRect.left + dp(10), dp(190), drawerRect.right - dp(10), dp(252));
+        drawModeRow(canvas, hudRow, "状态监视", "CPU / GPU 占用", !mirroring);
+        drawModeRow(canvas, mirrorRow, "屏幕镜像", "投电脑画面", mirroring);
 
         String ver = formatVersion(BridgeService.STATE.apkVersion);
         dim.setColor(colDim());
@@ -312,8 +295,12 @@ final class AppMenu {
                 openSettings();
                 return true;
             }
+            if (hudRow.contains(x, y)) {
+                setMirror(false);
+                return true;
+            }
             if (mirrorRow.contains(x, y)) {
-                toggleMirror();
+                setMirror(true);
                 return true;
             }
             if (!drawerRect.contains(x, y)) {
@@ -359,9 +346,31 @@ final class AppMenu {
         view.invalidate();
     }
 
-    private void toggleMirror() {
-        BridgeService.setScreenMirror(view.getContext(), !BridgeService.STATE.screenMirror);
+    private void setMirror(boolean on) {
+        BridgeService.setScreenMirror(view.getContext(), on);
+        animateTo(0);
         view.invalidate();
+    }
+
+    private void drawModeRow(Canvas canvas, RectF rect, String title, String hint, boolean selected) {
+        if (selected) {
+            card.setColor(light ? 0xFFD7F6E7 : 0xFF1C3A32);
+            stroke.setStyle(Paint.Style.STROKE);
+            stroke.setStrokeWidth(dp(2));
+            stroke.setColor(0xFF3DDC97);
+            canvas.drawRoundRect(rect, dp(12), dp(12), card);
+            canvas.drawRoundRect(rect, dp(12), dp(12), stroke);
+        } else {
+            card.setColor(colCard());
+            canvas.drawRoundRect(rect, dp(12), dp(12), card);
+        }
+        text.setTextSize(dp(16));
+        text.setColor(selected ? 0xFF3DDC97 : colText());
+        canvas.drawText(title, rect.left + dp(14), rect.top + dp(32), text);
+        dim.setColor(selected ? 0xFF3DDC97 : colDim());
+        dim.setTextSize(dp(11));
+        canvas.drawText(hint, rect.left + dp(14), rect.top + dp(50), dim);
+        text.setColor(colText());
     }
 
     private void setLight(boolean wantLight) {
