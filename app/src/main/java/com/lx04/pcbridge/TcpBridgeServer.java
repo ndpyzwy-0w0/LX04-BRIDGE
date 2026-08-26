@@ -21,6 +21,7 @@ final class TcpBridgeServer {
         void onClient(boolean connected, String helloAckName);
         void onControl(JSONObject json);
         void onPlay(byte[] pcm, boolean muted);
+        void onVideo(byte[] jpeg);
     }
 
     private final BridgeState state;
@@ -95,6 +96,7 @@ final class TcpBridgeServer {
             o.put("playLevel", state.playLevel);
             o.put("volume", BridgeService.musicVolume());
             o.put("lightTheme", state.lightTheme);
+            o.put("screenMirror", state.screenMirror);
             o.put("hudStyle", state.hudStyle.toStatusJson());
             enqueue(Protocol.STATUS, (byte) 0, o.toString().getBytes(StandardCharsets.UTF_8));
         } catch (Exception ignored) {
@@ -220,6 +222,10 @@ final class TcpBridgeServer {
             }
             if (frame.type == Protocol.PLAY && frame.payload != null) {
                 callbacks.onPlay(frame.payload, (frame.flags & Protocol.FLAG_MUTED) != 0);
+                return;
+            }
+            if (frame.type == Protocol.VIDEO && frame.payload != null) {
+                callbacks.onVideo(frame.payload);
             }
         } catch (Exception ignored) {
         }

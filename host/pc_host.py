@@ -30,6 +30,7 @@ import hifi_cable
 import hud_preview
 import pc_stats
 import protocol
+import screen_mirror
 import vb_cable
 import win_endpoint
 import win_mic
@@ -92,6 +93,11 @@ class BridgeClient:
     def send_play(self, pcm: bytes, muted: bool = False) -> None:
         flags = protocol.FLAG_MUTED if muted else 0
         self._send(protocol.encode(protocol.PLAY, pcm or b"", flags=flags, seq=self._next_seq()))
+
+    def send_video(self, jpeg: bytes) -> None:
+        if not jpeg or len(jpeg) > protocol.MAX_PAYLOAD:
+            return
+        self._send(protocol.encode(protocol.VIDEO, jpeg, seq=self._next_seq()))
 
     def _next_seq(self) -> int:
         with self._seq_lock:
@@ -252,7 +258,12 @@ class HostApp:
         self.upside_down = tk.BooleanVar(value=False)
         self.light_theme = tk.BooleanVar(value=False)
         self.disk_var = tk.StringVar()
+        self.monitor_var = tk.StringVar()
         self._saved_disk = ""
+        self._saved_monitor = ""
+        self._monitors: list[screen_mirror.Monitor] = []
+        self.mirror = screen_mirror.ScreenSender(self._send_mirror_frame)
+        self._mirror_logged = False
         self.inject_var = tk.StringVar()
         self.spk_dev_var = tk.StringVar()
         self._inject_devices: list[tuple[str, str | int, str]] = []
@@ -278,8 +289,8 @@ class HostApp:
     def _build(self) -> None:
         self.root.title("LX04 上位机")
         self.root.configure(bg=BG)
-        self.root.geometry("860x800")
-        self.root.minsize(760, 640)
+        self.root.geometry("860x840")
+        self.root.minsize(760, 680)
 
         style = ttk.Style()
         try:
@@ -476,6 +487,18 @@ class HostApp:
             stats_row, text="CPU 温度 / Afterburner", command=self._on_afterburner
         ).pack(side="right")
 
+        mirror_row = ttk.Frame(card, style="Card.TFrame")
+        mirror_row.pack(fill="x", padx=16, pady=(0, 8))
+        ttk.Label(mirror_row, text="同步屏幕", style="Card.TLabel").pack(side="left")
+        self.monitor_drop = ChoiceDrop(
+            mirror_row, self.monitor_var, self._on_monitor_change, combo_bg, combo_fg
+        )
+        ttk.Label(
+            mirror_row,
+            text="在音箱右侧菜单打开「屏幕镜像」。",
+            style="CardDim.TLabel",
+        ).pack(side="left")
+
         row2 = ttk.Frame(card, style="Card.TFrame")
         row2.pack(fill="x", padx=16, pady=(0, 8))
         ttk.Button(row2, text="试音", command=self._on_test_tone).pack(side="left")
@@ -577,7 +600,9 @@ class HostApp:
         self._saved_inject = str(data.get("inject") or "")
         self._saved_spk = str(data.get("speaker") or "")
         self._saved_disk = str(data.get("pc_disk") or "")
+        self._saved_monitor = str(data.get("pc_monitor") or "")
         self._refresh_disks()
+        self._refresh_monitors()
 
     def _save_routes(self) -> None:
         payload = {
@@ -589,6 +614,7 @@ class HostApp:
             "upside_down": bool(self.upside_down.get()),
             "light_theme": bool(self.light_theme.get()),
             "pc_disk": self._selected_disk(),
+            "pc_monitor": self._selected_monitor_key(),
             "inject": self.inject_var.get(),
             "speaker": self.spk_dev_var.get(),
         }
@@ -717,6 +743,66 @@ class HostApp:
             chosen = system or (labels[0] if labels else "")
         if chosen:
             self.disk_var.set(chosen)
+
+    def _refresh_monitors(self) -> None:
+        previous = self._selected_monitor_key() or getattr(self, "_saved_monitor", "")
+        try:
+            self._monitors = screen_mirror.list_monitors()
+        except Exception:
+            self._monitors = []
+        labels = [item.label() for item in self._monitors]
+        if hasattr(self, "monitor_drop"):
+            self.monitor_drop.set_labels(labels or ["没有显示器"])
+        chosen = screen_mirror.pick_monitor(self._monitors, previous)
+        if chosen:
+            self.monitor_var.set(chosen.label())
+            self._saved_monitor = chosen.key
+        elif labels:
+            self.monitor_var.set(labels[0])
+
+    def _selected_monitor_key(self) -> str:
+        label = (self.monitor_var.get() or "").strip()
+        for item in self._monitors:
+            if item.label() == label:
+                return item.key
+        return str(getattr(self, "_saved_monitor", "") or "")
+
+    def _on_monitor_change(self) -> None:
+        if not self._routes_ready:
+            return
+        self._save_routes()
+        if self.mirror.running():
+            self._start_mirror(restart=True)
+
+    def _send_mirror_frame(self, jpeg: bytes) -> None:
+        if not self.connected:
+            return
+        self.client.send_video(jpeg)
+
+    def _apply_mirror_request(self, on: bool) -> None:
+        if on and self.connected:
+            if not self.mirror.running():
+                self._start_mirror()
+            return
+        if self.mirror.running():
+            self.mirror.stop()
+            self._mirror_logged = False
+            self._log("屏幕镜像已关闭")
+
+    def _start_mirror(self, restart: bool = False) -> None:
+        if not self.connected:
+            return
+        self._refresh_monitors()
+        chosen = self.mirror.start(self._selected_monitor_key())
+        self._mirror_logged = False
+        if chosen is None:
+            self._log("屏幕镜像失败: " + (self.mirror.error or "没有可用的显示器"))
+            return
+        self.monitor_var.set(chosen.label())
+        self._saved_monitor = chosen.key
+        self.client.send_control("mirror_info", title=chosen.label())
+        self._save_routes()
+        self._log(("屏幕镜像已切换到: " if restart else "屏幕镜像: ") + chosen.label())
 
     def _on_pc_stats_change(self) -> None:
         if not self._routes_ready:
@@ -1090,6 +1176,7 @@ class HostApp:
         self._log("USB 设备: " + (", ".join(self.devices) if self.devices else "无"))
         self.refresh_audio_devices(log=False)
         self._refresh_disks()
+        self._refresh_monitors()
 
     def connect(self) -> None:
         if not self.adb:
@@ -1166,6 +1253,8 @@ class HostApp:
         self.hw.stop(self.adb, self._serial)
         self.sink.stop()
         self._restore_render()
+        self.mirror.stop()
+        self._mirror_logged = False
         self.connected = False
         self._stats_logged = False
         if self.adb and self._serial:
@@ -1253,6 +1342,8 @@ class HostApp:
         self.hw.stop(self.adb, self._serial)
         self.sink.stop()
         self._restore_render()
+        self.mirror.stop()
+        self._mirror_logged = False
         if self.adb and self._serial:
             try:
                 adb_usb.release_speaker_mic(self.adb, self._serial)
@@ -1310,6 +1401,8 @@ class HostApp:
                 self.sink.push(data.payload, muted=data.muted)
         elif kind == "status":
             self._on_hud_status(data)
+            if "screenMirror" in data:
+                self._apply_mirror_request(bool(data.get("screenMirror")))
             if "volume" in data:
                 try:
                     self._apply_speaker_volume(float(data.get("volume") or 0))
@@ -1364,6 +1457,8 @@ class HostApp:
             self._log("链路错误: " + str(data))
         elif kind == "disconnected":
             self.connected = False
+            self.mirror.stop()
+            self._mirror_logged = False
             self._draw_meter(self.meter, 0)
             self._draw_meter(self.spk_meter, 0)
             if not self._session:
@@ -1386,6 +1481,12 @@ class HostApp:
         if self._stats_ticks >= 12:
             self._stats_ticks = 0
             self._push_pc_stats()
+        if self.mirror.error:
+            self._log("屏幕镜像: " + self.mirror.error)
+            self.mirror.error = ""
+        if self.mirror.running() and self.mirror.frames and not self._mirror_logged:
+            self._mirror_logged = True
+            self._log("屏幕镜像已出画面: " + (self.mirror.title or self.monitor_var.get()))
         self.root.after(80, self._tick)
 
     def _draw_meter(self, canvas: tk.Canvas, level: float) -> None:

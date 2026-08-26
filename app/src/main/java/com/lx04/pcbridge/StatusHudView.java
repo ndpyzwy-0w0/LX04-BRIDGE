@@ -129,6 +129,16 @@ public class StatusHudView extends View {
         int h = getHeight();
         canvas.drawRect(0, 0, w, h, bg);
 
+        if (s.screenMirror) {
+            drawMirror(canvas, s, w, h);
+            if (editor.isOpen()) {
+                editor.draw(canvas, w, h, lightTheme);
+            } else {
+                menu.draw(canvas, w, h, lightTheme);
+            }
+            return;
+        }
+
         float p = dp(12);
         RectF card = new RectF(p, p, w - p, h - p);
         canvas.drawRoundRect(card, dp(18), dp(18), panel);
@@ -188,6 +198,46 @@ public class StatusHudView extends View {
             return;
         }
         menu.handleBack();
+    }
+
+    private void drawMirror(Canvas canvas, BridgeState s, int w, int h) {
+        bg.setColor(0xFF000000);
+        canvas.drawRect(0, 0, w, h, bg);
+        bg.setColor(lightTheme ? 0xFFF3F5F8 : 0xFF0B1220);
+        boolean hasFrame = ScreenMirror.INSTANCE.hasFrame();
+        if (hasFrame) {
+            ScreenMirror.INSTANCE.draw(canvas, w, h);
+        }
+        dim.setColor(0x88000000);
+        canvas.drawRect(0, 0, w, dp(28), dim);
+        dim.setColor(colDim);
+        int usbColor = !s.usbConnected ? 0xFFFF5C7A : (s.clientConnected ? 0xFF3DDC97 : 0xFFFFB020);
+        accent.setColor(usbColor);
+        canvas.drawCircle(dp(16), dp(16), dp(6), accent);
+
+        text.setTextSize(dp(13));
+        text.setColor(0xFFE8EEF8);
+        String title = (s.mirrorTitle == null || s.mirrorTitle.isEmpty()) ? "屏幕镜像" : s.mirrorTitle;
+        canvas.drawText(title, dp(30), dp(21), text);
+
+        if (!s.clientConnected) {
+            drawMirrorMessage(canvas, w, h, "等待上位机", "连接电脑后开始同步画面");
+        } else if (!hasFrame) {
+            drawMirrorMessage(canvas, w, h, "正在等待电脑画面…", "从右侧滑出菜单可关闭");
+        } else if (ScreenMirror.INSTANCE.stale()) {
+            drawMirrorMessage(canvas, w, h, "画面中断", "从右侧滑出菜单可关闭");
+        }
+    }
+
+    private void drawMirrorMessage(Canvas canvas, int w, int h, String headline, String detail) {
+        dim.setColor(0xCCFFFFFF);
+        dim.setTextSize(dp(18));
+        float tw = dim.measureText(headline);
+        canvas.drawText(headline, w / 2f - tw / 2f, h / 2f - dp(6), dim);
+        dim.setTextSize(dp(13));
+        float dw = dim.measureText(detail);
+        canvas.drawText(detail, w / 2f - dw / 2f, h / 2f + dp(18), dim);
+        dim.setColor(colDim);
     }
 
     private void drawMuteButton(Canvas canvas, RectF rect, boolean muted, String label) {
@@ -452,6 +502,9 @@ public class StatusHudView extends View {
             if (menu.blocksHud()) {
                 return true;
             }
+            if (BridgeService.STATE.screenMirror) {
+                return true;
+            }
             if (micMuteRect.contains(x, y)) {
                 if (listener != null) {
                     listener.onMicMuteTap();
@@ -479,7 +532,7 @@ public class StatusHudView extends View {
     }
 
     private int cardIndexAt(float x, float y) {
-        if (!BridgeService.STATE.hasPcStats()) {
+        if (BridgeService.STATE.screenMirror || !BridgeService.STATE.hasPcStats()) {
             return -1;
         }
         for (int i = 0; i < cardRects.length; i++) {
