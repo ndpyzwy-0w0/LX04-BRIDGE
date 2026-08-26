@@ -160,6 +160,11 @@ final class TcpBridgeServer {
             reader.start();
             long lastStatus = 0;
             while (running && client == socket && !socket.isClosed()) {
+                if (state.flushStatus) {
+                    state.flushStatus = false;
+                    lastStatus = SystemClock.elapsedRealtime();
+                    sendStatus();
+                }
                 byte[] frame = outbound.poll();
                 if (frame != null) {
                     out.write(frame);

@@ -780,7 +780,7 @@ class HostApp:
             self._start_mirror(restart=True)
 
     def _send_mirror_frame(self, jpeg: bytes) -> None:
-        if not self.connected:
+        if not self.connected or not self.mirror.running():
             return
         self.client.send_video(jpeg)
 
@@ -792,7 +792,9 @@ class HostApp:
         if self.mirror.running():
             self.mirror.stop()
             self._mirror_logged = False
-            self._log("屏幕镜像已关闭")
+            self._log("屏幕镜像已关闭，已停止推画面")
+            if self.pc_stats_enabled.get():
+                self._push_pc_stats(force=True)
 
     def _start_mirror(self, restart: bool = False) -> None:
         if not self.connected:

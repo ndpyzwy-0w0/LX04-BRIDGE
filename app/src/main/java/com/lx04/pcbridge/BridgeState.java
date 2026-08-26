@@ -10,6 +10,7 @@ final class BridgeState {
     volatile boolean upsideDown;
     volatile boolean lightTheme;
     volatile boolean screenMirror;
+    volatile boolean flushStatus;
     volatile String mirrorTitle = "";
     volatile boolean permissionDenied;
     volatile float level;

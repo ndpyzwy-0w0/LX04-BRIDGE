@@ -209,6 +209,7 @@ public class BridgeService extends Service {
 
     public static void setScreenMirror(android.content.Context context, boolean on) {
         STATE.screenMirror = on;
+        STATE.flushStatus = true;
         if (!on) {
             ScreenMirror.INSTANCE.clear();
             STATE.mirrorTitle = "";
