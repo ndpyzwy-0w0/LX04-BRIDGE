@@ -8,6 +8,7 @@ final class DisplayPrefs {
     private static final String KEY_UPSIDE_DOWN = "upside_down";
     private static final String KEY_LIGHT_THEME = "light_theme";
     private static final String KEY_HUD_STYLE = "hud_style";
+    private static final String KEY_SCREEN_MIRROR = "screen_mirror";
 
     private DisplayPrefs() {
     }
@@ -26,6 +27,14 @@ final class DisplayPrefs {
 
     static void setLightTheme(Context context, boolean lightTheme) {
         prefs(context).edit().putBoolean(KEY_LIGHT_THEME, lightTheme).apply();
+    }
+
+    static boolean isScreenMirror(Context context) {
+        return prefs(context).getBoolean(KEY_SCREEN_MIRROR, false);
+    }
+
+    static void setScreenMirror(Context context, boolean on) {
+        prefs(context).edit().putBoolean(KEY_SCREEN_MIRROR, on).apply();
     }
 
     static String hudStyleJson(Context context) {

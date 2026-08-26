@@ -31,6 +31,7 @@ public class BridgeService extends Service {
         STATE.apkVersion = AppVersion.read(this);
         STATE.upsideDown = DisplayPrefs.isUpsideDown(this);
         STATE.lightTheme = DisplayPrefs.isLightTheme(this);
+        STATE.screenMirror = DisplayPrefs.isScreenMirror(this);
         DisplayPrefs.loadHudStyle(this, STATE.hudStyle);
         startAsForeground();
         PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
@@ -53,6 +54,8 @@ public class BridgeService extends Service {
                 STATE.pcName = helloAckName == null ? "" : helloAckName;
                 if (!connected) {
                     STATE.pcStatsValid = false;
+                    ScreenMirror.INSTANCE.clear();
+                    STATE.mirrorTitle = "";
                 }
                 if (connected) {
                     playback.start();
@@ -72,6 +75,13 @@ public class BridgeService extends Service {
                 if (playback != null) {
                     playback.push(pcm, muted || STATE.spkMuted);
                     STATE.playLevel = playback.getPeak();
+                }
+            }
+
+            @Override
+            public void onVideo(byte[] jpeg) {
+                if (STATE.screenMirror) {
+                    ScreenMirror.INSTANCE.accept(jpeg);
                 }
             }
 
@@ -115,6 +125,11 @@ public class BridgeService extends Service {
                     return;
                 } else if ("pc_stats".equals(cmd)) {
                     applyPcStats(json);
+                    return;
+                } else if ("mirror_info".equals(cmd) || "screen_mirror".equals(cmd)) {
+                    if (json.has("title")) {
+                        STATE.mirrorTitle = json.optString("title", "");
+                    }
                     return;
                 }
                 refreshHeadline();
@@ -189,6 +204,17 @@ public class BridgeService extends Service {
         STATE.lightTheme = light;
         if (context != null) {
             DisplayPrefs.setLightTheme(context, light);
+        }
+    }
+
+    public static void setScreenMirror(android.content.Context context, boolean on) {
+        STATE.screenMirror = on;
+        if (!on) {
+            ScreenMirror.INSTANCE.clear();
+            STATE.mirrorTitle = "";
+        }
+        if (context != null) {
+            DisplayPrefs.setScreenMirror(context, on);
         }
     }
 

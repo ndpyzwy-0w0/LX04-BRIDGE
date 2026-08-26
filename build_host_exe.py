@@ -113,6 +113,8 @@ def main() -> int:
         "psutil",
         "--hidden-import",
         "pc_stats",
+        "--hidden-import",
+        "screen_mirror",
         "--collect-all",
         "psutil",
         "--collect-all",

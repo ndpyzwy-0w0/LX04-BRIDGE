@@ -33,6 +33,7 @@ adb forward tcp:17890 tcp:17890
 | 0x06 | PING | 双向 | 空 |
 | 0x07 | PONG | 双向 | 空 |
 | 0x08 | PLAY | 电脑→音箱 | PCM S16LE 48 kHz 立体声 |
+| 0x09 | VIDEO | 电脑→音箱 | JPEG（800×480，屏幕镜像） |
 
 ## HELLO JSON
 
@@ -67,6 +68,7 @@ adb forward tcp:17890 tcp:17890
   "playLevel": 0.18,
   "volume": 0.55,
   "lightTheme": false,
+  "screenMirror": false,
   "hudStyle": {
     "rev": 1710000000000,
     "reset": false,
@@ -88,6 +90,7 @@ adb forward tcp:17890 tcp:17890
 {"cmd": "ping"}
 {"cmd": "volume", "level": 0.55}
 {"cmd": "pc_stats", "cpu": 34, "cpuT": 59, "gpu": 12, "gpuT": 49, "gpuN": "RTX 4070 SUPER", "vram": 28, "gpuW": 32, "ram": 35, "ramU": 22.2, "ramT": 63.8, "disk": 42, "diskN": "D:", "diskU": 400, "diskT": 931, "netD": 1500, "netU": 120, "up": 3600, "cores": 24}
+{"cmd": "mirror_info", "title": "1  1920×1080  主屏"}
 ```
 
 `pc_stats` 由电脑每秒推一次，音箱屏幕画 CPU / GPU / 内存 / 磁盘。占用用打包进 EXE 的采集器 + 系统 API / 显卡驱动，不要求接收方再装 Python 或监控软件。`diskN` / `diskU` / `diskT` 是上位机所选盘符和已用/总量 GB。温度字段在读不到时省略（不要发假的 ACPI 27°C）。GPU 温度优先用本机 NVIDIA NVML；CPU 封装温度仅在本机已开 MSI Afterburner 时补充。上位机可打开 MSI 官网下载页或启动本机已安装的 Afterburner，但不随包分发。
@@ -95,3 +98,5 @@ adb forward tcp:17890 tcp:17890
 `mute` / `unmute` / `toggle_mute` 只切麦克风。扬声器用 `mute_spk` / `unmute_spk` / `toggle_spk_mute`。STATUS 里 `micMuted` / `spkMuted` 分开报；`muted` 仍表示麦克风静音（兼容旧上位机）。`upside_down` 由上位机切换吊装倒转屏幕。`light_theme` 切换浅色/深色底；音箱从右侧滑出菜单进入「系统设置」也可改，两边通过 STATUS `lightTheme` 与 CONTROL `light_theme` 实时同步。`hud_style` 同步各板块标题、大字颜色、大字号（`valueSize`，默认 28）和小字号（`subSize`，默认 11），以及大字（`metric`）和小字（`subMetric`）监视的数据：cpu / cpuT / gpu / gpuT / gpuW / gpuFan / vram / ram / ramGB / disk / diskGB / diskIo / netD / netU / cores / gpuN；小字还可 `none` 不显示。字号超出板块宽高时会自动缩小并裁切，不会画出格子。`rev` 为双方的样式版本，较大的覆盖较小的。音箱长按某一栏目可编辑，改动经 STATUS `hudStyle` 回传电脑；电脑预览的改动经 CONTROL 下发。两边实时同一套样式。音箱显示真实读数，预览只用示意数字。`reset: true` 恢复默认。未连接上位机时，音箱等待页有「重置样式」。
 
 `PLAY` 是电脑正在播放的声音，送给音箱喇叭。与 `AUDIO`（音箱麦克风 → 电脑）方向相反。
+
+`VIDEO` 是电脑某一块显示器的 JPEG 画面，缩放成 800×480 后投到音箱。音箱从右侧菜单打开「屏幕镜像」后，STATUS 带 `screenMirror: true`，上位机开始推帧；再点一次关闭。上位机「同步屏幕」下拉框选择投哪一块显示器。`mirror_info` 只把当前显示器名称告诉音箱，画在画面顶部。JPEG 通常约 20KB，约 10 帧/秒，和音频共用同一条 USB 隧道。payload 上限 **256KB**。

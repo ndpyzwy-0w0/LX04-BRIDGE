@@ -9,6 +9,8 @@ final class BridgeState {
     volatile boolean spkMuted;
     volatile boolean upsideDown;
     volatile boolean lightTheme;
+    volatile boolean screenMirror;
+    volatile String mirrorTitle = "";
     volatile boolean permissionDenied;
     volatile float level;
     volatile float playLevel;
