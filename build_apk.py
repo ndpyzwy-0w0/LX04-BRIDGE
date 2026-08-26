@@ -26,6 +26,15 @@ def bump_version() -> int:
     return version
 
 
+def _use_user_gradle_home(env: dict[str, str]) -> None:
+    """Cursor sandbox may point GRADLE_USER_HOME at an empty temp cache."""
+    current = (env.get("GRADLE_USER_HOME") or "").replace("\\", "/").lower()
+    real = Path.home() / ".gradle"
+    if "cursor-sandbox-cache" in current and real.is_dir():
+        env["GRADLE_USER_HOME"] = str(real)
+        print("GRADLE_USER_HOME ->", real)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Build APK and commit a local release snapshot.")
     parser.add_argument(
@@ -51,6 +60,7 @@ def main() -> int:
     for key in ("JAVA_HOME", "ANDROID_HOME", "ANDROID_SDK_ROOT"):
         if key in os.environ:
             env[key] = os.environ[key]
+    _use_user_gradle_home(env)
 
     gradlew = ROOT / "gradlew.bat" if os.name == "nt" else ROOT / "gradlew"
     cmd = [str(gradlew), ":app:assembleDebug", "--no-daemon"]
