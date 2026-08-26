@@ -56,6 +56,15 @@ public class StatusHudView extends View {
     private final RectF tmpRect = new RectF();
     private float pulse;
     private boolean lightTheme;
+    private boolean wasMirroring;
+    private long mirrorInteractAt;
+    private final Runnable hideMirrorBar = new Runnable() {
+        @Override
+        public void run() {
+            invalidate();
+            postInvalidateOnAnimation();
+        }
+    };
     private int colText;
     private int colDim;
     private int colButton;
@@ -130,6 +139,9 @@ public class StatusHudView extends View {
         int h = getHeight();
         canvas.drawRect(0, 0, w, h, bg);
 
+        if (!s.screenMirror) {
+            wasMirroring = false;
+        }
         if (s.screenMirror) {
             drawMirror(canvas, s, w, h);
             if (editor.isOpen()) {
@@ -198,7 +210,43 @@ public class StatusHudView extends View {
             editor.close();
             return;
         }
+        if (BridgeService.STATE.screenMirror) {
+            noteMirrorInteract();
+        }
         menu.handleBack();
+    }
+
+    private void noteMirrorInteract() {
+        mirrorInteractAt = android.os.SystemClock.uptimeMillis();
+        touchHandler.removeCallbacks(hideMirrorBar);
+        touchHandler.postDelayed(hideMirrorBar, 2800);
+        invalidate();
+    }
+
+    private float mirrorBarAlpha() {
+        if (!wasMirroring) {
+            wasMirroring = true;
+            mirrorInteractAt = android.os.SystemClock.uptimeMillis();
+            touchHandler.removeCallbacks(hideMirrorBar);
+            touchHandler.postDelayed(hideMirrorBar, 2800);
+        }
+        if (menu.blocksHud()) {
+            mirrorInteractAt = android.os.SystemClock.uptimeMillis();
+            touchHandler.removeCallbacks(hideMirrorBar);
+            touchHandler.postDelayed(hideMirrorBar, 2800);
+            return 1f;
+        }
+        long idle = android.os.SystemClock.uptimeMillis() - mirrorInteractAt;
+        long showMs = 2800;
+        long fadeMs = 320;
+        if (idle < showMs) {
+            return 1f;
+        }
+        float fade = (idle - showMs) / (float) fadeMs;
+        if (fade >= 1f) {
+            return 0f;
+        }
+        return 1f - fade;
     }
 
     private void drawMirror(Canvas canvas, BridgeState s, int w, int h) {
@@ -209,17 +257,28 @@ public class StatusHudView extends View {
         if (hasFrame) {
             ScreenMirror.INSTANCE.draw(canvas, w, h);
         }
-        dim.setColor(0x88000000);
-        canvas.drawRect(0, 0, w, dp(28), dim);
-        dim.setColor(colDim);
-        int usbColor = !s.usbConnected ? 0xFFFF5C7A : (s.clientConnected ? 0xFF3DDC97 : 0xFFFFB020);
-        accent.setColor(usbColor);
-        canvas.drawCircle(dp(16), dp(16), dp(6), accent);
+        float bar = mirrorBarAlpha();
+        if (bar > 0.02f) {
+            int scrim = Math.max(1, Math.min(255, (int) (0x88 * bar)));
+            dim.setColor(scrim << 24);
+            canvas.drawRect(0, 0, w, dp(28), dim);
+            dim.setColor(colDim);
+            int usbColor = !s.usbConnected ? 0xFFFF5C7A : (s.clientConnected ? 0xFF3DDC97 : 0xFFFFB020);
+            accent.setColor(usbColor);
+            accent.setAlpha(Math.max(1, Math.min(255, (int) (255 * bar))));
+            canvas.drawCircle(dp(16), dp(16), dp(6), accent);
+            accent.setAlpha(255);
 
-        text.setTextSize(dp(13));
-        text.setColor(0xFFE8EEF8);
-        String title = (s.mirrorTitle == null || s.mirrorTitle.isEmpty()) ? "屏幕镜像" : s.mirrorTitle;
-        canvas.drawText(title, dp(30), dp(21), text);
+            int textAlpha = Math.max(1, Math.min(255, (int) (255 * bar)));
+            text.setTextSize(dp(13));
+            text.setColor((textAlpha << 24) | 0x00E8EEF8);
+            String title = (s.mirrorTitle == null || s.mirrorTitle.isEmpty()) ? "屏幕镜像" : s.mirrorTitle;
+            canvas.drawText(title, dp(30), dp(21), text);
+            text.setColor(colText);
+        }
+        if (bar > 0.02f && bar < 1f) {
+            postInvalidateOnAnimation();
+        }
 
         if (!s.clientConnected) {
             drawMirrorMessage(canvas, w, h, "等待上位机", "连接电脑后开始同步画面");
@@ -461,6 +520,9 @@ public class StatusHudView extends View {
         int action = event.getActionMasked();
         int w = getWidth();
         if (action == MotionEvent.ACTION_DOWN) {
+            if (BridgeService.STATE.screenMirror) {
+                noteMirrorInteract();
+            }
             menu.onDown(x, y, w, event);
             if (menu.blocksHud()) {
                 return true;
