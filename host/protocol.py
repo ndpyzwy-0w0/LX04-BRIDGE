@@ -8,6 +8,7 @@ from dataclasses import dataclass
 MAGIC = b"LXB1"
 HEADER = struct.Struct("<4sBBHII")
 PORT = 17890
+VIDEO_PORT = 17891
 
 HELLO = 0x01
 HELLO_ACK = 0x02

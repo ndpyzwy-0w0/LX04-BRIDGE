@@ -8,6 +8,7 @@ final class Protocol {
     static final String MAGIC = "LXB1";
     static final int HEADER_SIZE = 16;
     static final int PORT = 17890;
+    static final int VIDEO_PORT = 17891;
     static final int MAX_PAYLOAD = 256 * 1024;
 
     static final byte HELLO = 0x01;

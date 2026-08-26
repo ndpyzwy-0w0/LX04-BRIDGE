@@ -52,13 +52,16 @@ class BridgeClient:
     def __init__(self, on_event) -> None:
         self.on_event = on_event
         self.sock: socket.socket | None = None
+        self.video_sock: socket.socket | None = None
         self.alive = False
         self.seq = 0
         self.hello: dict = {}
         self.status: dict = {}
         self.frames = 0
         self._thread: threading.Thread | None = None
+        self._video_thread: threading.Thread | None = None
         self._send_lock = threading.Lock()
+        self._video_lock = threading.Lock()
         self._seq_lock = threading.Lock()
         self.generation = 0
 
@@ -69,8 +72,8 @@ class BridgeClient:
         sock = socket.create_connection((host, port), timeout=5)
         sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
         try:
-            sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 16 * 1024)
-            sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 16 * 1024)
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 64 * 1024)
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 64 * 1024)
         except OSError:
             pass
         sock.settimeout(8)
@@ -80,8 +83,32 @@ class BridgeClient:
         self._thread = threading.Thread(target=self._loop, args=(gen,), daemon=True)
         self._thread.start()
 
+    def connect_video(self, host: str, port: int) -> None:
+        self.close_video()
+        sock = socket.create_connection((host, port), timeout=5)
+        sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        try:
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 8 * 1024)
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 8 * 1024)
+        except OSError:
+            pass
+        sock.settimeout(None)
+        self.video_sock = sock
+        self._video_thread = threading.Thread(target=self._video_loop, args=(sock,), daemon=True, name="lx04-video-ack")
+        self._video_thread.start()
+
+    def close_video(self) -> None:
+        sock = self.video_sock
+        self.video_sock = None
+        if sock is not None:
+            try:
+                sock.close()
+            except OSError:
+                pass
+
     def close(self) -> None:
         self.alive = False
+        self.close_video()
         sock = self.sock
         self.sock = None
         if sock is not None:
@@ -102,7 +129,33 @@ class BridgeClient:
     def send_video(self, jpeg: bytes) -> None:
         if not jpeg or len(jpeg) > protocol.MAX_PAYLOAD:
             return
-        self._send(protocol.encode(protocol.VIDEO, jpeg, seq=self._next_seq()))
+        sock = self.video_sock
+        if sock is None:
+            return
+        try:
+            with self._video_lock:
+                if self.video_sock is not sock:
+                    return
+                sock.sendall(protocol.encode(protocol.VIDEO, jpeg, seq=self._next_seq()))
+        except OSError:
+            self.close_video()
+
+    def _video_loop(self, sock: socket.socket) -> None:
+        try:
+            while self.alive and sock is self.video_sock:
+                header = _read_exact(sock, protocol.HEADER.size)
+                decoded = protocol.try_decode_header(header)
+                if decoded is None:
+                    break
+                msg_type, _flags, seq, _timestamp_ms, length = decoded
+                if length:
+                    _read_exact(sock, length)
+                if msg_type == protocol.VIDEO_ACK:
+                    self.on_event("video_ack", seq)
+        except Exception:
+            pass
+        if sock is self.video_sock:
+            self.close_video()
 
     def _next_seq(self) -> int:
         with self._seq_lock:
@@ -163,8 +216,6 @@ class BridgeClient:
             self.on_event("status", self.status)
         elif frame.type == protocol.PING:
             self._send(protocol.encode(protocol.PONG, seq=self._next_seq()))
-        elif frame.type == protocol.VIDEO_ACK:
-            self.on_event("video_ack", frame.seq)
 
 
 def _read_exact(sock: socket.socket, size: int) -> bytes:
@@ -801,6 +852,12 @@ class HostApp:
     def _start_mirror(self, restart: bool = False) -> None:
         if not self.connected:
             return
+        if self.client.video_sock is None:
+            try:
+                self.client.connect_video("127.0.0.1", protocol.VIDEO_PORT)
+            except Exception as exc:
+                self._log("屏幕通道未打开: " + str(exc))
+                return
         self._refresh_monitors()
         chosen = self.mirror.start(self._selected_monitor_key())
         self._mirror_logged = False
@@ -1253,6 +1310,10 @@ class HostApp:
                     adb_usb.usb_forward(self.adb, serial)
                     time.sleep(0.35 * attempt)
                 self.client.connect("127.0.0.1", protocol.PORT)
+                try:
+                    self.client.connect_video("127.0.0.1", protocol.VIDEO_PORT)
+                except Exception:
+                    pass
                 return
             except Exception as exc:
                 last_err = exc
@@ -1305,6 +1366,10 @@ class HostApp:
                         self._reviving = False
                         return
                     self.client.connect("127.0.0.1", protocol.PORT)
+                    try:
+                        self.client.connect_video("127.0.0.1", protocol.VIDEO_PORT)
+                    except Exception:
+                        pass
                     if not self._session:
                         self.client.close()
                         self._reviving = False
