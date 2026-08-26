@@ -31,7 +31,7 @@ public class MainActivity extends Activity {
                 }
                 hud.invalidate();
             }
-            long delay = BridgeService.STATE.screenMirror ? 200 : 50;
+            long delay = BridgeService.STATE.screenMirror ? 16 : 50;
             handler.postDelayed(this, delay);
         }
     };
