@@ -88,7 +88,7 @@ class BridgeClient:
         sock = socket.create_connection((host, port), timeout=5)
         sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
         try:
-            sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 8 * 1024)
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 4 * 1024)
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 8 * 1024)
         except OSError:
             pass
@@ -868,7 +868,7 @@ class HostApp:
         self._saved_monitor = chosen.key
         self.client.send_control("mirror_info", title=chosen.label())
         self._save_routes()
-        self._log(("屏幕镜像已切换到: " if restart else "屏幕镜像: ") + chosen.label())
+        self._log(("屏幕镜像已切换到: " if restart else "屏幕镜像: ") + chosen.label() + "（投屏时暂停音箱播放，把 USB 留给画面）")
 
     def _on_pc_stats_change(self) -> None:
         if not self._routes_ready:
@@ -1151,6 +1151,8 @@ class HostApp:
             self.play_peak = 0.0
         else:
             self.play_peak = self.loopback.peak
+        if self.mirror.running():
+            return
         self.client.send_play(pcm, muted=silent)
 
     def _restore_render(self) -> None:

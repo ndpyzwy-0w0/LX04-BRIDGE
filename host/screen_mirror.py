@@ -12,16 +12,16 @@ COLORONCOLOR = 3
 MONITORINFOF_PRIMARY = 1
 CCHDEVICENAME = 32
 ENCODER_PARAMETER_LONG = 4
-JPEG_QUALITY = 16
-JPEG_QUALITY_SMALL = 12
-MAX_JPEG = 28 * 1024
+JPEG_QUALITY = 6
+JPEG_QUALITY_SMALL = 4
+MAX_JPEG = 20 * 1024
 TARGET_W = 800
 TARGET_H = 480
-FRAME_INTERVAL = 0.07
-FRAME_INTERVAL_SLOW = 0.14
+FRAME_INTERVAL = 0.04
+FRAME_INTERVAL_SLOW = 0.10
 MONITOR_REFRESH = 2.0
 GRABBER_REOPEN_FRAMES = 400
-ACK_WAIT_S = 0.12
+ACK_WAIT_S = 0.28
 
 user32 = ctypes.WinDLL("user32", use_last_error=True)
 gdi32 = ctypes.WinDLL("gdi32", use_last_error=True)
@@ -30,6 +30,8 @@ ole32 = ctypes.oledll.ole32
 kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
 
 DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 = ctypes.c_void_p(-4)
+DPI_AWARENESS_CONTEXT_UNAWARE = ctypes.c_void_p(-1)
+DPI_AWARENESS_CONTEXT_UNAWARE_GDISCALED = ctypes.c_void_p(-5)
 
 
 class RECT(ctypes.Structure):
@@ -235,12 +237,22 @@ _gdiplus_lock = threading.Lock()
 
 
 def _thread_dpi() -> None:
-    """Per-monitor DPI for capture threads only. Never call this on the Tk UI thread:
-    changing awareness after Tk() creates a window detaches the frame from the widgets."""
+    """Per-monitor DPI for UI monitor lists only. Never call this on the Tk UI thread."""
     try:
         user32.SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2)
     except Exception:
         pass
+
+
+def _capture_dpi() -> None:
+    """Virtualized pixels for capture: a 4K screen is ~2K, StretchBlt is much cheaper."""
+    try:
+        user32.SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_UNAWARE_GDISCALED)
+    except Exception:
+        try:
+            user32.SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_UNAWARE)
+        except Exception:
+            pass
 
 
 def _ensure_gdiplus() -> None:
@@ -453,7 +465,7 @@ def _hbitmap_to_jpeg(hbitmap, quality: int, stream) -> bytes:
     status = gdiplus.GdipCreateBitmapFromHBITMAP(hbitmap, None, ctypes.byref(image))
     if status != 0 or not image:
         raise RuntimeError("无法编码屏幕画面")
-    quality_value = ctypes.c_uint32(max(15, min(80, int(quality))))
+    quality_value = ctypes.c_uint32(max(1, min(100, int(quality))))
     params = EncoderParameters()
     params.Count = 1
     params.Parameter[0].Guid = ENCODER_QUALITY
@@ -573,7 +585,7 @@ class ScreenSender:
             ole32.CoInitializeEx(None, COINIT_MULTITHREADED)
         except Exception:
             pass
-        _thread_dpi()
+        _capture_dpi()
         grabber = _Grabber()
         chosen: Monitor | None = None
         last_enum = 0.0
@@ -593,7 +605,7 @@ class ScreenSender:
                             self.title = chosen.label()
                     if chosen is None:
                         raise RuntimeError("显示器已断开")
-                    quality = JPEG_QUALITY_SMALL if self._send_s > 0.08 else None
+                    quality = JPEG_QUALITY_SMALL if self._send_s > 0.07 else None
                     jpeg = grabber.grab(chosen, quality)
                     if self._alive and jpeg:
                         self._put(jpeg)
