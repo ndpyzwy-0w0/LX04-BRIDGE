@@ -144,6 +144,11 @@ final class TcpBridgeServer {
         try {
             socket.setTcpNoDelay(true);
             socket.setSoTimeout(15000);
+            try {
+                socket.setReceiveBufferSize(48 * 1024);
+                socket.setSendBufferSize(32 * 1024);
+            } catch (Exception ignored) {
+            }
             callbacks.prepareForClient();
             OutputStream out = socket.getOutputStream();
             InputStream in = socket.getInputStream();
@@ -159,10 +164,11 @@ final class TcpBridgeServer {
                 if (frame != null) {
                     out.write(frame);
                 } else {
-                    Thread.sleep(4);
+                    Thread.sleep(state.screenMirror ? 8 : 4);
                 }
                 long now = SystemClock.elapsedRealtime();
-                if (now - lastStatus > 250) {
+                long statusEvery = state.screenMirror ? 800 : 250;
+                if (now - lastStatus > statusEvery) {
                     lastStatus = now;
                     sendStatus();
                 }
