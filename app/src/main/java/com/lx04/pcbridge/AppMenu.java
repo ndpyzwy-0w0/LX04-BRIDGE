@@ -10,6 +10,7 @@ import android.os.SystemClock;
 import android.view.MotionEvent;
 import android.view.VelocityTracker;
 import android.view.ViewConfiguration;
+import android.widget.OverScroller;
 
 final class AppMenu {
     private static final int PAGE_HUD = 0;
@@ -40,6 +41,7 @@ final class AppMenu {
     private final RectF clockMinuteRect = new RectF();
     private final RectF clockSecondRect = new RectF();
     private final RectF settingsPanel = new RectF();
+    private final RectF settingsViewport = new RectF();
     private final RectF bgRow = new RectF();
     private final RectF[] slotRects = new RectF[] {
             new RectF(), new RectF(), new RectF(), new RectF()
@@ -47,7 +49,9 @@ final class AppMenu {
     private final RectF opacityTrack = new RectF();
     private final RectF opacityKnob = new RectF();
     private final Paint dash = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint scrollBar = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final DashPathEffect dashEffect = new DashPathEffect(new float[] {8f, 6f}, 0);
+    private final OverScroller scroller;
 
     private int page = PAGE_HUD;
     private float offset;
@@ -62,17 +66,24 @@ final class AppMenu {
     private boolean light;
     private boolean pageCapture;
     private boolean slidingOpacity;
+    private boolean settingsScrolling;
     private boolean longFired;
     private int pressSlot = -1;
     private long lastAnimMs;
     private long lastOpenMs;
+    private float settingsScroll;
+    private float settingsContentH;
+    private float settingsDragStart;
+    private final int maxFling;
     private VelocityTracker velocity;
 
     AppMenu(StatusHudView view) {
         this.view = view;
+        scroller = new OverScroller(view.getContext());
         ViewConfiguration vc = ViewConfiguration.get(view.getContext());
         touchSlop = vc.getScaledTouchSlop();
         minFling = vc.getScaledMinimumFlingVelocity();
+        maxFling = vc.getScaledMaximumFlingVelocity();
         text.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
         dim.setTypeface(Typeface.create("sans-serif", Typeface.NORMAL));
         stroke.setStyle(Paint.Style.STROKE);
@@ -104,7 +115,10 @@ final class AppMenu {
         dragging = false;
         pageCapture = false;
         slidingOpacity = false;
+        settingsScrolling = false;
         pressSlot = -1;
+        settingsScroll = 0;
+        scroller.forceFinished(true);
         view.removeCallbacks(longDelete);
         recycleVelocity();
         animateTo(0);
@@ -122,6 +136,9 @@ final class AppMenu {
         }
         if (page == PAGE_SETTINGS) {
             page = PAGE_HUD;
+            settingsScroll = 0;
+            settingsScrolling = false;
+            scroller.forceFinished(true);
             view.invalidate();
             return;
         }
@@ -148,21 +165,26 @@ final class AppMenu {
     }
 
     boolean advance() {
-        if (!animating) {
-            return false;
+        boolean more = false;
+        if (animating) {
+            long now = SystemClock.uptimeMillis();
+            float dt = Math.min(0.05f, (now - lastAnimMs) / 1000f);
+            lastAnimMs = now;
+            float diff = target - offset;
+            if (Math.abs(diff) < 1.5f) {
+                offset = target;
+                animating = false;
+            } else {
+                float step = Math.max(dp(420), Math.abs(diff) * 8f) * dt;
+                offset += Math.signum(diff) * Math.min(Math.abs(diff), step);
+                more = true;
+            }
         }
-        long now = SystemClock.uptimeMillis();
-        float dt = Math.min(0.05f, (now - lastAnimMs) / 1000f);
-        lastAnimMs = now;
-        float diff = target - offset;
-        if (Math.abs(diff) < 1.5f) {
-            offset = target;
-            animating = false;
-            return false;
+        if (page == PAGE_SETTINGS && scroller.computeScrollOffset()) {
+            settingsScroll = clampSettingsScroll(scroller.getCurrY());
+            more = true;
         }
-        float step = Math.max(dp(420), Math.abs(diff) * 8f) * dt;
-        offset += Math.signum(diff) * Math.min(Math.abs(diff), step);
-        return true;
+        return more;
     }
 
     void draw(Canvas canvas, int w, int h, boolean lightTheme) {
@@ -233,74 +255,108 @@ final class AppMenu {
         float tw = text.measureText(title);
         canvas.drawText(title, settingsPanel.centerX() - tw / 2f, settingsPanel.top + dp(30), text);
 
-        dim.setColor(colDim());
-        dim.setTextSize(dp(13));
-        canvas.drawText("外观", settingsPanel.left + dp(18), settingsPanel.top + dp(64), dim);
+        settingsViewport.set(settingsPanel.left, settingsPanel.top + dp(48),
+                settingsPanel.right, settingsPanel.bottom - dp(8));
+        settingsContentH = layoutSettings(null, false);
+        settingsScroll = clampSettingsScroll(settingsScroll);
 
-        float top = settingsPanel.top + dp(74);
+        canvas.save();
+        canvas.clipRect(settingsViewport);
+        layoutSettings(canvas, true);
+        canvas.restore();
+        drawSettingsScrollBar(canvas);
+    }
+
+    private float layoutSettings(Canvas canvas, boolean draw) {
+        float y = settingsViewport.top - (draw ? settingsScroll : 0);
+        float start = y;
+        float left = settingsPanel.left + dp(18);
+        float right = settingsPanel.right - dp(18);
         float btnH = dp(44);
         float gap = dp(10);
-        float inner = settingsPanel.width() - dp(36);
+        float inner = right - left;
         float btnW = (inner - gap) / 2f;
-        darkRect.set(settingsPanel.left + dp(18), top, settingsPanel.left + dp(18) + btnW, top + btnH);
-        lightRect.set(darkRect.right + gap, top, darkRect.right + gap + btnW, top + btnH);
-        drawModeButton(canvas, darkRect, "深色", !light);
-        drawModeButton(canvas, lightRect, "浅色", light);
 
-        dim.setTextSize(dp(12));
-        canvas.drawText("与电脑上位机的「浅色」开关同步。",
-                settingsPanel.left + dp(18), lightRect.bottom + dp(20), dim);
+        if (draw) {
+            dim.setColor(colDim());
+            dim.setTextSize(dp(13));
+            canvas.drawText("外观", left, y + dp(16), dim);
+        }
+        y += dp(22);
 
-        dim.setTextSize(dp(13));
-        canvas.drawText("静音按钮", settingsPanel.left + dp(18), lightRect.bottom + dp(42), dim);
+        darkRect.set(left, y, left + btnW, y + btnH);
+        lightRect.set(darkRect.right + gap, y, right, y + btnH);
+        if (draw) {
+            drawModeButton(canvas, darkRect, "深色", !light);
+            drawModeButton(canvas, lightRect, "浅色", light);
+            dim.setTextSize(dp(12));
+            canvas.drawText("与电脑上位机的「浅色」开关同步。",
+                    left, lightRect.bottom + dp(20), dim);
+            dim.setTextSize(dp(13));
+            canvas.drawText("静音按钮", left, lightRect.bottom + dp(42), dim);
+        }
 
         float hideTop = lightRect.bottom + dp(50);
-        autoHideOffRect.set(settingsPanel.left + dp(18), hideTop,
-                settingsPanel.left + dp(18) + btnW, hideTop + btnH);
-        autoHideOnRect.set(autoHideOffRect.right + gap, hideTop,
-                autoHideOffRect.right + gap + btnW, hideTop + btnH);
-        boolean autoHide = BridgeService.STATE.autoHideMute;
-        drawModeButton(canvas, autoHideOffRect, "常显", !autoHide);
-        drawModeButton(canvas, autoHideOnRect, "自动隐藏", autoHide);
-
-        dim.setTextSize(dp(12));
-        canvas.drawText("开启后空闲会隐藏，点屏幕可再次呼出。",
-                settingsPanel.left + dp(18), autoHideOnRect.bottom + dp(18), dim);
-
-        dim.setTextSize(dp(13));
-        canvas.drawText("时间", settingsPanel.left + dp(18), autoHideOnRect.bottom + dp(42), dim);
+        autoHideOffRect.set(left, hideTop, left + btnW, hideTop + btnH);
+        autoHideOnRect.set(autoHideOffRect.right + gap, hideTop, right, hideTop + btnH);
+        if (draw) {
+            boolean autoHide = BridgeService.STATE.autoHideMute;
+            drawModeButton(canvas, autoHideOffRect, "常显", !autoHide);
+            drawModeButton(canvas, autoHideOnRect, "自动隐藏", autoHide);
+            dim.setTextSize(dp(12));
+            canvas.drawText("开启后空闲会隐藏，点屏幕可再次呼出。",
+                    left, autoHideOnRect.bottom + dp(18), dim);
+            dim.setTextSize(dp(13));
+            canvas.drawText("时间", left, autoHideOnRect.bottom + dp(42), dim);
+        }
 
         float clockTop = autoHideOnRect.bottom + dp(50);
         float unitW = (inner - gap * 3) / 4f;
-        clockDateRect.set(settingsPanel.left + dp(18), clockTop,
-                settingsPanel.left + dp(18) + unitW, clockTop + btnH);
+        clockDateRect.set(left, clockTop, left + unitW, clockTop + btnH);
         clockHourRect.set(clockDateRect.right + gap, clockTop,
                 clockDateRect.right + gap + unitW, clockTop + btnH);
         clockMinuteRect.set(clockHourRect.right + gap, clockTop,
                 clockHourRect.right + gap + unitW, clockTop + btnH);
-        clockSecondRect.set(clockMinuteRect.right + gap, clockTop,
-                clockMinuteRect.right + gap + unitW, clockTop + btnH);
-        BridgeState clock = BridgeService.STATE;
-        drawModeButton(canvas, clockDateRect, "日期", clock.clockDate);
-        drawModeButton(canvas, clockHourRect, "时", clock.clockHour);
-        drawModeButton(canvas, clockMinuteRect, "分", clock.clockMinute);
-        drawModeButton(canvas, clockSecondRect, "秒", clock.clockSecond);
+        clockSecondRect.set(clockMinuteRect.right + gap, clockTop, right, clockTop + btnH);
+        if (draw) {
+            BridgeState clock = BridgeService.STATE;
+            drawModeButton(canvas, clockDateRect, "日期", clock.clockDate);
+            drawModeButton(canvas, clockHourRect, "时", clock.clockHour);
+            drawModeButton(canvas, clockMinuteRect, "分", clock.clockMinute);
+            drawModeButton(canvas, clockSecondRect, "秒", clock.clockSecond);
+            dim.setTextSize(dp(12));
+            canvas.drawText("右上角逐项开关，全关则不显示。",
+                    left, clockSecondRect.bottom + dp(18), dim);
+        }
 
-        dim.setTextSize(dp(12));
-        canvas.drawText("右上角逐项开关，全关则不显示。",
-                settingsPanel.left + dp(18), clockSecondRect.bottom + dp(18), dim);
+        bgRow.set(left, clockSecondRect.bottom + dp(30), right, clockSecondRect.bottom + dp(76));
+        if (draw) {
+            card.setColor(colCard());
+            canvas.drawRoundRect(bgRow, dp(12), dp(12), card);
+            text.setTextSize(dp(16));
+            text.setColor(colText());
+            canvas.drawText("监视页背景", bgRow.left + dp(14), bgRow.top + dp(20), text);
+            dim.setColor(colDim());
+            dim.setTextSize(dp(11));
+            canvas.drawText("自定义图片 / 元素透明度", bgRow.left + dp(14), bgRow.top + dp(36), dim);
+            drawChevron(canvas, bgRow.right - dp(18), bgRow.centerY(), dp(8), colDim(), false);
+        }
+        return bgRow.bottom + dp(16) - start;
+    }
 
-        bgRow.set(settingsPanel.left + dp(18), clockSecondRect.bottom + dp(30),
-                settingsPanel.right - dp(18), clockSecondRect.bottom + dp(76));
-        card.setColor(colCard());
-        canvas.drawRoundRect(bgRow, dp(12), dp(12), card);
-        text.setTextSize(dp(16));
-        text.setColor(colText());
-        canvas.drawText("监视页背景", bgRow.left + dp(14), bgRow.top + dp(20), text);
-        dim.setColor(colDim());
-        dim.setTextSize(dp(11));
-        canvas.drawText("自定义图片 / 元素透明度", bgRow.left + dp(14), bgRow.top + dp(36), dim);
-        drawChevron(canvas, bgRow.right - dp(18), bgRow.centerY(), dp(8), colDim(), false);
+    private void drawSettingsScrollBar(Canvas canvas) {
+        float viewH = settingsViewport.height();
+        if (settingsContentH <= viewH + 1f) {
+            return;
+        }
+        float track = viewH;
+        float thumb = Math.max(dp(28), track * track / settingsContentH);
+        float max = settingsContentH - viewH;
+        float t = max <= 0 ? 0 : settingsScroll / max;
+        float top = settingsViewport.top + (track - thumb) * t;
+        float right = settingsViewport.right - dp(4);
+        scrollBar.setColor(light ? 0x668FA0BE : 0x88E8EEF8);
+        canvas.drawRoundRect(right - dp(4), top, right, top + thumb, dp(2), dp(2), scrollBar);
     }
 
     private void drawBgSettings(Canvas canvas, int w, int h) {
@@ -473,11 +529,16 @@ final class AppMenu {
         animating = false;
         pageCapture = false;
         slidingOpacity = false;
+        settingsScrolling = false;
         longFired = false;
         pressSlot = -1;
         view.removeCallbacks(longDelete);
         obtainVelocity().addMovement(event);
         drawerW = drawerWidth(w);
+        if (page == PAGE_SETTINGS) {
+            scroller.forceFinished(true);
+            settingsDragStart = settingsScroll;
+        }
         if (page == PAGE_BG && hitOpacity(x, y)) {
             pageCapture = true;
             slidingOpacity = true;
@@ -509,6 +570,21 @@ final class AppMenu {
         float dx = downX - x;
         float adx = Math.abs(dx);
         float ady = Math.abs(y - downY);
+        if (page == PAGE_SETTINGS) {
+            if (!settingsScrolling && !dragging) {
+                if (adx < touchSlop && ady < touchSlop) {
+                    return true;
+                }
+                if (ady > adx) {
+                    settingsScrolling = true;
+                }
+            }
+            if (settingsScrolling) {
+                settingsScroll = clampSettingsScroll(settingsDragStart - (y - downY));
+                view.invalidate();
+                return true;
+            }
+        }
         if (!dragging) {
             if (adx < touchSlop && ady < touchSlop) {
                 return pageCapture;
@@ -546,8 +622,22 @@ final class AppMenu {
             return false;
         }
         obtainVelocity().addMovement(event);
-        obtainVelocity().computeCurrentVelocity(1000);
+        obtainVelocity().computeCurrentVelocity(1000, maxFling);
         float vx = obtainVelocity().getXVelocity();
+        float vy = obtainVelocity().getYVelocity();
+        boolean wasSettingsScroll = settingsScrolling;
+        if (wasSettingsScroll) {
+            recycleVelocity();
+            settingsScrolling = false;
+            tracking = false;
+            dragging = false;
+            if (Math.abs(vy) > minFling) {
+                scroller.fling(0, Math.round(settingsScroll), 0, Math.round(-vy),
+                        0, 0, 0, Math.round(maxSettingsScroll()));
+                view.postInvalidateOnAnimation();
+            }
+            return true;
+        }
         recycleVelocity();
         boolean wasDrag = dragging;
         dragging = false;
@@ -581,46 +671,48 @@ final class AppMenu {
         if (page == PAGE_SETTINGS) {
             if (backRect.contains(x, y)) {
                 page = PAGE_HUD;
+                settingsScroll = 0;
+                scroller.forceFinished(true);
                 view.invalidate();
                 return true;
             }
-            if (darkRect.contains(x, y)) {
+            if (hitSetting(darkRect, x, y)) {
                 setLight(false);
                 return true;
             }
-            if (lightRect.contains(x, y)) {
+            if (hitSetting(lightRect, x, y)) {
                 setLight(true);
                 return true;
             }
-            if (autoHideOffRect.contains(x, y)) {
+            if (hitSetting(autoHideOffRect, x, y)) {
                 setAutoHideMute(false);
                 return true;
             }
-            if (autoHideOnRect.contains(x, y)) {
+            if (hitSetting(autoHideOnRect, x, y)) {
                 setAutoHideMute(true);
                 return true;
             }
-            if (clockDateRect.contains(x, y)) {
+            if (hitSetting(clockDateRect, x, y)) {
                 BridgeService.setClockDate(view.getContext(), !BridgeService.STATE.clockDate);
                 view.invalidate();
                 return true;
             }
-            if (clockHourRect.contains(x, y)) {
+            if (hitSetting(clockHourRect, x, y)) {
                 BridgeService.setClockHour(view.getContext(), !BridgeService.STATE.clockHour);
                 view.invalidate();
                 return true;
             }
-            if (clockMinuteRect.contains(x, y)) {
+            if (hitSetting(clockMinuteRect, x, y)) {
                 BridgeService.setClockMinute(view.getContext(), !BridgeService.STATE.clockMinute);
                 view.invalidate();
                 return true;
             }
-            if (clockSecondRect.contains(x, y)) {
+            if (hitSetting(clockSecondRect, x, y)) {
                 BridgeService.setClockSecond(view.getContext(), !BridgeService.STATE.clockSecond);
                 view.invalidate();
                 return true;
             }
-            if (bgRow.contains(x, y)) {
+            if (hitSetting(bgRow, x, y)) {
                 openBgSettings();
                 return true;
             }
@@ -655,10 +747,12 @@ final class AppMenu {
         view.removeCallbacks(longDelete);
         pageCapture = false;
         slidingOpacity = false;
+        settingsScrolling = false;
         pressSlot = -1;
         tracking = false;
         dragging = false;
         recycleVelocity();
+        scroller.forceFinished(true);
         if (offset > 1f && offset < drawerW) {
             animateTo(offset >= drawerW * 0.4f ? drawerW : 0);
         }
@@ -700,8 +794,23 @@ final class AppMenu {
 
     private void openSettings() {
         page = PAGE_SETTINGS;
+        settingsScroll = 0;
+        settingsScrolling = false;
+        scroller.forceFinished(true);
         animateTo(0);
         view.invalidate();
+    }
+
+    private boolean hitSetting(RectF rect, float x, float y) {
+        return settingsViewport.contains(x, y) && rect.contains(x, y);
+    }
+
+    private float maxSettingsScroll() {
+        return Math.max(0f, settingsContentH - settingsViewport.height());
+    }
+
+    private float clampSettingsScroll(float value) {
+        return clamp(value, 0f, maxSettingsScroll());
     }
 
     private void setMirror(boolean on) {
