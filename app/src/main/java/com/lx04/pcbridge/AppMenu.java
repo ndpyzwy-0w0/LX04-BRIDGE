@@ -35,6 +35,10 @@ final class AppMenu {
     private final RectF lightRect = new RectF();
     private final RectF autoHideOffRect = new RectF();
     private final RectF autoHideOnRect = new RectF();
+    private final RectF clockDateRect = new RectF();
+    private final RectF clockHourRect = new RectF();
+    private final RectF clockMinuteRect = new RectF();
+    private final RectF clockSecondRect = new RectF();
     private final RectF settingsPanel = new RectF();
     private final RectF bgRow = new RectF();
     private final RectF[] slotRects = new RectF[] {
@@ -193,7 +197,7 @@ final class AppMenu {
         canvas.drawText("系统设置", settingsRow.left + dp(14), settingsRow.top + dp(32), text);
         dim.setColor(colDim());
         dim.setTextSize(dp(11));
-        canvas.drawText("深色 / 浅色 / 背景", settingsRow.left + dp(14), settingsRow.top + dp(46), dim);
+        canvas.drawText("深色 / 浅色 / 时间 / 背景", settingsRow.left + dp(14), settingsRow.top + dp(46), dim);
         drawChevron(canvas, settingsRow.right - dp(18), settingsRow.centerY(), dp(8), colDim(), false);
 
         boolean mirroring = BridgeService.STATE.screenMirror;
@@ -263,8 +267,31 @@ final class AppMenu {
         canvas.drawText("开启后空闲会隐藏，点屏幕可再次呼出。",
                 settingsPanel.left + dp(18), autoHideOnRect.bottom + dp(18), dim);
 
-        bgRow.set(settingsPanel.left + dp(18), autoHideOnRect.bottom + dp(30),
-                settingsPanel.right - dp(18), autoHideOnRect.bottom + dp(76));
+        dim.setTextSize(dp(13));
+        canvas.drawText("时间", settingsPanel.left + dp(18), autoHideOnRect.bottom + dp(42), dim);
+
+        float clockTop = autoHideOnRect.bottom + dp(50);
+        float unitW = (inner - gap * 3) / 4f;
+        clockDateRect.set(settingsPanel.left + dp(18), clockTop,
+                settingsPanel.left + dp(18) + unitW, clockTop + btnH);
+        clockHourRect.set(clockDateRect.right + gap, clockTop,
+                clockDateRect.right + gap + unitW, clockTop + btnH);
+        clockMinuteRect.set(clockHourRect.right + gap, clockTop,
+                clockHourRect.right + gap + unitW, clockTop + btnH);
+        clockSecondRect.set(clockMinuteRect.right + gap, clockTop,
+                clockMinuteRect.right + gap + unitW, clockTop + btnH);
+        BridgeState clock = BridgeService.STATE;
+        drawModeButton(canvas, clockDateRect, "日期", clock.clockDate);
+        drawModeButton(canvas, clockHourRect, "时", clock.clockHour);
+        drawModeButton(canvas, clockMinuteRect, "分", clock.clockMinute);
+        drawModeButton(canvas, clockSecondRect, "秒", clock.clockSecond);
+
+        dim.setTextSize(dp(12));
+        canvas.drawText("右上角逐项开关，全关则不显示。",
+                settingsPanel.left + dp(18), clockSecondRect.bottom + dp(18), dim);
+
+        bgRow.set(settingsPanel.left + dp(18), clockSecondRect.bottom + dp(30),
+                settingsPanel.right - dp(18), clockSecondRect.bottom + dp(76));
         card.setColor(colCard());
         canvas.drawRoundRect(bgRow, dp(12), dp(12), card);
         text.setTextSize(dp(16));
@@ -571,6 +598,26 @@ final class AppMenu {
             }
             if (autoHideOnRect.contains(x, y)) {
                 setAutoHideMute(true);
+                return true;
+            }
+            if (clockDateRect.contains(x, y)) {
+                BridgeService.setClockDate(view.getContext(), !BridgeService.STATE.clockDate);
+                view.invalidate();
+                return true;
+            }
+            if (clockHourRect.contains(x, y)) {
+                BridgeService.setClockHour(view.getContext(), !BridgeService.STATE.clockHour);
+                view.invalidate();
+                return true;
+            }
+            if (clockMinuteRect.contains(x, y)) {
+                BridgeService.setClockMinute(view.getContext(), !BridgeService.STATE.clockMinute);
+                view.invalidate();
+                return true;
+            }
+            if (clockSecondRect.contains(x, y)) {
+                BridgeService.setClockSecond(view.getContext(), !BridgeService.STATE.clockSecond);
+                view.invalidate();
                 return true;
             }
             if (bgRow.contains(x, y)) {
