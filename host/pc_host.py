@@ -407,6 +407,7 @@ class HostApp:
         self._mirror_logged = False
         self.toast = toast_mirror.ToastSender(self._on_toast_change, self._on_toast_log)
         self._toast_logged = False
+        self._toast_sync_after = None
         self.inject_var = tk.StringVar()
         self.spk_dev_var = tk.StringVar()
         self._inject_devices: list[tuple[str, str | int, str]] = []
@@ -1015,26 +1016,41 @@ class HostApp:
         if not self._routes_ready:
             return
         self._save_routes()
+        if self._toast_sync_after is not None:
+            try:
+                self.root.after_cancel(self._toast_sync_after)
+            except Exception:
+                pass
+        self._toast_sync_after = self.root.after(250, self._apply_toast_mirror_toggle)
+
+    def _apply_toast_mirror_toggle(self) -> None:
+        self._toast_sync_after = None
         self._sync_toast_mirror()
+        if self.toast.error:
+            self._log("系统弹窗: " + self.toast.error)
+            self.toast.error = ""
         if self.toast_mirror.get():
             via = self.client.toast_channel() if self.connected else "17892"
-            self._log("已开启系统弹窗同步（独立通道 " + via + "）：系统通知的文字和按钮会显示在音箱上，点按即操作电脑通知。")
+            self._log("已开启系统弹窗同步（独立通道 " + via + "）：系统通知的标题、正文、按钮会显示在音箱上，点按即点电脑通知。")
         else:
             self._log("已关闭系统弹窗同步")
 
     def _sync_toast_mirror(self) -> None:
-        if self.connected and self.toast_mirror.get():
-            self.toast.start()
-            return
-        was_showing = self.toast.showing()
-        self.toast.stop()
-        self._toast_logged = False
-        if was_showing and self.connected:
-            try:
-                self.client.send_toast("toast_overlay", on=False)
-            except Exception:
-                pass
-        self.mirror.resume()
+        try:
+            if self.connected and self.toast_mirror.get():
+                self.toast.start()
+                return
+            was_showing = self.toast.showing()
+            self.toast.stop()
+            self._toast_logged = False
+            if was_showing and self.connected:
+                try:
+                    self.client.send_toast("toast_overlay", on=False)
+                except Exception:
+                    pass
+            self.mirror.resume()
+        except Exception as exc:
+            self._log("系统弹窗同步失败: " + str(exc))
 
     def _apply_mirror_request(self, on: bool) -> None:
         if on and self.connected:

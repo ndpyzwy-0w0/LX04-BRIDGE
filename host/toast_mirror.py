@@ -798,6 +798,8 @@ class ToastSender:
         self._showing = False
         self._thread: threading.Thread | None = None
         self._lock = threading.Lock()
+        self._life = threading.Lock()
+        self._wake_lock = threading.Lock()
         self._jobs: queue.Queue[tuple[str, str]] = queue.Queue()
         self._content: ToastContent | None = None
         self._last_buttons: list[ToastButtonInfo] = []
@@ -822,38 +824,47 @@ class ToastSender:
             return self._content
 
     def start(self) -> None:
-        if self._alive:
-            return
-        self.error = ""
-        self._showing = False
-        self._fingerprint = None
-        self._holdoff = 0.0
-        self._hint_hwnd = 0
-        self._last_buttons = []
-        self._idle_n = 0
-        self._jobs = queue.Queue()
-        self._alive = True
-        self._thread = threading.Thread(target=self._loop, daemon=True, name="lx04-toast")
-        self._thread.start()
+        with self._life:
+            thread = self._thread
+            if self._alive and thread is not None and thread.is_alive():
+                return
+            if thread is not None and thread.is_alive():
+                self._alive = False
+                self._signal()
+                thread.join(timeout=5.0)
+                if thread.is_alive():
+                    self.error = "系统弹窗线程未能结束，请再试一次"
+                    return
+            self.error = ""
+            self._showing = False
+            self._fingerprint = None
+            self._holdoff = 0.0
+            self._hint_hwnd = 0
+            self._last_buttons = []
+            self._idle_n = 0
+            self._hooks = []
+            self._jobs = queue.Queue()
+            self._alive = True
+            self._thread = threading.Thread(target=self._loop, daemon=True, name="lx04-toast")
+            self._thread.start()
 
     def stop(self) -> None:
-        was_showing = self._showing
-        self._alive = False
-        self._showing = False
-        self._signal()
-        thread = self._thread
-        self._thread = None
-        if thread is not None and thread is not threading.current_thread() and thread.is_alive():
-            thread.join(timeout=1.0)
-        if thread is not None and thread.is_alive():
-            self._unhook()
-            self._close_wake()
-        with self._lock:
-            self._content = None
-            self._fingerprint = None
-            self._last_buttons = []
-        if was_showing:
-            self._emit(False, None)
+        with self._life:
+            was_showing = self._showing
+            self._alive = False
+            self._showing = False
+            self._signal()
+            thread = self._thread
+            if thread is not None and thread is not threading.current_thread() and thread.is_alive():
+                thread.join(timeout=5.0)
+            if thread is not None and not thread.is_alive():
+                self._thread = None
+            with self._lock:
+                self._content = None
+                self._fingerprint = None
+                self._last_buttons = []
+            if was_showing:
+                self._emit(False, None)
 
     def handle_event(self, data: dict) -> None:
         cmd = str(data.get("cmd") or "")
@@ -913,34 +924,44 @@ class ToastSender:
             self.error = line
 
     def _signal(self) -> None:
-        handle = self._wake
-        if handle:
-            kernel32.SetEvent(handle)
+        with self._wake_lock:
+            handle = self._wake
+            if handle:
+                kernel32.SetEvent(handle)
 
     def _close_wake(self) -> None:
-        handle = self._wake
-        self._wake = None
+        with self._wake_lock:
+            handle = self._wake
+            self._wake = None
         if handle:
             kernel32.CloseHandle(handle)
 
     def _unhook(self) -> None:
-        for hook in self._hooks:
+        hooks = list(self._hooks)
+        self._hooks = []
+        for hook in hooks:
             try:
                 user32.UnhookWinEvent(hook)
             except Exception:
                 pass
-        self._hooks = []
-        self._winevent_proc = None
+        _pump()
 
     def _on_win_event(self, _hook, _event, hwnd, id_object, id_child, _thread, _time) -> None:
         try:
             if not self._alive or not hwnd or int(id_object) != OBJID_WINDOW or int(id_child) != 0:
                 return
             handle = int(hwnd)
-            if not _hwnd_is_toast(handle, os.getpid(), require_visible=False):
+            class_name = _class_name(handle)
+            if not class_name or class_name in SKIP_CLASSES:
                 return
-            self._hint_hwnd = handle
-            self._signal()
+            title = _title(handle).strip().lower()
+            if (
+                class_name in TOAST_CLASSES
+                or class_name.startswith("Chrome_WidgetWin_")
+                or title in TOAST_TITLES
+            ):
+                self._hint_hwnd = handle
+                self._signal()
         except Exception:
             pass
 
@@ -964,12 +985,15 @@ class ToastSender:
             if remain <= 0:
                 return
             wait_ms = min(remain, 25)
-            if handle:
-                slot = wintypes.HANDLE(int(handle))
-                user32.MsgWaitForMultipleObjects(1, ctypes.byref(slot), False, wait_ms, QS_ALLINPUT)
-                kernel32.ResetEvent(handle)
-            else:
-                user32.MsgWaitForMultipleObjects(0, None, False, wait_ms, QS_ALLINPUT)
+            try:
+                if handle:
+                    slot = wintypes.HANDLE(int(handle))
+                    user32.MsgWaitForMultipleObjects(1, ctypes.byref(slot), False, wait_ms, QS_ALLINPUT)
+                    kernel32.ResetEvent(handle)
+                else:
+                    user32.MsgWaitForMultipleObjects(0, None, False, wait_ms, QS_ALLINPUT)
+            except Exception:
+                return
             _pump()
             if self._hint_hwnd:
                 return
@@ -1064,6 +1088,7 @@ class ToastSender:
         finally:
             self._unhook()
             self._close_wake()
+            self._winevent_proc = None
             try:
                 ole32.CoUninitialize()
             except Exception:
