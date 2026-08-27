@@ -19,6 +19,8 @@ public class StatusHudView extends View {
         void onResetStyleTap();
 
         void onHudStyleChanged();
+
+        void onPointer(float x, float y, String act);
     }
 
     private Listener listener;
@@ -64,6 +66,7 @@ public class StatusHudView extends View {
     private boolean lightTheme;
     private boolean wasMirroring;
     private boolean muteRevealTap;
+    private boolean pointerDown;
     private long mirrorInteractAt;
     private long muteInteractAt;
     private long lastMuteAnimMs;
@@ -162,10 +165,10 @@ public class StatusHudView extends View {
         int h = getHeight();
         canvas.drawRect(0, 0, w, h, bg);
 
-        if (!s.screenMirror) {
+        if (!s.screenMirror && !s.toastOverlay) {
             wasMirroring = false;
         }
-        if (s.screenMirror) {
+        if (s.screenMirror || s.toastOverlay) {
             drawMirror(canvas, s, w, h);
             if (editor.isOpen()) {
                 editor.draw(canvas, w, h, lightTheme);
@@ -269,7 +272,7 @@ public class StatusHudView extends View {
             editor.close();
             return;
         }
-        if (BridgeService.STATE.screenMirror) {
+        if (BridgeService.STATE.screenMirror || BridgeService.STATE.toastOverlay) {
             noteMirrorInteract();
         }
         menu.handleBack();
@@ -395,7 +398,12 @@ public class StatusHudView extends View {
 
             int textAlpha = Math.max(1, Math.min(255, (int) (255 * bar)));
             int barText = (textAlpha << 24) | 0x00E8EEF8;
-            String title = (s.mirrorTitle == null || s.mirrorTitle.isEmpty()) ? "屏幕镜像" : s.mirrorTitle;
+            String title;
+            if (s.toastOverlay) {
+                title = (s.toastTitle == null || s.toastTitle.isEmpty()) ? "系统弹窗" : s.toastTitle;
+            } else {
+                title = (s.mirrorTitle == null || s.mirrorTitle.isEmpty()) ? "屏幕镜像" : s.mirrorTitle;
+            }
             float clockLeft = drawClock(canvas, w, dp(21), barText, dp(13));
             text.setTextSize(dp(13));
             text.setColor(barText);
@@ -410,7 +418,11 @@ public class StatusHudView extends View {
         if (!s.clientConnected) {
             drawMirrorMessage(canvas, w, h, "等待上位机", "连接电脑后开始同步画面");
         } else if (!hasFrame) {
-            drawMirrorMessage(canvas, w, h, "正在等待电脑画面…", "从右侧滑出菜单可关闭");
+            if (s.toastOverlay) {
+                drawMirrorMessage(canvas, w, h, "正在同步系统弹窗…", "点按即可操作电脑上的提示");
+            } else {
+                drawMirrorMessage(canvas, w, h, "正在等待电脑画面…", "从右侧滑出菜单可关闭");
+            }
         } else if (ScreenMirror.INSTANCE.stale()) {
             drawMirrorMessage(canvas, w, h, "画面中断", "从右侧滑出菜单可关闭");
         }
@@ -775,7 +787,7 @@ public class StatusHudView extends View {
         int action = event.getActionMasked();
         int w = getWidth();
         if (action == MotionEvent.ACTION_DOWN) {
-            if (BridgeService.STATE.screenMirror) {
+            if (BridgeService.STATE.screenMirror || BridgeService.STATE.toastOverlay) {
                 noteMirrorInteract();
             } else if (BridgeService.STATE.autoHideMute) {
                 muteRevealTap = muteButtonsHidden();
@@ -783,6 +795,11 @@ public class StatusHudView extends View {
             }
             menu.onDown(x, y, w, event);
             if (menu.blocksHud()) {
+                return true;
+            }
+            if (BridgeService.STATE.toastOverlay) {
+                pointerDown = true;
+                sendPointer(x, y, "down");
                 return true;
             }
             pressSlot = cardIndexAt(x, y);
@@ -797,6 +814,7 @@ public class StatusHudView extends View {
             if (menu.onMove(x, y, w, event)) {
                 touchHandler.removeCallbacks(longPress);
                 pressSlot = -1;
+                cancelPointer();
                 return true;
             }
             if (menu.blocksHud()) {
@@ -813,6 +831,7 @@ public class StatusHudView extends View {
             menu.onCancel();
             touchHandler.removeCallbacks(longPress);
             pressSlot = -1;
+            cancelPointer();
             return true;
         }
         if (action == MotionEvent.ACTION_UP) {
@@ -820,9 +839,16 @@ public class StatusHudView extends View {
             pressSlot = -1;
             if (menu.onUp(x, y, w, event)) {
                 muteRevealTap = false;
+                cancelPointer();
                 return true;
             }
             if (menu.blocksHud()) {
+                cancelPointer();
+                return true;
+            }
+            if (BridgeService.STATE.toastOverlay) {
+                sendPointer(x, y, "up");
+                pointerDown = false;
                 return true;
             }
             if (BridgeService.STATE.screenMirror) {
@@ -859,7 +885,8 @@ public class StatusHudView extends View {
     }
 
     private int cardIndexAt(float x, float y) {
-        if (BridgeService.STATE.screenMirror || !BridgeService.STATE.hasPcStats()) {
+        if (BridgeService.STATE.screenMirror || BridgeService.STATE.toastOverlay
+                || !BridgeService.STATE.hasPcStats()) {
             return -1;
         }
         for (int i = 0; i < cardRects.length; i++) {
@@ -868,6 +895,26 @@ public class StatusHudView extends View {
             }
         }
         return -1;
+    }
+
+    private void sendPointer(float x, float y, String act) {
+        if (listener == null) {
+            return;
+        }
+        int w = getWidth();
+        int h = getHeight();
+        if (w <= 0 || h <= 0) {
+            return;
+        }
+        listener.onPointer(x / w, y / h, act);
+    }
+
+    private void cancelPointer() {
+        if (!pointerDown) {
+            return;
+        }
+        pointerDown = false;
+        sendPointer(0f, 0f, "cancel");
     }
 
     private static String formatMetricValue(BridgeState s, String metric) {

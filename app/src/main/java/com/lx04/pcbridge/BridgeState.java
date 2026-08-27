@@ -10,6 +10,7 @@ final class BridgeState {
     volatile boolean upsideDown;
     volatile boolean lightTheme;
     volatile boolean screenMirror;
+    volatile boolean toastOverlay;
     volatile boolean autoHideMute;
     volatile boolean clockDate = true;
     volatile boolean clockHour = true;
@@ -17,6 +18,7 @@ final class BridgeState {
     volatile boolean clockSecond = true;
     volatile boolean flushStatus;
     volatile String mirrorTitle = "";
+    volatile String toastTitle = "";
     volatile boolean permissionDenied;
     volatile float level;
     volatile float playLevel;
