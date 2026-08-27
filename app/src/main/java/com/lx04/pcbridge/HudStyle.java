@@ -19,6 +19,7 @@ final class HudStyle {
             "ram", "ramGB", "disk", "diskGB", "diskIo", "netD", "netU"
     };
     static final String CHART_FOLLOW = "main";
+    static final int MAX_SUBS = 4;
     static final int[] PALETTE = {
             0xFF8FA0BE, 0xFF5A6B84, 0xFF3DDC97, 0xFFFFB020, 0xFFFF5C7A, 0xFF6EA8FF,
             0xFFE8EEF8, 0xFFA78BFA, 0xFF22D3EE, 0xFFF472B6, 0xFFFBBF24, 0xFFFB923C
@@ -26,7 +27,8 @@ final class HudStyle {
 
     private final String[] titles = new String[] {"", "", "", ""};
     private final String[] metrics = new String[] {"", "", "", ""};
-    private final String[] subMetrics = new String[] {"", "", "", ""};
+    private final String[][] subLines = new String[4][MAX_SUBS];
+    private final int[] subCounts = new int[4];
     private final String[] chartMetrics = new String[] {"", "", "", ""};
     private final boolean[] chartOn = new boolean[] {true, true, true, true};
     static final int DEFAULT_VALUE_SIZE = 28;
@@ -46,7 +48,7 @@ final class HudStyle {
         for (int i = 0; i < 4; i++) {
             titles[i] = "";
             metrics[i] = "";
-            subMetrics[i] = "";
+            clearSubs(i);
             chartMetrics[i] = "";
             chartOn[i] = true;
             titleColors[i] = 0;
@@ -88,7 +90,7 @@ final class HudStyle {
             }
             titles[index] = card.optString("title", "");
             metrics[index] = card.optString("metric", "");
-            subMetrics[index] = card.optString("subMetric", "");
+            applySubJson(index, card);
             chartMetrics[index] = normalizeChartMetric(card.optString("chartMetric", ""));
             chartOn[index] = !card.has("chart") || card.optBoolean("chart", true);
             titleColors[index] = parseColor(card.optString("titleColor", ""));
@@ -116,7 +118,7 @@ final class HudStyle {
                 card.put("key", KEYS[i]);
                 card.put("title", title(i, DEFAULT_TITLES[i]));
                 card.put("metric", metric(i));
-                card.put("subMetric", subMetric(i));
+                putSubJson(card, i);
                 if (titleColors[i] != 0) {
                     card.put("titleColor", hex(titleColors[i]));
                 }
@@ -149,7 +151,7 @@ final class HudStyle {
 
     synchronized boolean isClear() {
         for (int i = 0; i < 4; i++) {
-            if (!titles[i].isEmpty() || !metrics[i].isEmpty() || !subMetrics[i].isEmpty()
+            if (!titles[i].isEmpty() || !metrics[i].isEmpty() || subCounts[i] > 0
                     || !chartMetrics[i].isEmpty() || !chartOn[i]
                     || titleColors[i] != 0 || valueColors[i] != 0
                     || valueSizes[i] != 0 || subSizes[i] != 0) {
@@ -180,14 +182,56 @@ final class HudStyle {
     }
 
     synchronized String subMetric(int index) {
+        String[] shown = displaySubs(index);
+        if (shown.length == 0) {
+            return "none";
+        }
+        return shown[0];
+    }
+
+    synchronized String[] displaySubs(int index) {
         if (index < 0 || index >= 4) {
-            return DEFAULT_SUB_METRICS[0];
+            return new String[0];
         }
-        String custom = subMetrics[index];
-        if (isKnown(custom)) {
-            return custom;
+        if (subCounts[index] <= 0) {
+            return new String[] { DEFAULT_SUB_METRICS[index] };
         }
-        return DEFAULT_SUB_METRICS[index];
+        int n = 0;
+        String[] tmp = new String[subCounts[index]];
+        for (int i = 0; i < subCounts[index]; i++) {
+            String key = subLines[index][i];
+            if (isKnown(key) && !"none".equals(key)) {
+                tmp[n++] = key;
+            }
+        }
+        String[] out = new String[n];
+        System.arraycopy(tmp, 0, out, 0, n);
+        return out;
+    }
+
+    synchronized int editorSubCount(int index) {
+        if (index < 0 || index >= 4) {
+            return 1;
+        }
+        return subCounts[index] <= 0 ? 1 : subCounts[index];
+    }
+
+    synchronized String editorSubAt(int index, int line) {
+        if (index < 0 || index >= 4) {
+            return "none";
+        }
+        if (subCounts[index] <= 0) {
+            return line == 0 ? DEFAULT_SUB_METRICS[index] : "none";
+        }
+        if (line < 0 || line >= subCounts[index]) {
+            return "none";
+        }
+        String key = subLines[index][line];
+        return isKnown(key) ? key : "none";
+    }
+
+    synchronized boolean canAddSub(int index) {
+        return editorSubCount(index) < MAX_SUBS;
     }
 
     synchronized String rawTitle(int index) {
@@ -275,10 +319,59 @@ final class HudStyle {
     }
 
     synchronized void setSubMetric(int index, String metric) {
+        setSubMetricAt(index, 0, metric);
+    }
+
+    synchronized void setSubMetricAt(int index, int line, String metric) {
         if (index < 0 || index >= 4 || !isKnown(metric)) {
             return;
         }
-        subMetrics[index] = metric;
+        ensureStoredSubs(index);
+        if (line < 0 || line >= subCounts[index]) {
+            return;
+        }
+        if (metric.equals(subLines[index][line])) {
+            return;
+        }
+        subLines[index][line] = metric;
+        bumpRev();
+    }
+
+    synchronized boolean addSubMetric(int index) {
+        if (index < 0 || index >= 4) {
+            return false;
+        }
+        ensureStoredSubs(index);
+        if (subCounts[index] >= MAX_SUBS) {
+            return false;
+        }
+        subLines[index][subCounts[index]] = unusedSub(index);
+        subCounts[index]++;
+        bumpRev();
+        return true;
+    }
+
+    synchronized void removeSubMetric(int index, int line) {
+        if (index < 0 || index >= 4) {
+            return;
+        }
+        ensureStoredSubs(index);
+        if (line < 0 || line >= subCounts[index]) {
+            return;
+        }
+        if (subCounts[index] == 1) {
+            if ("none".equals(subLines[index][0])) {
+                return;
+            }
+            subLines[index][0] = "none";
+            bumpRev();
+            return;
+        }
+        for (int i = line; i < subCounts[index] - 1; i++) {
+            subLines[index][i] = subLines[index][i + 1];
+        }
+        subLines[index][subCounts[index] - 1] = "";
+        subCounts[index]--;
         bumpRev();
     }
 
@@ -351,7 +444,7 @@ final class HudStyle {
         }
         titles[index] = "";
         metrics[index] = "";
-        subMetrics[index] = "";
+        clearSubs(index);
         chartMetrics[index] = "";
         chartOn[index] = true;
         titleColors[index] = 0;
@@ -521,6 +614,73 @@ final class HudStyle {
             return "";
         }
         return metric;
+    }
+
+    private void clearSubs(int index) {
+        subCounts[index] = 0;
+        for (int i = 0; i < MAX_SUBS; i++) {
+            subLines[index][i] = "";
+        }
+    }
+
+    private void ensureStoredSubs(int index) {
+        if (subCounts[index] > 0) {
+            return;
+        }
+        subLines[index][0] = DEFAULT_SUB_METRICS[index];
+        subCounts[index] = 1;
+    }
+
+    private String unusedSub(int index) {
+        for (int p = 0; p < PICK_METRICS.length; p++) {
+            String key = PICK_METRICS[p];
+            boolean used = false;
+            for (int i = 0; i < subCounts[index]; i++) {
+                if (key.equals(subLines[index][i])) {
+                    used = true;
+                    break;
+                }
+            }
+            if (!used) {
+                return key;
+            }
+        }
+        return PICK_METRICS[0];
+    }
+
+    private void applySubJson(int index, JSONObject card) {
+        clearSubs(index);
+        JSONArray extra = card.optJSONArray("subMetrics");
+        if (extra != null && extra.length() > 0) {
+            int n = 0;
+            int len = Math.min(extra.length(), MAX_SUBS);
+            for (int i = 0; i < len; i++) {
+                String key = extra.optString(i, "");
+                if (!isKnown(key)) {
+                    continue;
+                }
+                subLines[index][n++] = key;
+            }
+            subCounts[index] = n;
+            return;
+        }
+        String one = card.optString("subMetric", "");
+        if (isKnown(one)) {
+            subLines[index][0] = one;
+            subCounts[index] = 1;
+        }
+    }
+
+    private void putSubJson(JSONObject card, int index) throws Exception {
+        card.put("subMetric", subMetric(index));
+        if (subCounts[index] <= 0) {
+            return;
+        }
+        JSONArray arr = new JSONArray();
+        for (int i = 0; i < subCounts[index]; i++) {
+            arr.put(subLines[index][i]);
+        }
+        card.put("subMetrics", arr);
     }
 
     private static int indexOf(String key) {

@@ -32,7 +32,9 @@ final class CardEditor {
     private final RectF headerRect = new RectF();
     private final RectF viewport = new RectF();
     private final RectF metricRect = new RectF();
-    private final RectF subRect = new RectF();
+    private final RectF[] subRects = new RectF[HudStyle.MAX_SUBS];
+    private final RectF[] subRemoveRects = new RectF[HudStyle.MAX_SUBS];
+    private final RectF addSubRect = new RectF();
     private final RectF chartMetricRect = new RectF();
     private final RectF chartOffRect = new RectF();
     private final RectF chartOnRect = new RectF();
@@ -46,6 +48,7 @@ final class CardEditor {
     private final RectF[] valueSwatches = new RectF[HudStyle.PALETTE.length];
     private int slot = -1;
     private int page = PAGE_MAIN;
+    private int subEditIndex;
     private float mainScroll;
     private float listScroll;
     private float contentHeight;
@@ -73,6 +76,10 @@ final class CardEditor {
             titleSwatches[i] = new RectF();
             valueSwatches[i] = new RectF();
         }
+        for (int i = 0; i < subRects.length; i++) {
+            subRects[i] = new RectF();
+            subRemoveRects[i] = new RectF();
+        }
     }
 
     boolean isOpen() {
@@ -82,6 +89,7 @@ final class CardEditor {
     void open(int slot, RectF from) {
         this.slot = slot;
         page = PAGE_MAIN;
+        subEditIndex = 0;
         mainScroll = 0;
         listScroll = 0;
         dragging = false;
@@ -229,8 +237,7 @@ final class CardEditor {
         y = drawLabeledPalette(canvas, draw, "大字颜色", y, valueSwatches,
                 style.valueColor(slot), 0xFF3DDC97);
         y += dp(10);
-        y = drawLabeledRow(canvas, draw, "小字内容", y, subRect,
-                HudStyle.metricLabel(style.subMetric(slot)));
+        y = drawSubSection(canvas, draw, y, style);
         y = drawLabeledPalette(canvas, draw, "字母颜色", y, titleSwatches,
                 style.titleColor(slot), light ? 0xFF5A6B84 : 0xFF8FA0BE);
         y += dp(12);
@@ -255,6 +262,47 @@ final class CardEditor {
             drawRow(canvas, rect, value);
         }
         return rect.bottom + dp(12);
+    }
+
+    private float drawSubSection(Canvas canvas, boolean draw, float y, HudStyle style) {
+        if (draw) {
+            canvas.drawText("小字内容", panelRect.left + dp(16), y + dp(12), label);
+        }
+        y += dp(18);
+        int count = style.editorSubCount(slot);
+        for (int i = 0; i < HudStyle.MAX_SUBS; i++) {
+            if (i >= count) {
+                subRects[i].setEmpty();
+                subRemoveRects[i].setEmpty();
+                continue;
+            }
+            y = drawSubRow(canvas, draw, y, i, HudStyle.metricLabel(style.editorSubAt(slot, i)));
+        }
+        if (style.canAddSub(slot)) {
+            addSubRect.set(panelRect.left + dp(16), y, panelRect.right - dp(16), y + dp(36));
+            if (draw) {
+                drawButton(canvas, addSubRect, "添加小字");
+            }
+            y = addSubRect.bottom + dp(12);
+        } else {
+            addSubRect.setEmpty();
+            y += dp(4);
+        }
+        return y;
+    }
+
+    private float drawSubRow(Canvas canvas, boolean draw, float y, int line, String value) {
+        float h = dp(40);
+        float btn = dp(44);
+        float gap = dp(8);
+        float right = panelRect.right - dp(16);
+        subRemoveRects[line].set(right - btn, y, right, y + h);
+        subRects[line].set(panelRect.left + dp(16), y, subRemoveRects[line].left - gap, y + h);
+        if (draw) {
+            drawRow(canvas, subRects[line], value);
+            drawButton(canvas, subRemoveRects[line], "－");
+        }
+        return y + h + dp(8);
     }
 
     private float drawLabeledPalette(Canvas canvas, boolean draw, String caption, float y,
@@ -339,7 +387,7 @@ final class CardEditor {
             String raw = style.rawChartMetric(slot);
             current = raw.isEmpty() ? HudStyle.CHART_FOLLOW : raw;
         } else if (includeNone) {
-            current = style.subMetric(slot);
+            current = style.editorSubAt(slot, subEditIndex);
         } else {
             current = style.metric(slot);
         }
@@ -505,10 +553,21 @@ final class CardEditor {
             view.invalidate();
             return true;
         }
-        if (subRect.contains(x, y) && viewport.contains(x, y)) {
+        if (subRectsHit(x, y) >= 0 && viewport.contains(x, y)) {
+            subEditIndex = subRectsHit(x, y);
             page = PAGE_SUB;
             listScroll = 0;
             view.invalidate();
+            return true;
+        }
+        if (subRemoveHit(x, y) >= 0 && viewport.contains(x, y)) {
+            BridgeService.STATE.hudStyle.removeSubMetric(slot, subRemoveHit(x, y));
+            changed();
+            return true;
+        }
+        if (!addSubRect.isEmpty() && addSubRect.contains(x, y) && viewport.contains(x, y)) {
+            BridgeService.STATE.hudStyle.addSubMetric(slot);
+            changed();
             return true;
         }
         if (chartMetricRect.contains(x, y) && viewport.contains(x, y)) {
@@ -580,7 +639,7 @@ final class CardEditor {
         String key = listKey(page == PAGE_SUB, index);
         HudStyle style = BridgeService.STATE.hudStyle;
         if (page == PAGE_SUB) {
-            style.setSubMetric(slot, key);
+            style.setSubMetricAt(slot, subEditIndex, key);
         } else if (page == PAGE_CHART) {
             style.setChartMetric(slot, key);
         } else {
@@ -588,6 +647,24 @@ final class CardEditor {
         }
         page = PAGE_MAIN;
         changed();
+    }
+
+    private int subRectsHit(float x, float y) {
+        for (int i = 0; i < subRects.length; i++) {
+            if (!subRects[i].isEmpty() && subRects[i].contains(x, y)) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    private int subRemoveHit(float x, float y) {
+        for (int i = 0; i < subRemoveRects.length; i++) {
+            if (!subRemoveRects[i].isEmpty() && subRemoveRects[i].contains(x, y)) {
+                return i;
+            }
+        }
+        return -1;
     }
 
     private void changed() {

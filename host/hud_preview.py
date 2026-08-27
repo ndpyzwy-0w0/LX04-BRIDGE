@@ -54,6 +54,7 @@ VALUE_SIZE_DEFAULT = 28
 SUB_SIZE_DEFAULT = 11
 VALUE_SIZE_MIN, VALUE_SIZE_MAX = 12, 56
 SUB_SIZE_MIN, SUB_SIZE_MAX = 8, 28
+MAX_SUBS = 4
 
 
 def metric_label(key: str) -> str:
@@ -84,6 +85,54 @@ def sub_metric_sample(key: str) -> str:
     if key == NONE_METRIC:
         return ""
     return metric_sample(key)
+
+
+def default_sub_for(card: dict) -> str:
+    key = str(card.get("key") or "")
+    for item in DEFAULT_SLOTS:
+        if item[0] == key:
+            return item[3]
+    return DEFAULT_SLOTS[0][3]
+
+
+def card_sub_metrics(card: dict) -> list[str]:
+    extra = card.get("sub_metrics")
+    if extra is None:
+        extra = card.get("subMetrics")
+    keys: list[str] = []
+    if isinstance(extra, list):
+        for item in extra:
+            key = str(item or "")
+            if is_metric(key):
+                keys.append(key)
+            if len(keys) >= MAX_SUBS:
+                break
+        if keys:
+            return keys
+    one = str(card.get("sub_metric") or card.get("subMetric") or "")
+    if is_metric(one):
+        return [one]
+    return []
+
+
+def display_sub_metrics(card: dict) -> list[str]:
+    keys = card_sub_metrics(card)
+    if not keys:
+        return [default_sub_for(card)]
+    return [key for key in keys if key != NONE_METRIC]
+
+
+def store_sub_metrics(card: dict, keys: list[str]) -> None:
+    cleaned: list[str] = []
+    for key in keys:
+        if is_metric(key):
+            cleaned.append(key)
+        if len(cleaned) >= MAX_SUBS:
+            break
+    if not cleaned:
+        cleaned = [NONE_METRIC]
+    card["sub_metrics"] = cleaned
+    card["sub_metric"] = cleaned[0]
 
 
 def is_metric(key: str) -> bool:
@@ -201,6 +250,7 @@ def default_state(light: bool = False) -> dict:
                 "title": title,
                 "metric": metric,
                 "sub_metric": sub_metric,
+                "sub_metrics": [sub_metric],
                 "value_size": VALUE_SIZE_DEFAULT,
                 "sub_size": SUB_SIZE_DEFAULT,
                 "title_color": colors["dim"],
@@ -235,9 +285,9 @@ def load_state(light: bool = False) -> dict:
         metric = str(extra.get("metric") or "")
         if metric in METRIC_LABEL:
             card["metric"] = metric
-        sub_metric = str(extra.get("sub_metric") or extra.get("subMetric") or "")
-        if is_metric(sub_metric):
-            card["sub_metric"] = sub_metric
+        subs = card_sub_metrics(extra)
+        if subs:
+            store_sub_metrics(card, subs)
         if extra.get("value_size") or extra.get("valueSize"):
             card["value_size"] = card_value_size(extra)
         if extra.get("sub_size") or extra.get("subSize"):
@@ -279,7 +329,7 @@ def style_is_default(state: dict) -> bool:
             return False
         if str(card.get("metric") or default["metric"]) != default["metric"]:
             return False
-        if str(card.get("sub_metric") or default["sub_metric"]) != default["sub_metric"]:
+        if display_sub_metrics(card) != [default["sub_metric"]]:
             return False
         if card_value_size(card) != VALUE_SIZE_DEFAULT or card_sub_size(card) != SUB_SIZE_DEFAULT:
             return False
@@ -308,9 +358,11 @@ def control_payload(state: dict) -> dict:
         metric = str(card.get("metric") or default["metric"])
         if metric != default["metric"] and metric in METRIC_LABEL:
             item["metric"] = metric
-        sub_metric = str(card.get("sub_metric") or default["sub_metric"])
-        if sub_metric != default["sub_metric"] and is_metric(sub_metric):
-            item["subMetric"] = sub_metric
+        subs = card_sub_metrics(card) or [default["sub_metric"]]
+        if subs != [default["sub_metric"]]:
+            item["subMetric"] = subs[0]
+            if len(subs) > 1 or subs[0] == NONE_METRIC:
+                item["subMetrics"] = subs
         title_color = _hex(card.get("title_color"))
         if card.get("title_color_set") and title_color:
             item["titleColor"] = title_color
@@ -352,9 +404,9 @@ def state_from_payload(payload: dict, light: bool) -> dict:
         metric = str(extra.get("metric") or "")
         if metric in METRIC_LABEL:
             card["metric"] = metric
-        sub_metric = str(extra.get("sub_metric") or extra.get("subMetric") or "")
-        if is_metric(sub_metric):
-            card["sub_metric"] = sub_metric
+        subs = card_sub_metrics(extra)
+        if subs:
+            store_sub_metrics(card, subs)
         card["value_size"] = card_value_size(extra)
         card["sub_size"] = card_sub_size(extra)
         if "chart" in extra:
@@ -529,13 +581,15 @@ def _draw_card(canvas: tk.Canvas, x: float, y: float, cw: float, ch: float, card
     _round_rect(canvas, x, y, x + cw, y + ch, dp(12), colors["card"])
     title = str(card.get("title") or "")
     value = metric_sample(str(card.get("metric") or "cpu"))
-    sub = sub_metric_sample(str(card.get("sub_metric") or NONE_METRIC))
+    subs = [sub_metric_sample(key) for key in display_sub_metrics(card)]
     title_color = _hex(card.get("title_color")) or colors["dim"]
     value_color = _hex(card.get("value_color")) or OK
     inner_w = max(dp(24), cw - dp(20))
     title_dp = _fit_size(13, False, title, inner_w, 9)
     value_dp = _fit_size(card_value_size(card), True, value, inner_w, VALUE_SIZE_MIN)
-    sub_dp = _fit_size(card_sub_size(card), False, sub, inner_w, SUB_SIZE_MIN) if sub else SUB_SIZE_DEFAULT
+    sub_dp = float(card_sub_size(card))
+    for line in subs:
+        sub_dp = _fit_size(sub_dp, False, line, inner_w, SUB_SIZE_MIN)
     bar_space = dp(16)
     show_chart = bool(card.get("chart", True))
     usable = y + ch - bar_space - (dp(40) if show_chart else 0)
@@ -543,7 +597,9 @@ def _draw_card(canvas: tk.Canvas, x: float, y: float, cw: float, ch: float, card
     def _layout() -> tuple[float, float, float]:
         title_y = y + dp(8) + dp(title_dp)
         value_y = title_y + dp(4) + dp(value_dp)
-        sub_y = value_y + dp(3) + dp(sub_dp) if sub else value_y
+        sub_y = value_y
+        for _line in subs:
+            sub_y = sub_y + dp(3) + dp(sub_dp)
         return title_y, value_y, sub_y
 
     title_y, value_y, sub_y = _layout()
@@ -552,7 +608,7 @@ def _draw_card(canvas: tk.Canvas, x: float, y: float, cw: float, ch: float, card
         if value_dp > VALUE_SIZE_MIN:
             value_dp = max(VALUE_SIZE_MIN, value_dp - 1)
             shrunk = True
-        if sub and sub_dp > SUB_SIZE_MIN:
+        if subs and sub_dp > SUB_SIZE_MIN:
             sub_dp = max(SUB_SIZE_MIN, sub_dp - 1)
             shrunk = True
         if title_dp > 9:
@@ -566,11 +622,13 @@ def _draw_card(canvas: tk.Canvas, x: float, y: float, cw: float, ch: float, card
     sub_font = _font(sub_dp)
     canvas.create_text(x + dp(10), title_y, text=_fit(title_font, title, inner_w), fill=title_color, font=title_font, anchor="sw")
     canvas.create_text(x + dp(10), value_y, text=_fit(value_font, value, inner_w), fill=value_color, font=value_font, anchor="sw")
-    if sub:
-        canvas.create_text(x + dp(10), sub_y, text=_fit(sub_font, sub, inner_w), fill=colors["dim"], font=sub_font, anchor="sw")
+    line_y = value_y
+    for line in subs:
+        line_y = line_y + dp(3) + dp(sub_dp)
+        canvas.create_text(x + dp(10), line_y, text=_fit(sub_font, line, inner_w), fill=colors["dim"], font=sub_font, anchor="sw")
 
     if show_chart:
-        chart_top = (sub_y if sub else value_y) + dp(8)
+        chart_top = (sub_y if subs else value_y) + dp(8)
         chart_bottom = y + ch - bar_space - dp(2)
         if chart_bottom - chart_top >= dp(18):
             chart_metric = str(card.get("chart_metric") or "") or str(card.get("metric") or "cpu")
@@ -659,7 +717,10 @@ class PreviewWindow:
         self.light_var = tk.BooleanVar(value=bool(self.state["light"]))
         self.title_vars: list[tk.StringVar] = []
         self.metric_vars: list[tk.StringVar] = []
-        self.sub_metric_vars: list[tk.StringVar] = []
+        self.sub_metric_vars: list[list[tk.StringVar]] = []
+        self.sub_frames: list[tk.Frame] = []
+        self._combo_bg = "#F3F6FB"
+        self._combo_fg = "#1A2333"
         self.value_size_vars: list[tk.IntVar] = []
         self.sub_size_vars: list[tk.IntVar] = []
         self.chart_vars: list[tk.BooleanVar] = []
@@ -668,7 +729,7 @@ class PreviewWindow:
 
         hint = ttk.Label(
             self.root,
-            text="每个格子分别选大字、小字、字号和折线。音箱上长按栏目也能改，两边会同步。字号超出板块时会自动缩小。",
+            text="每个格子可加大字和多条小字。音箱上长按栏目也能改，两边会同步。",
             style="Dim.TLabel",
         )
         hint.pack(anchor="w", padx=16, pady=(12, 6))
@@ -709,48 +770,45 @@ class PreviewWindow:
         ttk.Label(header, text="字母色", style="CardDim.TLabel", width=8).pack(side="left")
         ttk.Label(header, text="大字内容", style="CardDim.TLabel", width=14).pack(side="left")
         ttk.Label(header, text="大字色", style="CardDim.TLabel", width=8).pack(side="left")
-        ttk.Label(header, text="小字内容", style="CardDim.TLabel", width=14).pack(side="left")
+        ttk.Label(header, text="小字内容", style="CardDim.TLabel", width=18).pack(side="left")
         ttk.Label(header, text="大字号", style="CardDim.TLabel", width=7).pack(side="left")
         ttk.Label(header, text="小字号", style="CardDim.TLabel", width=7).pack(side="left")
         ttk.Label(header, text="折线", style="CardDim.TLabel", width=6).pack(side="left")
         ttk.Label(header, text="折线内容", style="CardDim.TLabel").pack(side="left")
 
-        combo_bg = "#F3F6FB"
-        combo_fg = "#1A2333"
+        combo_bg = self._combo_bg
+        combo_fg = self._combo_fg
         for index, (_key, label, _metric, _sub) in enumerate(DEFAULT_SLOTS):
             card = self.state["cards"][index]
             row = tk.Frame(editors, bg="#141C2E")
             row.pack(fill="x", padx=8, pady=4)
-            ttk.Label(row, text=label, style="Card.TLabel", width=6).pack(side="left")
+            ttk.Label(row, text=label, style="Card.TLabel", width=6).pack(side="left", anchor="n", pady=4)
             title_var = tk.StringVar(value=str(card["title"]))
             metric_var = tk.StringVar(value=metric_label(str(card.get("metric") or _metric)))
-            sub_var = tk.StringVar(value=sub_metric_label(str(card.get("sub_metric") or _sub)))
             value_size_var = tk.IntVar(value=card_value_size(card))
             sub_size_var = tk.IntVar(value=card_sub_size(card))
             chart_var = tk.BooleanVar(value=bool(card.get("chart", True)))
             chart_metric_var = tk.StringVar(value=chart_metric_label(str(card.get("chart_metric") or "")))
             self.title_vars.append(title_var)
             self.metric_vars.append(metric_var)
-            self.sub_metric_vars.append(sub_var)
+            self.sub_metric_vars.append([])
             self.value_size_vars.append(value_size_var)
             self.sub_size_vars.append(sub_size_var)
             self.chart_vars.append(chart_var)
             self.chart_metric_vars.append(chart_metric_var)
-            ttk.Entry(row, textvariable=title_var, width=10).pack(side="left", padx=(0, 6))
+            ttk.Entry(row, textvariable=title_var, width=10).pack(side="left", padx=(0, 6), anchor="n", pady=4)
             title_swatch = tk.Button(row, width=3, relief="groove", bd=1, command=lambda i=index: self._pick(i, "title"))
-            title_swatch.pack(side="left", padx=(0, 12))
+            title_swatch.pack(side="left", padx=(0, 12), anchor="n", pady=4)
             drop = ttk.Menubutton(row, textvariable=metric_var, style="Drop.TMenubutton", width=12, direction="below")
             menu = self._metric_menu(drop, metric_var, combo_bg, combo_fg, lambda i=index: self._on_metric(i))
             drop["menu"] = menu
-            drop.pack(side="left", padx=(0, 12))
+            drop.pack(side="left", padx=(0, 12), anchor="n", pady=4)
             value_swatch = tk.Button(row, width=3, relief="groove", bd=1, command=lambda i=index: self._pick(i, "value"))
-            value_swatch.pack(side="left", padx=(0, 12))
-            sub_drop = ttk.Menubutton(row, textvariable=sub_var, style="Drop.TMenubutton", width=12, direction="below")
-            sub_menu = self._metric_menu(
-                sub_drop, sub_var, combo_bg, combo_fg, lambda i=index: self._on_sub_metric(i), include_none=True
-            )
-            sub_drop["menu"] = sub_menu
-            sub_drop.pack(side="left", padx=(0, 8))
+            value_swatch.pack(side="left", padx=(0, 12), anchor="n", pady=4)
+            sub_col = tk.Frame(row, bg="#141C2E")
+            sub_col.pack(side="left", padx=(0, 8))
+            self.sub_frames.append(sub_col)
+            self._rebuild_sub_col(index)
             ttk.Spinbox(
                 row,
                 from_=VALUE_SIZE_MIN,
@@ -759,7 +817,7 @@ class PreviewWindow:
                 textvariable=value_size_var,
                 width=4,
                 command=lambda i=index: self._on_text(i),
-            ).pack(side="left", padx=(0, 8))
+            ).pack(side="left", padx=(0, 8), anchor="n", pady=4)
             ttk.Spinbox(
                 row,
                 from_=SUB_SIZE_MIN,
@@ -768,7 +826,7 @@ class PreviewWindow:
                 textvariable=sub_size_var,
                 width=4,
                 command=lambda i=index: self._on_text(i),
-            ).pack(side="left", padx=(0, 8))
+            ).pack(side="left", padx=(0, 8), anchor="n", pady=4)
             tk.Checkbutton(
                 row,
                 text="开",
@@ -781,7 +839,7 @@ class PreviewWindow:
                 activeforeground="#E8EEF8",
                 highlightthickness=0,
                 font=("Segoe UI", 10),
-            ).pack(side="left", padx=(0, 8))
+            ).pack(side="left", padx=(0, 8), anchor="n", pady=4)
             chart_drop = ttk.Menubutton(
                 row, textvariable=chart_metric_var, style="Drop.TMenubutton", width=12, direction="below"
             )
@@ -794,7 +852,7 @@ class PreviewWindow:
                 include_follow=True,
             )
             chart_drop["menu"] = chart_menu
-            chart_drop.pack(side="left")
+            chart_drop.pack(side="left", anchor="n", pady=4)
             self._swatches.append((title_swatch, value_swatch))
             title_var.trace_add("write", lambda *_a, i=index: self._on_text(i))
             value_size_var.trace_add("write", lambda *_a, i=index: self._on_text(i))
@@ -812,7 +870,7 @@ class PreviewWindow:
             for index, card in enumerate(self.state["cards"]):
                 self.title_vars[index].set(str(card.get("title") or DEFAULT_SLOTS[index][1]))
                 self.metric_vars[index].set(metric_label(str(card.get("metric") or DEFAULT_SLOTS[index][2])))
-                self.sub_metric_vars[index].set(sub_metric_label(str(card.get("sub_metric") or DEFAULT_SLOTS[index][3])))
+                self._rebuild_sub_col(index)
                 self.value_size_vars[index].set(card_value_size(card))
                 self.sub_size_vars[index].set(card_sub_size(card))
                 self.chart_vars[index].set(bool(card.get("chart", True)))
@@ -853,7 +911,8 @@ class PreviewWindow:
         for index, card in enumerate(self.state["cards"]):
             card["title"] = self.title_vars[index].get()[:8]
             card["metric"] = metric_key(self.metric_vars[index].get())
-            card["sub_metric"] = sub_metric_key(self.sub_metric_vars[index].get())
+            keys = [sub_metric_key(var.get()) for var in self.sub_metric_vars[index]]
+            store_sub_metrics(card, keys)
             card["value_size"] = self._spin_int(self.value_size_vars[index], VALUE_SIZE_DEFAULT, VALUE_SIZE_MIN, VALUE_SIZE_MAX)
             card["sub_size"] = self._spin_int(self.sub_size_vars[index], SUB_SIZE_DEFAULT, SUB_SIZE_MIN, SUB_SIZE_MAX)
             card["chart"] = bool(self.chart_vars[index].get())
@@ -876,8 +935,64 @@ class PreviewWindow:
         card["metric"] = new_metric
         self._on_text(index)
 
-    def _on_sub_metric(self, index: int) -> None:
-        self.state["cards"][index]["sub_metric"] = sub_metric_key(self.sub_metric_vars[index].get())
+    def _rebuild_sub_col(self, index: int) -> None:
+        frame = self.sub_frames[index]
+        for child in frame.winfo_children():
+            child.destroy()
+        keys = card_sub_metrics(self.state["cards"][index]) or [DEFAULT_SLOTS[index][3]]
+        vars: list[tk.StringVar] = []
+        for line, key in enumerate(keys):
+            row = tk.Frame(frame, bg="#141C2E")
+            row.pack(fill="x", pady=1)
+            var = tk.StringVar(value=sub_metric_label(key))
+            drop = ttk.Menubutton(row, textvariable=var, style="Drop.TMenubutton", width=12, direction="below")
+            drop["menu"] = self._metric_menu(
+                drop,
+                var,
+                self._combo_bg,
+                self._combo_fg,
+                lambda i=index, n=line: self._on_sub_metric(i, n),
+                include_none=True,
+            )
+            drop.pack(side="left")
+            ttk.Button(row, text="×", width=2, command=lambda i=index, n=line: self._remove_sub(i, n)).pack(
+                side="left", padx=(4, 0)
+            )
+            vars.append(var)
+        if len(keys) < MAX_SUBS:
+            ttk.Button(frame, text="+ 小字", command=lambda i=index: self._add_sub(i)).pack(
+                anchor="w", pady=(2, 0)
+            )
+        self.sub_metric_vars[index] = vars
+
+    def _add_sub(self, index: int) -> None:
+        keys = card_sub_metrics(self.state["cards"][index]) or [DEFAULT_SLOTS[index][3]]
+        if len(keys) >= MAX_SUBS:
+            return
+        used = set(keys)
+        nxt = next((key for key, _label, _sample in METRICS if key not in used), METRICS[0][0])
+        keys.append(nxt)
+        store_sub_metrics(self.state["cards"][index], keys)
+        self._rebuild_sub_col(index)
+        self._on_text(index)
+
+    def _remove_sub(self, index: int, line: int) -> None:
+        keys = card_sub_metrics(self.state["cards"][index]) or [DEFAULT_SLOTS[index][3]]
+        if line < 0 or line >= len(keys):
+            return
+        if len(keys) == 1:
+            keys = [NONE_METRIC]
+        else:
+            keys.pop(line)
+        store_sub_metrics(self.state["cards"][index], keys)
+        self._rebuild_sub_col(index)
+        self._on_text(index)
+
+    def _on_sub_metric(self, index: int, line: int = 0) -> None:
+        keys = [sub_metric_key(var.get()) for var in self.sub_metric_vars[index]]
+        if 0 <= line < len(keys):
+            keys[line] = sub_metric_key(self.sub_metric_vars[index][line].get())
+        store_sub_metrics(self.state["cards"][index], keys)
         self._on_text(index)
 
     def _on_chart_metric(self, index: int) -> None:
@@ -916,7 +1031,7 @@ class PreviewWindow:
         self.light_var.set(bool(self.state["light"]))
         for index, card in enumerate(self.state["cards"]):
             self.metric_vars[index].set(metric_label(str(card.get("metric") or DEFAULT_SLOTS[index][2])))
-            self.sub_metric_vars[index].set(sub_metric_label(str(card.get("sub_metric") or DEFAULT_SLOTS[index][3])))
+            self._rebuild_sub_col(index)
             self.value_size_vars[index].set(card_value_size(card))
             self.sub_size_vars[index].set(card_sub_size(card))
             self.chart_vars[index].set(bool(card.get("chart", True)))
