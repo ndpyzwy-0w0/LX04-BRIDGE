@@ -463,10 +463,9 @@ public class StatusHudView extends View {
             float x = left + (cardW + gap) * i;
             cardRects[i].set(x, top, x + cardW, top + cardH);
             String metric = s.hudStyle.metric(i);
-            String subMetric = s.hudStyle.subMetric(i);
             String title = s.hudStyle.title(i, HudStyle.fallbackTitle(metric, s.pcDiskName));
             drawStatCard(canvas, x, top, cardW, cardH, title,
-                    formatMetricValue(s, metric), formatMetricValue(s, subMetric),
+                    formatMetricValue(s, metric),
                     formatMetricFoot(s, metric), metricUsage(s, metric), metricTemp(s, metric), i);
         }
 
@@ -479,16 +478,17 @@ public class StatusHudView extends View {
     }
 
     private void drawStatCard(Canvas canvas, float x, float y, float cw, float ch,
-            String title, String value, String sub, String foot, float usage, float temp, int slot) {
+            String title, String value, String foot, float usage, float temp, int slot) {
         tmpRect.set(x, y, x + cw, y + ch);
         canvas.drawRoundRect(tmpRect, dp(12), dp(12), cardPaint);
         HudStyle style = BridgeService.STATE.hudStyle;
+        String[] subs = style.displaySubs(slot);
         float padX = dp(10);
         float innerW = Math.max(dp(24), cw - padX * 2);
         float titleSize = dp(13);
         float valueWant = dp(style.valueSize(slot));
         float subWant = dp(style.subSize(slot));
-        boolean hasSub = sub != null && !sub.isEmpty();
+        boolean hasSub = subs.length > 0;
         boolean hasFoot = foot != null && !foot.isEmpty();
         boolean showChart = style.chartOn(slot);
         float barSpace = dp(16);
@@ -510,13 +510,24 @@ public class StatusHudView extends View {
         float valueBase = afterTitle - text.ascent();
         float valueBottom = valueBase + text.descent();
 
-        float subBase = 0;
-        float subBottom = valueBottom;
         if (hasSub) {
             dim.setColor(colDim);
-            subWant = fitText(dim, sub, innerW, subWant, dp(HudStyle.MIN_SUB_SIZE));
-            subBase = valueBottom + dp(3) - dim.ascent();
-            subBottom = subBase + dim.descent();
+            for (int i = 0; i < subs.length; i++) {
+                String line = formatMetricValue(BridgeService.STATE, subs[i]);
+                subWant = fitText(dim, line, innerW, subWant, dp(HudStyle.MIN_SUB_SIZE));
+            }
+        }
+
+        float[] subBases = new float[subs.length];
+        float subBottom = valueBottom;
+        if (hasSub) {
+            dim.setTextSize(subWant);
+            float prev = valueBottom;
+            for (int i = 0; i < subs.length; i++) {
+                subBases[i] = prev + dp(3) - dim.ascent();
+                prev = subBases[i] + dim.descent();
+            }
+            subBottom = prev;
         }
 
         int guard = 0;
@@ -545,8 +556,12 @@ public class StatusHudView extends View {
             valueBottom = valueBase + text.descent();
             if (hasSub) {
                 dim.setTextSize(subWant);
-                subBase = valueBottom + dp(3) - dim.ascent();
-                subBottom = subBase + dim.descent();
+                float prev = valueBottom;
+                for (int i = 0; i < subs.length; i++) {
+                    subBases[i] = prev + dp(3) - dim.ascent();
+                    prev = subBases[i] + dim.descent();
+                }
+                subBottom = prev;
             } else {
                 subBottom = valueBottom;
             }
@@ -566,7 +581,10 @@ public class StatusHudView extends View {
         if (hasSub) {
             dim.setColor(colDim);
             dim.setTextSize(subWant);
-            canvas.drawText(clip(dim, sub, innerW), x + padX, subBase, dim);
+            for (int i = 0; i < subs.length; i++) {
+                String line = formatMetricValue(BridgeService.STATE, subs[i]);
+                canvas.drawText(clip(dim, line, innerW), x + padX, subBases[i], dim);
+            }
         }
         canvas.restore();
         dim.setColor(colDim);
