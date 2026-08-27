@@ -9,6 +9,7 @@ final class DisplayPrefs {
     private static final String KEY_LIGHT_THEME = "light_theme";
     private static final String KEY_HUD_STYLE = "hud_style";
     private static final String KEY_SCREEN_MIRROR = "screen_mirror";
+    private static final String KEY_AUTO_HIDE_MUTE = "auto_hide_mute";
 
     private DisplayPrefs() {
     }
@@ -35,6 +36,14 @@ final class DisplayPrefs {
 
     static void setScreenMirror(Context context, boolean on) {
         prefs(context).edit().putBoolean(KEY_SCREEN_MIRROR, on).apply();
+    }
+
+    static boolean isAutoHideMute(Context context) {
+        return prefs(context).getBoolean(KEY_AUTO_HIDE_MUTE, false);
+    }
+
+    static void setAutoHideMute(Context context, boolean on) {
+        prefs(context).edit().putBoolean(KEY_AUTO_HIDE_MUTE, on).apply();
     }
 
     static String hudStyleJson(Context context) {
