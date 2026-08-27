@@ -202,12 +202,15 @@ public class StatusHudView extends View {
         dim.setTextSize(dp(12));
         canvas.drawText(s.formatLink(), dp(36), dp(27), dim);
 
+        float clockLeft = drawClock(canvas, w, dp(27), colText, dp(13));
+
         if (s.hasPcStats()) {
             String host = s.pcName.isEmpty() ? "电脑" : s.pcName;
             String up = formatUptime(s.pcUptime);
             String mid = host + (up.isEmpty() ? "" : "  ·  " + up);
             dim.setTextSize(dp(11));
-            canvas.drawText(clip(dim, mid, w - dp(22) - dp(110)), dp(110), dp(27), dim);
+            canvas.drawText(clip(dim, mid, Math.max(0f, clockLeft - dp(12) - dp(110))),
+                    dp(110), dp(27), dim);
         }
 
         float mutePad = dp(12);
@@ -391,10 +394,13 @@ public class StatusHudView extends View {
             accent.setAlpha(255);
 
             int textAlpha = Math.max(1, Math.min(255, (int) (255 * bar)));
-            text.setTextSize(dp(13));
-            text.setColor((textAlpha << 24) | 0x00E8EEF8);
+            int barText = (textAlpha << 24) | 0x00E8EEF8;
             String title = (s.mirrorTitle == null || s.mirrorTitle.isEmpty()) ? "屏幕镜像" : s.mirrorTitle;
-            canvas.drawText(title, dp(30), dp(21), text);
+            float clockLeft = drawClock(canvas, w, dp(21), barText, dp(13));
+            text.setTextSize(dp(13));
+            text.setColor(barText);
+            canvas.drawText(clip(text, title, Math.max(0f, clockLeft - dp(12) - dp(30))),
+                    dp(30), dp(21), text);
             text.setColor(colText);
         }
         if (bar > 0.02f && bar < 1f) {
@@ -990,6 +996,24 @@ public class StatusHudView extends View {
             return String.format("%.1f KB/s", bytesPerSec / 1024f);
         }
         return String.format("%.2f MB/s", bytesPerSec / (1024f * 1024f));
+    }
+
+    private float drawClock(Canvas canvas, int w, float baseline, int color, float size) {
+        String clock = clockText();
+        text.setTextSize(size);
+        text.setColor(color);
+        float tw = text.measureText(clock);
+        float x = w - dp(16) - tw;
+        canvas.drawText(clock, x, baseline, text);
+        text.setColor(colText);
+        return x;
+    }
+
+    private static String clockText() {
+        java.util.Calendar c = java.util.Calendar.getInstance();
+        return String.format(java.util.Locale.US, "%02d:%02d",
+                c.get(java.util.Calendar.HOUR_OF_DAY),
+                c.get(java.util.Calendar.MINUTE));
     }
 
     private static String formatUptime(long seconds) {
