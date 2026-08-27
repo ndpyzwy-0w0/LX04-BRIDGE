@@ -137,6 +137,10 @@ final class HudBackground {
         return Math.round(alpha() * 255f / 100f);
     }
 
+    synchronized boolean hasImage() {
+        return current() != null;
+    }
+
     synchronized void draw(Canvas canvas, int w, int h) {
         Bitmap bmp = current();
         if (bmp == null) {
