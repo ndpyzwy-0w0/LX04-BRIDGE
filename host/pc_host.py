@@ -317,6 +317,7 @@ class HostApp:
         self.light_theme = tk.BooleanVar(value=False)
         self.disk_var = tk.StringVar()
         self.monitor_var = tk.StringVar()
+        self.quality_var = tk.StringVar(value=screen_mirror.DEFAULT_QUALITY)
         self._saved_disk = ""
         self._saved_monitor = ""
         self._monitors: list[screen_mirror.Monitor] = []
@@ -551,9 +552,20 @@ class HostApp:
         self.monitor_drop = ChoiceDrop(
             mirror_row, self.monitor_var, self._on_monitor_change, combo_bg, combo_fg
         )
+        ttk.Label(mirror_row, text="码率", style="Card.TLabel").pack(side="left", padx=(10, 0))
+        self.quality_drop = ChoiceDrop(
+            mirror_row,
+            self.quality_var,
+            self._on_quality_change,
+            combo_bg,
+            combo_fg,
+            expand=False,
+            width=6,
+        )
+        self.quality_drop.set_labels(list(screen_mirror.QUALITY_KEYS))
         ttk.Label(
             mirror_row,
-            text="在音箱右侧菜单打开「屏幕镜像」。",
+            text="越高越清晰，USB 忙时可能更卡。",
             style="CardDim.TLabel",
         ).pack(side="left")
 
@@ -659,6 +671,8 @@ class HostApp:
         self._saved_spk = str(data.get("speaker") or "")
         self._saved_disk = str(data.get("pc_disk") or "")
         self._saved_monitor = str(data.get("pc_monitor") or "")
+        self.quality_var.set(screen_mirror.pick_quality(str(data.get("mirror_quality") or "")).key)
+        self.mirror.set_quality(self.quality_var.get())
         self._refresh_disks()
         self._refresh_monitors()
 
@@ -673,6 +687,7 @@ class HostApp:
             "light_theme": bool(self.light_theme.get()),
             "pc_disk": self._selected_disk(),
             "pc_monitor": self._selected_monitor_key(),
+            "mirror_quality": self.quality_var.get(),
             "inject": self.inject_var.get(),
             "speaker": self.spk_dev_var.get(),
         }
@@ -831,6 +846,14 @@ class HostApp:
         self._save_routes()
         if self.mirror.running():
             self._start_mirror(restart=True)
+
+    def _on_quality_change(self) -> None:
+        if not self._routes_ready:
+            return
+        preset = self.mirror.set_quality(self.quality_var.get())
+        self.quality_var.set(preset.key)
+        self._save_routes()
+        self._log("镜像码率: " + preset.key)
 
     def _send_mirror_frame(self, jpeg: bytes) -> None:
         if not self.connected or not self.mirror.running():
