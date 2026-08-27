@@ -1652,7 +1652,16 @@ class HostApp:
             self.mirror.note_ack()
             return
         if kind == "event":
-            self.toast.handle_event(data if isinstance(data, dict) else {})
+            data = data if isinstance(data, dict) else {}
+            cmd = str(data.get("cmd") or "")
+            if cmd == "toast_dismiss":
+                self._toast_logged = False
+                try:
+                    self.client.send_control("toast_overlay", on=False)
+                except Exception:
+                    pass
+                self.mirror.resume()
+            self.toast.handle_event(data)
             return
         self.root.after(0, lambda: self._handle_event(kind, data))
 

@@ -601,6 +601,18 @@ public class StatusHudView extends View {
         return -1;
     }
 
+    private void clearToastOverlay() {
+        BridgeState s = BridgeService.STATE;
+        s.toastOverlay = false;
+        s.toastTitle = "";
+        s.toastApp = "";
+        s.toastBody = "";
+        s.toastButtonIds = new String[0];
+        s.toastButtonLabels = new String[0];
+        toastBtnCount = 0;
+        invalidate();
+    }
+
     private void drawMuteButton(Canvas canvas, RectF rect, boolean muted, String label, float alpha) {
         if (alpha <= 0.02f) {
             return;
@@ -1016,8 +1028,10 @@ public class StatusHudView extends View {
                     String[] ids = BridgeService.STATE.toastButtonIds;
                     String id = (ids != null && btn < ids.length) ? ids[btn] : String.valueOf(btn);
                     listener.onToastAction(id);
+                    clearToastOverlay();
                 } else if (toastPressOutside && !toastCard.contains(x, y) && listener != null) {
                     listener.onToastDismiss();
+                    clearToastOverlay();
                 }
                 toastPressBtn = -1;
                 toastPressOutside = false;
