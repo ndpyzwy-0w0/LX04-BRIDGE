@@ -30,8 +30,6 @@ ole32 = ctypes.oledll.ole32
 kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
 
 DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 = ctypes.c_void_p(-4)
-DPI_AWARENESS_CONTEXT_UNAWARE = ctypes.c_void_p(-1)
-DPI_AWARENESS_CONTEXT_UNAWARE_GDISCALED = ctypes.c_void_p(-5)
 
 
 class RECT(ctypes.Structure):
@@ -237,22 +235,12 @@ _gdiplus_lock = threading.Lock()
 
 
 def _thread_dpi() -> None:
-    """Per-monitor DPI for UI monitor lists only. Never call this on the Tk UI thread."""
+    """Per-monitor DPI for capture and monitor lists. Never call this on the Tk UI thread:
+    changing awareness after Tk() creates a window detaches the frame from the widgets."""
     try:
         user32.SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2)
     except Exception:
         pass
-
-
-def _capture_dpi() -> None:
-    """Virtualized pixels for capture: a 4K screen is ~2K, StretchBlt is much cheaper."""
-    try:
-        user32.SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_UNAWARE_GDISCALED)
-    except Exception:
-        try:
-            user32.SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_UNAWARE)
-        except Exception:
-            pass
 
 
 def _ensure_gdiplus() -> None:
@@ -585,7 +573,7 @@ class ScreenSender:
             ole32.CoInitializeEx(None, COINIT_MULTITHREADED)
         except Exception:
             pass
-        _capture_dpi()
+        _thread_dpi()
         grabber = _Grabber()
         chosen: Monitor | None = None
         last_enum = 0.0
