@@ -1,15 +1,15 @@
-"""Capture Windows toast / bottom-right popups and click them from the LX04."""
+"""Read and operate Windows toast popups via UI Automation, not screenshots."""
 from __future__ import annotations
 
 import ctypes
 import os
+import queue
 import threading
 import time
 from ctypes import wintypes
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import screen_mirror
-from screen_mirror import TARGET_H, TARGET_W, _Grabber, letterbox
 
 user32 = ctypes.WinDLL("user32", use_last_error=True)
 kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
@@ -36,11 +36,6 @@ user32.GetWindowThreadProcessId.restype = wintypes.DWORD
 user32.MonitorFromRect.argtypes = [ctypes.POINTER(screen_mirror.RECT), wintypes.DWORD]
 user32.MonitorFromRect.restype = wintypes.HMONITOR
 user32.GetMonitorInfoW.argtypes = [wintypes.HMONITOR, ctypes.POINTER(screen_mirror.MONITORINFOEXW)]
-user32.GetSystemMetrics.argtypes = [ctypes.c_int]
-user32.GetCursorPos.argtypes = [ctypes.POINTER(wintypes.POINT)]
-user32.SetCursorPos.argtypes = [ctypes.c_int, ctypes.c_int]
-user32.SendInput.argtypes = [wintypes.UINT, ctypes.c_void_p, ctypes.c_int]
-user32.SendInput.restype = wintypes.UINT
 user32.PostMessageW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
 kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
 kernel32.OpenProcess.restype = wintypes.HANDLE
@@ -55,35 +50,18 @@ if dwmapi is not None:
 
 GWL_STYLE = -16
 GWL_EXSTYLE = -20
-WS_POPUP = 0x80000000
 WS_VISIBLE = 0x10000000
 WS_EX_TOPMOST = 0x00000008
 WS_EX_TOOLWINDOW = 0x00000080
 WS_EX_NOACTIVATE = 0x08000000
-WS_EX_LAYERED = 0x00080000
 WS_EX_TRANSPARENT = 0x00000020
 DWMWA_CLOAKED = 14
 MONITOR_DEFAULTTONEAREST = 2
 PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
-SM_XVIRTUALSCREEN = 76
-SM_YVIRTUALSCREEN = 77
-SM_CXVIRTUALSCREEN = 78
-SM_CYVIRTUALSCREEN = 79
 WM_CLOSE = 0x0010
-INPUT_MOUSE = 0
-MOUSEEVENTF_MOVE = 0x0001
-MOUSEEVENTF_LEFTDOWN = 0x0002
-MOUSEEVENTF_LEFTUP = 0x0004
-MOUSEEVENTF_ABSOLUTE = 0x8000
-MOUSEEVENTF_VIRTUALDESK = 0x4000
-COINIT_MULTITHREADED = 0
-PAD_PX = 10
-POLL_IDLE_S = 0.12
-POLL_LIVE_S = 0.055
-ACK_WAIT_S = 0.28
-JPEG_QUALITY = 52
-JPEG_QUALITY_SMALL = 36
-MAX_JPEG = 72 * 1024
+COINIT_APARTMENTTHREADED = 0x2
+POLL_IDLE_S = 0.18
+POLL_LIVE_S = 0.35
 
 SKIP_CLASSES = {
     "Shell_TrayWnd",
@@ -122,6 +100,13 @@ TOAST_TITLES = {
     "新通知",
     "通知",
 }
+TOAST_WINDOW_NAMES = (
+    "新通知",
+    "New notification",
+    "New notifications",
+    "Notifications",
+    "Notification",
+)
 TOAST_PROCESSES = {
     "explorer.exe",
     "shellexperiencehost.exe",
@@ -129,48 +114,79 @@ TOAST_PROCESSES = {
     "cursor.exe",
     "code.exe",
 }
-
-
-class MOUSEINPUT(ctypes.Structure):
-    _fields_ = [
-        ("dx", wintypes.LONG),
-        ("dy", wintypes.LONG),
-        ("mouseData", wintypes.DWORD),
-        ("dwFlags", wintypes.DWORD),
-        ("time", wintypes.DWORD),
-        ("dwExtraInfo", ctypes.c_void_p),
-    ]
-
-
-class INPUT(ctypes.Structure):
-    class _I(ctypes.Union):
-        _fields_ = [("mi", MOUSEINPUT)]
-
-    _anonymous_ = ("i",)
-    _fields_ = [("type", wintypes.DWORD), ("i", _I)]
-
-
-@dataclass
-class ToastHit:
-    hwnds: tuple[int, ...]
-    left: int
-    top: int
-    width: int
-    height: int
-    title: str
+CHROME_BUTTONS = {
+    "此通知的设置",
+    "将此通知移动到通知中心",
+    "settings for this notification",
+    "move this notification to notification center",
+    "close",
+    "关闭",
+    "dismiss",
+    "dismiss notification",
+    "notification settings",
+    "see more",
+    "更多",
+    "打开通知中心",
+}
+UIA_WINDOW = 50032
+UIA_BUTTON = 50000
+UIA_HYPERLINK = 50005
+UIA_SPLITBUTTON = 50031
+UIA_MENUITEM = 50011
+UIA_TEXT = 50020
 
 
 @dataclass
-class ToastMap:
-    src_left: int
-    src_top: int
-    src_w: int
-    src_h: int
-    dst_x: int
-    dst_y: int
-    dst_w: int
-    dst_h: int
-    hwnds: tuple[int, ...]
+class ToastButtonInfo:
+    id: str
+    label: str
+
+
+@dataclass
+class ToastContent:
+    app: str = ""
+    title: str = ""
+    body: str = ""
+    buttons: list[ToastButtonInfo] = field(default_factory=list)
+    hwnd: int = 0
+
+    def fingerprint(self) -> tuple:
+        return (self.hwnd, self.app, self.title, self.body, tuple((b.id, b.label) for b in self.buttons))
+
+    def as_control(self) -> dict:
+        return {
+            "app": self.app,
+            "title": self.title or "系统弹窗",
+            "body": self.body,
+            "buttons": [{"id": b.id, "label": b.label} for b in self.buttons],
+        }
+
+
+_UIA = None
+_UIA_LOCK = threading.Lock()
+_THREAD_UIA = threading.local()
+HOST_APP_NAMES = {
+    "windows powershell",
+    "windows command processor",
+    "powershell",
+    "cmd",
+    "命令提示符",
+}
+
+
+def _uia_mod():
+    global _UIA
+    with _UIA_LOCK:
+        if _UIA is not None:
+            return _UIA
+        import comtypes.client
+        try:
+            from comtypes.gen import UIAutomationClient as uia
+        except (ImportError, OSError, AttributeError):
+            comtypes.client.GetModule("UIAutomationCore.dll")
+            from comtypes.gen import UIAutomationClient as uia
+        _UIA = uia
+        return uia
 
 
 def _class_name(hwnd: int) -> str:
@@ -205,14 +221,6 @@ def _process_name(pid: int) -> str:
         return os.path.basename(buf.value).lower()
     finally:
         kernel32.CloseHandle(handle)
-
-
-def _virtual_screen() -> tuple[int, int, int, int]:
-    left = int(user32.GetSystemMetrics(SM_XVIRTUALSCREEN))
-    top = int(user32.GetSystemMetrics(SM_YVIRTUALSCREEN))
-    width = max(1, int(user32.GetSystemMetrics(SM_CXVIRTUALSCREEN)))
-    height = max(1, int(user32.GetSystemMetrics(SM_CYVIRTUALSCREEN)))
-    return left, top, width, height
 
 
 def _work_area(rect: screen_mirror.RECT) -> screen_mirror.RECT | None:
@@ -267,9 +275,9 @@ def _looks_like_toast(
     return bool(ex_style & WS_EX_TOPMOST) and proc in TOAST_PROCESSES
 
 
-def find_toasts() -> ToastHit | None:
+def find_toast_hwnds() -> list[int]:
     screen_mirror._thread_dpi()
-    found: list[tuple[int, int, int, int, int, str]] = []
+    found: list[int] = []
     our_pid = os.getpid()
 
     def _enum(hwnd, _lparam):
@@ -302,78 +310,266 @@ def find_toasts() -> ToastHit | None:
         title = _title(hwnd)
         if not _looks_like_toast(class_name, title, width, height, work, ex_style, proc):
             return 1
-        found.append((int(hwnd), left, top, right, bottom, title or class_name or proc))
+        found.append(int(hwnd))
         return 1
 
     cb = WNDENUMPROC(_enum)
     user32.EnumWindows(cb, 0)
-    if not found:
+    return found
+
+
+def _create_uia():
+    import comtypes.client
+    uia = _uia_mod()
+    return comtypes.client.CreateObject(uia.CUIAutomation), uia
+
+
+def _auto():
+    pair = getattr(_THREAD_UIA, "pair", None)
+    if pair is None:
+        pair = _create_uia()
+        _THREAD_UIA.pair = pair
+    return pair
+
+
+def _hwnd_of(el) -> int:
+    try:
+        handle = el.CurrentNativeWindowHandle
+    except Exception:
+        return 0
+    if handle is None:
+        return 0
+    try:
+        return int(handle)
+    except (TypeError, ValueError):
+        return int(getattr(handle, "value", 0) or 0)
+
+
+def _find_named_toast_windows(automation, uia) -> list:
+    root = automation.GetRootElement()
+    found = []
+    seen: set[int] = set()
+    for name in TOAST_WINDOW_NAMES:
+        try:
+            name_cond = automation.CreatePropertyCondition(uia.UIA_NamePropertyId, name)
+            type_cond = automation.CreatePropertyCondition(uia.UIA_ControlTypePropertyId, UIA_WINDOW)
+            cond = automation.CreateAndCondition(name_cond, type_cond)
+            el = root.FindFirst(uia.TreeScope_Children, cond)
+        except Exception:
+            continue
+        if el is None:
+            continue
+        hwnd = _hwnd_of(el)
+        key = hwnd or id(el)
+        if key in seen:
+            continue
+        seen.add(key)
+        found.append(el)
+    return found
+
+
+def _element_from_hwnd(automation, hwnd: int):
+    if not hwnd:
         return None
-    left = min(item[1] for item in found)
-    top = min(item[2] for item in found)
-    right = max(item[3] for item in found)
-    bottom = max(item[4] for item in found)
-    vs_l, vs_t, vs_w, vs_h = _virtual_screen()
-    left = max(vs_l, left - PAD_PX)
-    top = max(vs_t, top - PAD_PX)
-    right = min(vs_l + vs_w, right + PAD_PX)
-    bottom = min(vs_t + vs_h, bottom + PAD_PX)
-    width = max(1, right - left)
-    height = max(1, bottom - top)
-    title = found[0][5]
-    for item in found:
-        low = item[5].strip().lower()
-        if low in TOAST_TITLES or "cursor" in low:
-            title = item[5]
-            break
-    return ToastHit(tuple(item[0] for item in found), left, top, width, height, title)
+    try:
+        return automation.ElementFromHandle(hwnd)
+    except Exception:
+        try:
+            return automation.ElementFromHandle(ctypes.c_void_p(hwnd))
+        except Exception:
+            return None
 
 
-def _send_mouse(flags: int, x: int | None = None, y: int | None = None) -> None:
-    inp = INPUT()
-    inp.type = INPUT_MOUSE
-    if x is not None and y is not None:
-        vs_l, vs_t, vs_w, vs_h = _virtual_screen()
-        inp.mi.dx = int(round((x - vs_l) * 65535 / max(1, vs_w)))
-        inp.mi.dy = int(round((y - vs_t) * 65535 / max(1, vs_h)))
-        inp.mi.dwFlags = flags | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK
-    else:
-        inp.mi.dwFlags = flags
-    user32.SendInput(1, ctypes.byref(inp), ctypes.sizeof(INPUT))
+def _has_invoke(el, uia) -> bool:
+    try:
+        return bool(el.GetCurrentPropertyValue(uia.UIA_IsInvokePatternAvailablePropertyId))
+    except Exception:
+        return False
 
 
-def click_screen(x: float, y: float, down: bool = False, up: bool = False) -> None:
+def _invoke(el, uia) -> bool:
+    try:
+        pat = el.GetCurrentPattern(uia.UIA_InvokePatternId)
+        if pat is None:
+            return False
+        inv = pat.QueryInterface(uia.IUIAutomationInvokePattern)
+        inv.Invoke()
+        return True
+    except Exception:
+        return False
+
+
+def _is_chrome_label(name: str) -> bool:
+    low = name.strip().lower()
+    if not low:
+        return True
+    if low in CHROME_BUTTONS:
+        return True
+    if "的新通知" in name or "new notification from" in low:
+        return True
+    if low.startswith("来自 ") and "的新通知" in name:
+        return True
+    return False
+
+
+def _walk(el, uia):
+    automation, _ = _auto()
+    return el.FindAll(uia.TreeScope_Descendants, automation.CreateTrueCondition())
+
+
+def read_toast(el, uia) -> ToastContent | None:
+    if el is None:
+        return None
+    try:
+        kids = _walk(el, uia)
+        count = int(kids.Length)
+    except Exception:
+        return None
+    texts: list[str] = []
+    buttons: list[str] = []
+    seen_btn: set[str] = set()
+    for i in range(count):
+        try:
+            node = kids.GetElement(i)
+            name = (node.CurrentName or "").strip()
+            ct = int(node.CurrentControlType)
+        except Exception:
+            continue
+        if not name or _is_chrome_label(name):
+            continue
+        is_btn = ct in (UIA_BUTTON, UIA_HYPERLINK, UIA_SPLITBUTTON, UIA_MENUITEM)
+        if is_btn or (ct != UIA_TEXT and _has_invoke(node, uia) and ct != UIA_WINDOW):
+            if name not in seen_btn:
+                seen_btn.add(name)
+                buttons.append(name)
+            continue
+        if name not in seen_btn and name not in texts:
+            texts.append(name)
+    leftover = [item for item in texts if item.strip().lower() not in TOAST_TITLES]
+    app = title = body = ""
+    if len(leftover) == 1:
+        title = leftover[0]
+    elif len(leftover) == 2:
+        title, body = leftover[0], leftover[1]
+    elif leftover:
+        app, title, body = leftover[0], leftover[1], leftover[2]
+        extra = leftover[3:]
+        if extra and len(extra[-1]) <= 24:
+            attr = extra[-1]
+            extra = extra[:-1]
+            if app.strip().lower() in HOST_APP_NAMES or not app:
+                app = attr
+        if extra:
+            body = body + "\n" + "\n".join(extra)
+    if app.strip().lower() in HOST_APP_NAMES:
+        app = ""
+    if not title:
+        try:
+            title = (el.CurrentName or "").strip()
+        except Exception:
+            title = ""
+        if title.strip().lower() in TOAST_TITLES:
+            title = "系统弹窗"
+    return ToastContent(
+        app=app,
+        title=title,
+        body=body,
+        buttons=[ToastButtonInfo(str(i), label) for i, label in enumerate(buttons)],
+        hwnd=_hwnd_of(el),
+    )
+
+
+def _toast_elements(automation, uia) -> list:
+    found = list(_find_named_toast_windows(automation, uia))
+    seen = {_hwnd_of(el) for el in found}
+    for hwnd in find_toast_hwnds():
+        if hwnd in seen:
+            continue
+        el = _element_from_hwnd(automation, hwnd)
+        if el is not None:
+            found.append(el)
+            seen.add(hwnd)
+    return found
+
+
+def read_current_toast() -> ToastContent | None:
     screen_mirror._thread_dpi()
-    px, py = int(round(x)), int(round(y))
-    user32.SetCursorPos(px, py)
-    _send_mouse(MOUSEEVENTF_MOVE, px, py)
-    if down:
-        _send_mouse(MOUSEEVENTF_LEFTDOWN)
-    if up:
-        _send_mouse(MOUSEEVENTF_LEFTUP)
+    automation, uia = _auto()
+    for el in _toast_elements(automation, uia):
+        content = read_toast(el, uia)
+        if content is not None and (content.title or content.body or content.buttons):
+            return content
+    return None
 
 
-def dismiss_toasts(hwnds: tuple[int, ...]) -> None:
-    for hwnd in hwnds:
+def _find_button(el, uia, label: str, chrome: bool = False):
+    try:
+        kids = _walk(el, uia)
+        count = int(kids.Length)
+    except Exception:
+        return None
+    want = label.strip()
+    for i in range(count):
+        try:
+            node = kids.GetElement(i)
+            name = (node.CurrentName or "").strip()
+            ct = int(node.CurrentControlType)
+        except Exception:
+            continue
+        if name != want:
+            continue
+        if not chrome and _is_chrome_label(name):
+            continue
+        if ct in (UIA_BUTTON, UIA_HYPERLINK, UIA_SPLITBUTTON, UIA_MENUITEM) or _has_invoke(node, uia):
+            return node
+    return None
+
+
+def invoke_toast_button(label: str) -> bool:
+    automation, uia = _auto()
+    for el in _toast_elements(automation, uia):
+        btn = _find_button(el, uia, label)
+        if btn is not None and _invoke(btn, uia):
+            return True
+    return False
+
+
+def dismiss_toasts() -> None:
+    try:
+        automation, uia = _auto()
+        for el in _toast_elements(automation, uia):
+            for chrome in (
+                "将此通知移动到通知中心",
+                "Move this notification to Notification Center",
+                "关闭",
+                "Close",
+            ):
+                btn = _find_button(el, uia, chrome, chrome=True)
+                if btn is not None and _invoke(btn, uia):
+                    return
+            hwnd = _hwnd_of(el)
+            if hwnd:
+                user32.PostMessageW(hwnd, WM_CLOSE, 0, 0)
+                return
+    except Exception:
+        pass
+    for hwnd in find_toast_hwnds():
         if hwnd and user32.IsWindow(hwnd):
             user32.PostMessageW(hwnd, WM_CLOSE, 0, 0)
 
 
 class ToastSender:
-    def __init__(self, send_jpeg, on_change=None) -> None:
-        self._send_jpeg = send_jpeg
+    def __init__(self, on_change=None) -> None:
         self.on_change = on_change
         self._alive = False
         self._showing = False
         self._thread: threading.Thread | None = None
-        self._ack = threading.Event()
         self._lock = threading.Lock()
-        self._map: ToastMap | None = None
-        self._cursor: wintypes.POINT | None = None
-        self._press_at: tuple[float, float] | None = None
+        self._jobs: queue.Queue[tuple[str, str]] = queue.Queue()
+        self._content: ToastContent | None = None
+        self._fingerprint: tuple | None = None
         self.title = ""
         self.error = ""
-        self.frames = 0
 
     def running(self) -> bool:
         return self._alive
@@ -381,12 +577,17 @@ class ToastSender:
     def showing(self) -> bool:
         return self._alive and self._showing
 
+    def content(self) -> ToastContent | None:
+        with self._lock:
+            return self._content
+
     def start(self) -> None:
         if self._alive:
             return
         self.error = ""
-        self.frames = 0
         self._showing = False
+        self._fingerprint = None
+        self._jobs = queue.Queue()
         self._alive = True
         self._thread = threading.Thread(target=self._loop, daemon=True, name="lx04-toast")
         self._thread.start()
@@ -395,165 +596,110 @@ class ToastSender:
         was_showing = self._showing
         self._alive = False
         self._showing = False
-        self._ack.set()
         thread = self._thread
         self._thread = None
-        if thread is not None and thread.is_alive() and thread is not threading.current_thread():
+        if thread is not None and thread is not threading.current_thread() and thread.is_alive():
             thread.join(timeout=1.0)
         with self._lock:
-            self._map = None
+            self._content = None
+            self._fingerprint = None
         if was_showing:
-            self._emit(False, "")
+            self._emit(False, None)
 
-    def note_ack(self) -> None:
-        self._ack.set()
-
-    def handle_pointer(self, data: dict) -> None:
+    def handle_event(self, data: dict) -> None:
         if not self._showing:
             return
-        try:
-            nx = float(data.get("x") or 0)
-            ny = float(data.get("y") or 0)
-        except (TypeError, ValueError):
-            return
-        act = str(data.get("act") or "")
-        with self._lock:
-            mapping = self._map
-            hwnds = mapping.hwnds if mapping is not None else ()
-        px = nx * TARGET_W
-        py = ny * TARGET_H
-        inside = mapping is not None and _inside_dest(px, py, mapping)
-        sx = sy = 0.0
-        if inside and mapping is not None:
-            sx = mapping.src_left + (px - mapping.dst_x) / max(1, mapping.dst_w) * mapping.src_w
-            sy = mapping.src_top + (py - mapping.dst_y) / max(1, mapping.dst_h) * mapping.src_h
-        if act == "down":
-            if not inside:
-                return
-            self._remember_cursor()
-            self._press_at = (sx, sy)
-            click_screen(sx, sy, down=True, up=False)
-            return
-        if act == "up":
-            if inside:
-                click_screen(sx, sy, down=False, up=True)
-            elif self._press_at is not None:
-                click_screen(self._press_at[0], self._press_at[1], down=False, up=True)
-            self._press_at = None
-            self._restore_cursor()
-            if not inside:
-                dismiss_toasts(hwnds)
-            return
-        if act == "cancel":
-            if self._press_at is not None:
-                click_screen(self._press_at[0], self._press_at[1], down=False, up=True)
-            self._press_at = None
-            self._restore_cursor()
+        cmd = str(data.get("cmd") or "")
+        if cmd == "toast_action":
+            self.invoke(str(data.get("id") or data.get("label") or ""))
+        elif cmd == "toast_dismiss":
+            self.dismiss()
 
-    def _remember_cursor(self) -> None:
-        screen_mirror._thread_dpi()
-        pt = wintypes.POINT()
-        if user32.GetCursorPos(ctypes.byref(pt)):
-            self._cursor = pt
-        else:
-            self._cursor = None
+    def invoke(self, button_id: str) -> None:
+        if button_id:
+            self._jobs.put(("invoke", button_id))
 
-    def _restore_cursor(self) -> None:
-        pt = self._cursor
-        self._cursor = None
-        if pt is not None:
-            user32.SetCursorPos(int(pt.x), int(pt.y))
+    def dismiss(self) -> None:
+        self._jobs.put(("dismiss", ""))
 
-    def _emit(self, showing: bool, title: str) -> None:
+    def _emit(self, showing: bool, content: ToastContent | None) -> None:
         cb = self.on_change
-        if cb is not None:
-            try:
-                cb(showing, title)
-            except Exception:
-                pass
+        if cb is None:
+            return
+        try:
+            cb(showing, content)
+        except Exception:
+            pass
 
     def _loop(self) -> None:
         try:
-            ole32.CoInitializeEx(None, COINIT_MULTITHREADED)
+            ole32.CoInitializeEx(None, COINIT_APARTMENTTHREADED)
         except Exception:
-            pass
+            try:
+                ole32.CoInitialize(None)
+            except Exception:
+                pass
         screen_mirror._thread_dpi()
-        grabber = _Grabber()
+        try:
+            _auto()
+        except Exception as exc:
+            self.error = "无法初始化系统通知接口: " + str(exc)
         try:
             while self._alive:
                 started = time.monotonic()
+                while True:
+                    try:
+                        kind, payload = self._jobs.get_nowait()
+                    except queue.Empty:
+                        break
+                    try:
+                        if kind == "invoke":
+                            label = payload
+                            with self._lock:
+                                content = self._content
+                            if content is not None:
+                                for btn in content.buttons:
+                                    if btn.id == payload or btn.label == payload:
+                                        label = btn.label
+                                        break
+                            if label and not invoke_toast_button(label):
+                                self.error = "未能点按系统通知按钮「" + label + "」"
+                        elif kind == "dismiss":
+                            dismiss_toasts()
+                    except Exception as exc:
+                        self.error = str(exc)
                 try:
-                    hit = find_toasts()
+                    content = read_current_toast()
                 except Exception as exc:
                     self.error = str(exc)
-                    hit = None
-                if hit is None:
+                    content = None
+                if content is None:
                     if self._showing:
-                        if self._press_at is not None:
-                            click_screen(self._press_at[0], self._press_at[1], down=False, up=True)
-                            self._press_at = None
-                            self._restore_cursor()
                         self._showing = False
                         with self._lock:
-                            self._map = None
-                        self._emit(False, "")
+                            self._content = None
+                            self._fingerprint = None
+                        self._emit(False, None)
                     remain = POLL_IDLE_S - (time.monotonic() - started)
                     if remain > 0 and self._alive:
                         time.sleep(remain)
                     continue
-                dest = letterbox(hit.width, hit.height)
-                mapping = ToastMap(
-                    src_left=hit.left,
-                    src_top=hit.top,
-                    src_w=hit.width,
-                    src_h=hit.height,
-                    dst_x=dest[0],
-                    dst_y=dest[1],
-                    dst_w=dest[2],
-                    dst_h=dest[3],
-                    hwnds=hit.hwnds,
-                )
+                fp = content.fingerprint()
+                self.title = content.title
                 with self._lock:
-                    self._map = mapping
-                self.title = hit.title
+                    self._content = content
+                    changed = fp != self._fingerprint
+                    self._fingerprint = fp
                 if not self._showing:
                     self._showing = True
-                    self._emit(True, hit.title)
-                try:
-                    jpeg = grabber.grab_region(
-                        hit.left, hit.top, hit.width, hit.height,
-                        quality=JPEG_QUALITY,
-                        max_jpeg=MAX_JPEG,
-                        quality_small=JPEG_QUALITY_SMALL,
-                    )
-                except Exception as exc:
-                    self.error = str(exc)
-                    grabber.close()
-                    time.sleep(0.25)
-                    continue
-                if not self._alive or not jpeg:
-                    continue
-                self._ack.clear()
-                try:
-                    self._send_jpeg(jpeg)
-                    self.frames += 1
-                except Exception as exc:
-                    self.error = str(exc)
-                if self._alive:
-                    self._ack.wait(timeout=ACK_WAIT_S)
+                    self._emit(True, content)
+                elif changed:
+                    self._emit(True, content)
                 remain = POLL_LIVE_S - (time.monotonic() - started)
                 if remain > 0 and self._alive:
                     time.sleep(remain)
         finally:
-            grabber.close()
             try:
                 ole32.CoUninitialize()
             except Exception:
                 pass
-
-
-def _inside_dest(px: float, py: float, mapping: ToastMap) -> bool:
-    return (
-        mapping.dst_x <= px <= mapping.dst_x + mapping.dst_w
-        and mapping.dst_y <= py <= mapping.dst_y + mapping.dst_h
-    )

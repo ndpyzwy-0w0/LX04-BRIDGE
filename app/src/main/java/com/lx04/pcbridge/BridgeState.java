@@ -19,6 +19,10 @@ final class BridgeState {
     volatile boolean flushStatus;
     volatile String mirrorTitle = "";
     volatile String toastTitle = "";
+    volatile String toastApp = "";
+    volatile String toastBody = "";
+    volatile String[] toastButtonIds = new String[0];
+    volatile String[] toastButtonLabels = new String[0];
     volatile boolean permissionDenied;
     volatile float level;
     volatile float playLevel;

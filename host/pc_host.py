@@ -336,7 +336,7 @@ class HostApp:
         self._monitors: list[screen_mirror.Monitor] = []
         self.mirror = screen_mirror.ScreenSender(self._send_mirror_frame)
         self._mirror_logged = False
-        self.toast = toast_mirror.ToastSender(self._send_toast_frame, self._on_toast_change)
+        self.toast = toast_mirror.ToastSender(self._on_toast_change)
         self._toast_logged = False
         self.inject_var = tk.StringVar()
         self.spk_dev_var = tk.StringVar()
@@ -605,7 +605,7 @@ class HostApp:
         ).pack(side="left")
         ttk.Label(
             toast_row,
-            text="开了后右下角 Windows / Cursor 提示会放大到音箱，可直接点按。",
+            text="开了后系统通知的标题、正文、按钮会显示到音箱，点按钮即点系统通知。",
             style="CardDim.TLabel",
         ).pack(side="left", padx=8)
 
@@ -902,36 +902,24 @@ class HostApp:
             return
         self.client.send_video(jpeg)
 
-    def _send_toast_frame(self, jpeg: bytes) -> None:
-        if not self.connected or not self.toast.showing():
-            return
-        if self.client.video_sock is None:
-            try:
-                self.client.connect_video("127.0.0.1", protocol.VIDEO_PORT)
-            except Exception:
-                return
-        self.client.send_video(jpeg)
-
-    def _on_toast_change(self, showing: bool, title: str) -> None:
+    def _on_toast_change(self, showing: bool, content) -> None:
         try:
-            self.root.after(0, lambda s=showing, t=title: self._apply_toast_change(s, t))
+            self.root.after(0, lambda s=showing, c=content: self._apply_toast_change(s, c))
         except Exception:
             pass
 
-    def _apply_toast_change(self, showing: bool, title: str) -> None:
+    def _apply_toast_change(self, showing: bool, content) -> None:
         if not self.connected:
             return
         if showing:
-            if self.client.video_sock is None:
-                try:
-                    self.client.connect_video("127.0.0.1", protocol.VIDEO_PORT)
-                except Exception as exc:
-                    self._log("屏幕通道未打开: " + str(exc))
-                    return
             self.mirror.pause()
-            self.client.send_control("toast_overlay", on=True, title=title or "系统弹窗")
+            payload = content.as_control() if content is not None else {"title": "系统弹窗"}
+            self.client.send_control("toast_overlay", on=True, **payload)
             if not self._toast_logged:
                 self._toast_logged = True
+                title = ""
+                if content is not None:
+                    title = content.title or content.app
                 self._log("系统弹窗已同步到音箱" + ((": " + title) if title else ""))
             return
         self._toast_logged = False
@@ -944,7 +932,7 @@ class HostApp:
         self._save_routes()
         self._sync_toast_mirror()
         if self.toast_mirror.get():
-            self._log("已开启系统弹窗同步：右下角提示会显示在音箱上，点按即可操作。")
+            self._log("已开启系统弹窗同步：系统通知的文字和按钮会显示在音箱上，点按即操作电脑通知。")
         else:
             self._log("已关闭系统弹窗同步")
 
@@ -1661,13 +1649,10 @@ class HostApp:
 
     def _on_bridge_event(self, kind: str, data) -> None:
         if kind == "video_ack":
-            if self.toast.showing():
-                self.toast.note_ack()
-            else:
-                self.mirror.note_ack()
+            self.mirror.note_ack()
             return
         if kind == "event":
-            self.toast.handle_pointer(data if isinstance(data, dict) else {})
+            self.toast.handle_event(data if isinstance(data, dict) else {})
             return
         self.root.after(0, lambda: self._handle_event(kind, data))
 

@@ -51,6 +51,9 @@ def main() -> int:
     latest = DIST / f"{name}.exe"
 
     subprocess.check_call([sys.executable, "-m", "pip", "install", "-q", "pyinstaller", "sounddevice", "pycaw", "comtypes", "psutil"])
+    subprocess.check_call(
+        [sys.executable, "-c", "import comtypes.client; comtypes.client.GetModule('UIAutomationCore.dll')"]
+    )
     cmd = [
         sys.executable,
         "-m",
@@ -117,6 +120,8 @@ def main() -> int:
         "screen_mirror",
         "--hidden-import",
         "toast_mirror",
+        "--hidden-import",
+        "comtypes.gen.UIAutomationClient",
         "--collect-all",
         "psutil",
         "--collect-all",

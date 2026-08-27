@@ -97,7 +97,7 @@ adb forward tcp:17891 tcp:17891
 {"cmd": "volume", "level": 0.55}
 {"cmd": "pc_stats", "cpu": 34, "cpuT": 59, "gpu": 12, "gpuT": 49, "gpuN": "RTX 4070 SUPER", "vram": 28, "gpuW": 32, "ram": 35, "ramU": 22.2, "ramT": 63.8, "disk": 42, "diskN": "D:", "diskU": 400, "diskT": 931, "netD": 1500, "netU": 120, "up": 3600, "cores": 24}
 {"cmd": "mirror_info", "title": "1  1920×1080  主屏"}
-{"cmd": "toast_overlay", "on": true, "title": "系统弹窗"}
+{"cmd": "toast_overlay", "on": true, "app": "Cursor", "title": "申请权限", "body": "想要使用麦克风", "buttons": [{"id": "0", "label": "拒绝"}, {"id": "1", "label": "允许"}]}
 {"cmd": "hud_bg", "op": "select", "slot": 0}
 {"cmd": "hud_bg", "op": "delete", "slot": 1}
 {"cmd": "hud_opacity", "alpha": 85}
@@ -113,14 +113,16 @@ adb forward tcp:17891 tcp:17891
 
 `VIDEO` 走单独的 **17891** 通道，不和音频/音量/STATUS 挤在 17890 上。画面是 800×480 JPEG，音箱从右侧菜单选「屏幕镜像」开始投屏，选「状态监视」立刻停止抓屏。上位机「同步屏幕」选择投哪一块显示器，「码率」可选流畅 / 清晰 / 高清 / 最高。`mirror_info` 仍走 17890，只把显示器名称告诉音箱。音箱在 17891 上每收到一帧回 `VIDEO_ACK`，电脑等确认后再发下一帧，避免画面隧道里堆旧图。JPEG 大约 8–90KB，随码率变化。payload 上限 **256KB**。画面走 17891，电脑扬声器 PCM 仍走 17890，投屏时喇叭照常出声。
 
-上位机可选「同步系统弹窗」。打开后，电脑侦测右下角 Windows 原生提示（含 Cursor 的权限/完成通知），把弹窗区域放大成 800×480 JPEG 经 17891 推到音箱；`toast_overlay` 让音箱盖住监视页来显示。音箱触控经 EVENT 回传，电脑按画面坐标点回原弹窗按钮。点弹窗外的黑边会关掉该提示。全屏镜像进行中若出现弹窗，会暂时改推弹窗特写。
+上位机可选「同步系统弹窗」。打开后，电脑用系统 UI Automation 读取 Windows 原生通知的标题、正文和按钮（不是截图），经 `toast_overlay` 让音箱画出同样的卡片。音箱点按钮时发 `toast_action`，电脑对系统通知执行 Invoke；点卡片外空白发 `toast_dismiss`。全屏镜像进行中若出现通知，会暂停镜像改显示这张卡片。
 
 ## EVENT JSON
 
 ```json
+{"cmd": "toast_action", "id": "1"}
+{"cmd": "toast_dismiss"}
 {"cmd": "pointer", "act": "down", "x": 0.42, "y": 0.31}
 {"cmd": "pointer", "act": "up", "x": 0.42, "y": 0.31}
 {"cmd": "pointer", "act": "cancel", "x": 0, "y": 0}
 ```
 
-`x` / `y` 是音箱 800×480 画面的 0–1 归一化坐标。`down` / `up` 组成一次点击；`cancel` 松开鼠标。
+`x` / `y` 是音箱 800×480 画面的 0–1 归一化坐标，仅用于其它触控。系统弹窗用 `toast_action` / `toast_dismiss`，不再按截图像素点回去。
