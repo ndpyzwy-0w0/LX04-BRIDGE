@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import math
 import sys
 import time
 from pathlib import Path
@@ -46,6 +47,9 @@ METRIC_SAMPLE = {key: sample for key, _label, sample in METRICS}
 METRIC_KEY = {label: key for key, label, _sample in METRICS}
 NONE_METRIC = "none"
 NONE_LABEL = "不显示"
+CHART_FOLLOW = "main"
+CHART_FOLLOW_LABEL = "跟随大字"
+CHART_METRICS = tuple(key for key, _label, _sample in METRICS if key not in {"cores", "gpuN"})
 VALUE_SIZE_DEFAULT = 28
 SUB_SIZE_DEFAULT = 11
 VALUE_SIZE_MIN, VALUE_SIZE_MAX = 12, 56
@@ -84,6 +88,23 @@ def sub_metric_sample(key: str) -> str:
 
 def is_metric(key: str) -> bool:
     return key == NONE_METRIC or key in METRIC_LABEL
+
+
+def is_chartable(key: str) -> bool:
+    return key in CHART_METRICS
+
+
+def chart_metric_label(key: str) -> str:
+    if not key or key == CHART_FOLLOW:
+        return CHART_FOLLOW_LABEL
+    return metric_label(key)
+
+
+def chart_metric_key(label: str) -> str:
+    if label == CHART_FOLLOW_LABEL or not label:
+        return ""
+    key = metric_key(label)
+    return key if is_chartable(key) else ""
 
 
 def clamp_int(value: object, default: int, lo: int, hi: int) -> int:
@@ -186,6 +207,8 @@ def default_state(light: bool = False) -> dict:
                 "value_color": OK,
                 "title_color_set": False,
                 "value_color_set": False,
+                "chart": True,
+                "chart_metric": "",
             }
         )
     return {"light": light, "cards": cards, "rev": 0}
@@ -219,6 +242,13 @@ def load_state(light: bool = False) -> dict:
             card["value_size"] = card_value_size(extra)
         if extra.get("sub_size") or extra.get("subSize"):
             card["sub_size"] = card_sub_size(extra)
+        if "chart" in extra:
+            card["chart"] = bool(extra.get("chart"))
+        chart_metric = str(extra.get("chart_metric") or extra.get("chartMetric") or "")
+        if chart_metric == CHART_FOLLOW:
+            card["chart_metric"] = ""
+        elif is_chartable(chart_metric):
+            card["chart_metric"] = chart_metric
         if _hex(extra.get("title_color")):
             card["title_color"] = _hex(extra.get("title_color"))
         if _hex(extra.get("value_color")):
@@ -252,6 +282,10 @@ def style_is_default(state: dict) -> bool:
         if str(card.get("sub_metric") or default["sub_metric"]) != default["sub_metric"]:
             return False
         if card_value_size(card) != VALUE_SIZE_DEFAULT or card_sub_size(card) != SUB_SIZE_DEFAULT:
+            return False
+        if bool(card.get("chart", True)) is False:
+            return False
+        if str(card.get("chart_metric") or ""):
             return False
         title_color = _hex(card.get("title_color")) or default["title_color"]
         value_color = _hex(card.get("value_color")) or default["value_color"]
@@ -293,6 +327,11 @@ def control_payload(state: dict) -> dict:
         sub_size = card_sub_size(card)
         if sub_size != SUB_SIZE_DEFAULT:
             item["subSize"] = sub_size
+        if not bool(card.get("chart", True)):
+            item["chart"] = False
+        chart_metric = str(card.get("chart_metric") or "")
+        if is_chartable(chart_metric):
+            item["chartMetric"] = chart_metric
         cards.append(item)
     return {"cards": cards, "reset": False, "rev": rev}
 
@@ -318,6 +357,15 @@ def state_from_payload(payload: dict, light: bool) -> dict:
             card["sub_metric"] = sub_metric
         card["value_size"] = card_value_size(extra)
         card["sub_size"] = card_sub_size(extra)
+        if "chart" in extra:
+            card["chart"] = bool(extra.get("chart"))
+        chart_metric = str(extra.get("chart_metric") or extra.get("chartMetric") or "")
+        if chart_metric == CHART_FOLLOW:
+            card["chart_metric"] = ""
+        elif is_chartable(chart_metric):
+            card["chart_metric"] = chart_metric
+        elif "chartMetric" in extra or "chart_metric" in extra:
+            card["chart_metric"] = ""
         if _hex(extra.get("titleColor") or extra.get("title_color")):
             card["title_color"] = _hex(extra.get("titleColor") or extra.get("title_color"))
             card["title_color_set"] = card["title_color"] != colors["dim"]
@@ -489,7 +537,8 @@ def _draw_card(canvas: tk.Canvas, x: float, y: float, cw: float, ch: float, card
     value_dp = _fit_size(card_value_size(card), True, value, inner_w, VALUE_SIZE_MIN)
     sub_dp = _fit_size(card_sub_size(card), False, sub, inner_w, SUB_SIZE_MIN) if sub else SUB_SIZE_DEFAULT
     bar_space = dp(16)
-    usable = y + ch - bar_space
+    show_chart = bool(card.get("chart", True))
+    usable = y + ch - bar_space - (dp(40) if show_chart else 0)
 
     def _layout() -> tuple[float, float, float]:
         title_y = y + dp(8) + dp(title_dp)
@@ -520,11 +569,44 @@ def _draw_card(canvas: tk.Canvas, x: float, y: float, cw: float, ch: float, card
     if sub:
         canvas.create_text(x + dp(10), sub_y, text=_fit(sub_font, sub, inner_w), fill=colors["dim"], font=sub_font, anchor="sw")
 
+    if show_chart:
+        chart_top = (sub_y if sub else value_y) + dp(8)
+        chart_bottom = y + ch - bar_space - dp(2)
+        if chart_bottom - chart_top >= dp(18):
+            chart_metric = str(card.get("chart_metric") or "") or str(card.get("metric") or "cpu")
+            _draw_spark(canvas, x + dp(10), chart_top, x + cw - dp(10), chart_bottom,
+                        value_color, hash(chart_metric) % 12)
+
     bar_top = y + ch - dp(14)
     bar_l, bar_r = x + dp(10), x + cw - dp(10)
     _round_rect(canvas, bar_l, bar_top, bar_r, bar_top + dp(7), dp(4), colors["meter_bg"])
     fill = max(dp(6), (cw - dp(20)) * _bar_fill(value))
     _round_rect(canvas, bar_l, bar_top, bar_l + fill, bar_top + dp(7), dp(4), value_color)
+
+
+def _draw_spark(
+    canvas: tk.Canvas, x1: float, y1: float, x2: float, y2: float, color: str, seed: int
+) -> None:
+    n = 24
+    width = max(1.0, x2 - x1)
+    height = max(1.0, y2 - y1)
+    pts: list[float] = []
+    fill: list[float] = [x1, y2]
+    for i in range(n):
+        t = i / (n - 1)
+        wave = 0.38 + 0.28 * math.sin(t * 4.4 + seed) + 0.1 * math.sin(t * 11.0 + seed * 1.7)
+        wave = max(0.06, min(0.94, wave))
+        x = x1 + width * t
+        y = y2 - height * wave
+        pts.extend((x, y))
+        fill.extend((x, y))
+    fill.extend((x2, y2))
+    fill_color = color if len(color) != 7 else color + "33"
+    try:
+        canvas.create_polygon(*fill, fill=fill_color, outline="")
+    except tk.TclError:
+        pass
+    canvas.create_line(*pts, fill=color, width=2, smooth=True, capstyle="round", joinstyle="round")
 
 
 def _draw_mute(canvas: tk.Canvas, rect: tuple[float, float, float, float], label: str, colors: dict[str, str]) -> None:
@@ -580,11 +662,13 @@ class PreviewWindow:
         self.sub_metric_vars: list[tk.StringVar] = []
         self.value_size_vars: list[tk.IntVar] = []
         self.sub_size_vars: list[tk.IntVar] = []
+        self.chart_vars: list[tk.BooleanVar] = []
+        self.chart_metric_vars: list[tk.StringVar] = []
         self._swatches: list[tuple[tk.Button, tk.Button]] = []
 
         hint = ttk.Label(
             self.root,
-            text="每个格子分别选大字、小字和字号。音箱上长按栏目也能改，两边会同步。字号超出板块时会自动缩小。",
+            text="每个格子分别选大字、小字、字号和折线。音箱上长按栏目也能改，两边会同步。字号超出板块时会自动缩小。",
             style="Dim.TLabel",
         )
         hint.pack(anchor="w", padx=16, pady=(12, 6))
@@ -627,7 +711,9 @@ class PreviewWindow:
         ttk.Label(header, text="大字色", style="CardDim.TLabel", width=8).pack(side="left")
         ttk.Label(header, text="小字内容", style="CardDim.TLabel", width=14).pack(side="left")
         ttk.Label(header, text="大字号", style="CardDim.TLabel", width=7).pack(side="left")
-        ttk.Label(header, text="小字号", style="CardDim.TLabel").pack(side="left")
+        ttk.Label(header, text="小字号", style="CardDim.TLabel", width=7).pack(side="left")
+        ttk.Label(header, text="折线", style="CardDim.TLabel", width=6).pack(side="left")
+        ttk.Label(header, text="折线内容", style="CardDim.TLabel").pack(side="left")
 
         combo_bg = "#F3F6FB"
         combo_fg = "#1A2333"
@@ -641,11 +727,15 @@ class PreviewWindow:
             sub_var = tk.StringVar(value=sub_metric_label(str(card.get("sub_metric") or _sub)))
             value_size_var = tk.IntVar(value=card_value_size(card))
             sub_size_var = tk.IntVar(value=card_sub_size(card))
+            chart_var = tk.BooleanVar(value=bool(card.get("chart", True)))
+            chart_metric_var = tk.StringVar(value=chart_metric_label(str(card.get("chart_metric") or "")))
             self.title_vars.append(title_var)
             self.metric_vars.append(metric_var)
             self.sub_metric_vars.append(sub_var)
             self.value_size_vars.append(value_size_var)
             self.sub_size_vars.append(sub_size_var)
+            self.chart_vars.append(chart_var)
+            self.chart_metric_vars.append(chart_metric_var)
             ttk.Entry(row, textvariable=title_var, width=10).pack(side="left", padx=(0, 6))
             title_swatch = tk.Button(row, width=3, relief="groove", bd=1, command=lambda i=index: self._pick(i, "title"))
             title_swatch.pack(side="left", padx=(0, 12))
@@ -678,7 +768,33 @@ class PreviewWindow:
                 textvariable=sub_size_var,
                 width=4,
                 command=lambda i=index: self._on_text(i),
-            ).pack(side="left")
+            ).pack(side="left", padx=(0, 8))
+            tk.Checkbutton(
+                row,
+                text="开",
+                variable=chart_var,
+                command=lambda i=index: self._on_text(i),
+                bg="#141C2E",
+                fg="#E8EEF8",
+                selectcolor="#1E2A44",
+                activebackground="#141C2E",
+                activeforeground="#E8EEF8",
+                highlightthickness=0,
+                font=("Segoe UI", 10),
+            ).pack(side="left", padx=(0, 8))
+            chart_drop = ttk.Menubutton(
+                row, textvariable=chart_metric_var, style="Drop.TMenubutton", width=12, direction="below"
+            )
+            chart_menu = self._metric_menu(
+                chart_drop,
+                chart_metric_var,
+                combo_bg,
+                combo_fg,
+                lambda i=index: self._on_chart_metric(i),
+                include_follow=True,
+            )
+            chart_drop["menu"] = chart_menu
+            chart_drop.pack(side="left")
             self._swatches.append((title_swatch, value_swatch))
             title_var.trace_add("write", lambda *_a, i=index: self._on_text(i))
             value_size_var.trace_add("write", lambda *_a, i=index: self._on_text(i))
@@ -699,12 +815,16 @@ class PreviewWindow:
                 self.sub_metric_vars[index].set(sub_metric_label(str(card.get("sub_metric") or DEFAULT_SLOTS[index][3])))
                 self.value_size_vars[index].set(card_value_size(card))
                 self.sub_size_vars[index].set(card_sub_size(card))
+                self.chart_vars[index].set(bool(card.get("chart", True)))
+                self.chart_metric_vars[index].set(chart_metric_label(str(card.get("chart_metric") or "")))
             self._paint_swatches()
             self._redraw()
         finally:
             self._remote = False
 
-    def _metric_menu(self, drop, variable, combo_bg, combo_fg, command, include_none: bool = False) -> tk.Menu:
+    def _metric_menu(
+        self, drop, variable, combo_bg, combo_fg, command, include_none: bool = False, include_follow: bool = False
+    ) -> tk.Menu:
         menu = tk.Menu(
             drop,
             tearoff=False,
@@ -718,7 +838,14 @@ class PreviewWindow:
         )
         if include_none:
             menu.add_radiobutton(label=NONE_LABEL, variable=variable, value=NONE_LABEL, command=command)
-        for _mkey, mlabel, _sample in METRICS:
+        if include_follow:
+            menu.add_radiobutton(
+                label=CHART_FOLLOW_LABEL, variable=variable, value=CHART_FOLLOW_LABEL, command=command
+            )
+        keys = CHART_METRICS if include_follow else None
+        for mkey, mlabel, _sample in METRICS:
+            if keys is not None and mkey not in keys:
+                continue
             menu.add_radiobutton(label=mlabel, variable=variable, value=mlabel, command=command)
         return menu
 
@@ -729,6 +856,8 @@ class PreviewWindow:
             card["sub_metric"] = sub_metric_key(self.sub_metric_vars[index].get())
             card["value_size"] = self._spin_int(self.value_size_vars[index], VALUE_SIZE_DEFAULT, VALUE_SIZE_MIN, VALUE_SIZE_MAX)
             card["sub_size"] = self._spin_int(self.sub_size_vars[index], SUB_SIZE_DEFAULT, SUB_SIZE_MIN, SUB_SIZE_MAX)
+            card["chart"] = bool(self.chart_vars[index].get())
+            card["chart_metric"] = chart_metric_key(self.chart_metric_vars[index].get())
 
     @staticmethod
     def _spin_int(var: tk.IntVar, default: int, lo: int, hi: int) -> int:
@@ -749,6 +878,10 @@ class PreviewWindow:
 
     def _on_sub_metric(self, index: int) -> None:
         self.state["cards"][index]["sub_metric"] = sub_metric_key(self.sub_metric_vars[index].get())
+        self._on_text(index)
+
+    def _on_chart_metric(self, index: int) -> None:
+        self.state["cards"][index]["chart_metric"] = chart_metric_key(self.chart_metric_vars[index].get())
         self._on_text(index)
 
     def _on_text(self, _index: int) -> None:
@@ -786,6 +919,8 @@ class PreviewWindow:
             self.sub_metric_vars[index].set(sub_metric_label(str(card.get("sub_metric") or DEFAULT_SLOTS[index][3])))
             self.value_size_vars[index].set(card_value_size(card))
             self.sub_size_vars[index].set(card_sub_size(card))
+            self.chart_vars[index].set(bool(card.get("chart", True)))
+            self.chart_metric_vars[index].set(chart_metric_label(str(card.get("chart_metric") or "")))
             self.title_vars[index].set(card["title"])
         self._paint_swatches()
         self._redraw()

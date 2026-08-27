@@ -14,6 +14,7 @@ final class CardEditor {
     static final int PAGE_MAIN = 0;
     static final int PAGE_METRIC = 1;
     static final int PAGE_SUB = 2;
+    static final int PAGE_CHART = 3;
 
     private final StatusHudView view;
     private final OverScroller scroller;
@@ -32,6 +33,9 @@ final class CardEditor {
     private final RectF viewport = new RectF();
     private final RectF metricRect = new RectF();
     private final RectF subRect = new RectF();
+    private final RectF chartMetricRect = new RectF();
+    private final RectF chartOffRect = new RectF();
+    private final RectF chartOnRect = new RectF();
     private final RectF resetRect = new RectF();
     private final RectF doneRect = new RectF();
     private final RectF valueMinus = new RectF();
@@ -232,6 +236,12 @@ final class CardEditor {
         y += dp(12);
         y = drawStepper(canvas, draw, "大字大小", y, valueMinus, valuePlus, style.valueSize(slot));
         y = drawStepper(canvas, draw, "小字大小", y, subMinus, subPlus, style.subSize(slot));
+        y += dp(6);
+        y = drawTogglePair(canvas, draw, "折线图", y, chartOffRect, chartOnRect, style.chartOn(slot));
+        String chartLabel = style.rawChartMetric(slot).isEmpty()
+                ? HudStyle.metricLabel(HudStyle.CHART_FOLLOW)
+                : HudStyle.metricLabel(style.rawChartMetric(slot));
+        y = drawLabeledRow(canvas, draw, "折线内容", y, chartMetricRect, chartLabel);
         return y - start + dp(8);
     }
 
@@ -283,6 +293,37 @@ final class CardEditor {
         return y + h + dp(10);
     }
 
+    private float drawTogglePair(Canvas canvas, boolean draw, String caption, float y,
+            RectF offRect, RectF onRect, boolean on) {
+        if (draw) {
+            canvas.drawText(caption, panelRect.left + dp(16), y + dp(12), label);
+        }
+        y += dp(18);
+        float h = dp(40);
+        float gap = dp(8);
+        float left = panelRect.left + dp(16);
+        float right = panelRect.right - dp(16);
+        float btnW = (right - left - gap) / 2f;
+        offRect.set(left, y, left + btnW, y + h);
+        onRect.set(offRect.right + gap, y, right, y + h);
+        if (draw) {
+            drawChoice(canvas, offRect, "关闭", !on);
+            drawChoice(canvas, onRect, "开启", on);
+        }
+        return y + h + dp(12);
+    }
+
+    private void drawChoice(Canvas canvas, RectF rect, String value, boolean selected) {
+        card.setColor(selected
+                ? (light ? 0xFFD7F6E7 : 0xFF1C3A32)
+                : (light ? 0xFFE8EEF5 : 0xFF1A2438));
+        canvas.drawRoundRect(rect, dp(10), dp(10), card);
+        text.setTextSize(dp(15));
+        text.setColor(selected ? 0xFF3DDC97 : (light ? 0xFF1A2438 : 0xFFE8EEF8));
+        float tw = text.measureText(value);
+        canvas.drawText(value, rect.centerX() - tw / 2f, rect.top + rect.height() * 0.66f, text);
+    }
+
     private void drawList(Canvas canvas, boolean includeNone) {
         viewport.set(panelRect.left + dp(8), headerRect.bottom, panelRect.right - dp(8), panelRect.bottom - dp(10));
         int count = listCount(includeNone);
@@ -293,7 +334,15 @@ final class CardEditor {
         canvas.save();
         canvas.clipRect(viewport);
         HudStyle style = BridgeService.STATE.hudStyle;
-        String current = includeNone ? style.subMetric(slot) : style.metric(slot);
+        String current;
+        if (page == PAGE_CHART) {
+            String raw = style.rawChartMetric(slot);
+            current = raw.isEmpty() ? HudStyle.CHART_FOLLOW : raw;
+        } else if (includeNone) {
+            current = style.subMetric(slot);
+        } else {
+            current = style.metric(slot);
+        }
         for (int i = 0; i < count; i++) {
             String key = listKey(includeNone, i);
             float top = viewport.top - listScroll + i * itemH;
@@ -442,7 +491,7 @@ final class CardEditor {
                 float itemH = dp(36);
                 int index = (int) ((y - viewport.top + listScroll) / itemH);
                 if (index >= 0 && index < count) {
-                    pickList(sub, index);
+                    pickList(index);
                 }
                 return true;
             }
@@ -462,8 +511,24 @@ final class CardEditor {
             view.invalidate();
             return true;
         }
+        if (chartMetricRect.contains(x, y) && viewport.contains(x, y)) {
+            page = PAGE_CHART;
+            listScroll = 0;
+            view.invalidate();
+            return true;
+        }
         if (viewport.contains(x, y)) {
             HudStyle style = BridgeService.STATE.hudStyle;
+            if (chartOffRect.contains(x, y)) {
+                style.setChartOn(slot, false);
+                changed();
+                return true;
+            }
+            if (chartOnRect.contains(x, y)) {
+                style.setChartOn(slot, true);
+                changed();
+                return true;
+            }
             if (valueMinus.contains(x, y)) {
                 style.setValueSize(slot, style.valueSize(slot) - 1);
                 changed();
@@ -511,11 +576,13 @@ final class CardEditor {
         return true;
     }
 
-    private void pickList(boolean sub, int index) {
-        String key = listKey(sub, index);
+    private void pickList(int index) {
+        String key = listKey(page == PAGE_SUB, index);
         HudStyle style = BridgeService.STATE.hudStyle;
-        if (sub) {
+        if (page == PAGE_SUB) {
             style.setSubMetric(slot, key);
+        } else if (page == PAGE_CHART) {
+            style.setChartMetric(slot, key);
         } else {
             style.setMetric(slot, key);
         }
@@ -581,10 +648,19 @@ final class CardEditor {
     }
 
     private int listCount(boolean includeNone) {
+        if (page == PAGE_CHART) {
+            return HudStyle.CHART_METRICS.length + 1;
+        }
         return HudStyle.PICK_METRICS.length + (includeNone ? 1 : 0);
     }
 
     private String listKey(boolean includeNone, int index) {
+        if (page == PAGE_CHART) {
+            if (index == 0) {
+                return HudStyle.CHART_FOLLOW;
+            }
+            return HudStyle.CHART_METRICS[index - 1];
+        }
         if (includeNone) {
             if (index == 0) {
                 return "none";

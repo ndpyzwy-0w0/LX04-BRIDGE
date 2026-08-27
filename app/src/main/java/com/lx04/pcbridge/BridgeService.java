@@ -61,6 +61,7 @@ public class BridgeService extends Service {
                 STATE.pcName = helloAckName == null ? "" : helloAckName;
                 if (!connected) {
                     STATE.pcStatsValid = false;
+                    STATE.sparks.clear();
                     ScreenMirror.INSTANCE.clear();
                     STATE.mirrorTitle = "";
                 }
@@ -335,6 +336,7 @@ public class BridgeService extends Service {
         STATE.pcNetUp = (float) json.optDouble("netU", 0);
         STATE.pcUptime = json.optLong("up", 0);
         STATE.pcCores = json.optInt("cores", 0);
+        STATE.sparks.record(STATE);
     }
 
     private static float optNum(JSONObject json, String key) {

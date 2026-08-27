@@ -14,6 +14,11 @@ final class HudStyle {
             "cpu", "cpuT", "gpu", "gpuT", "gpuW", "gpuFan", "vram",
             "ram", "ramGB", "disk", "diskGB", "diskIo", "netD", "netU", "cores", "gpuN"
     };
+    static final String[] CHART_METRICS = {
+            "cpu", "cpuT", "gpu", "gpuT", "gpuW", "gpuFan", "vram",
+            "ram", "ramGB", "disk", "diskGB", "diskIo", "netD", "netU"
+    };
+    static final String CHART_FOLLOW = "main";
     static final int[] PALETTE = {
             0xFF8FA0BE, 0xFF5A6B84, 0xFF3DDC97, 0xFFFFB020, 0xFFFF5C7A, 0xFF6EA8FF,
             0xFFE8EEF8, 0xFFA78BFA, 0xFF22D3EE, 0xFFF472B6, 0xFFFBBF24, 0xFFFB923C
@@ -22,6 +27,8 @@ final class HudStyle {
     private final String[] titles = new String[] {"", "", "", ""};
     private final String[] metrics = new String[] {"", "", "", ""};
     private final String[] subMetrics = new String[] {"", "", "", ""};
+    private final String[] chartMetrics = new String[] {"", "", "", ""};
+    private final boolean[] chartOn = new boolean[] {true, true, true, true};
     static final int DEFAULT_VALUE_SIZE = 28;
     static final int DEFAULT_SUB_SIZE = 11;
     static final int MIN_VALUE_SIZE = 12;
@@ -40,6 +47,8 @@ final class HudStyle {
             titles[i] = "";
             metrics[i] = "";
             subMetrics[i] = "";
+            chartMetrics[i] = "";
+            chartOn[i] = true;
             titleColors[i] = 0;
             valueColors[i] = 0;
             valueSizes[i] = 0;
@@ -80,6 +89,8 @@ final class HudStyle {
             titles[index] = card.optString("title", "");
             metrics[index] = card.optString("metric", "");
             subMetrics[index] = card.optString("subMetric", "");
+            chartMetrics[index] = normalizeChartMetric(card.optString("chartMetric", ""));
+            chartOn[index] = !card.has("chart") || card.optBoolean("chart", true);
             titleColors[index] = parseColor(card.optString("titleColor", ""));
             valueColors[index] = parseColor(card.optString("valueColor", ""));
             valueSizes[index] = normalizeValueSize(card.optInt("valueSize", 0));
@@ -118,6 +129,12 @@ final class HudStyle {
                 if (subSize(i) != DEFAULT_SUB_SIZE) {
                     card.put("subSize", subSize(i));
                 }
+                if (!chartOn[i]) {
+                    card.put("chart", false);
+                }
+                if (!chartMetrics[i].isEmpty()) {
+                    card.put("chartMetric", chartMetrics[i]);
+                }
                 cards.put(card);
             }
             o.put("cards", cards);
@@ -133,6 +150,7 @@ final class HudStyle {
     synchronized boolean isClear() {
         for (int i = 0; i < 4; i++) {
             if (!titles[i].isEmpty() || !metrics[i].isEmpty() || !subMetrics[i].isEmpty()
+                    || !chartMetrics[i].isEmpty() || !chartOn[i]
                     || titleColors[i] != 0 || valueColors[i] != 0
                     || valueSizes[i] != 0 || subSizes[i] != 0) {
                 return false;
@@ -222,6 +240,29 @@ final class HudStyle {
         return clamp(subSizes[index], MIN_SUB_SIZE, MAX_SUB_SIZE);
     }
 
+    synchronized boolean chartOn(int index) {
+        if (index < 0 || index >= 4) {
+            return true;
+        }
+        return chartOn[index];
+    }
+
+    synchronized String rawChartMetric(int index) {
+        if (index < 0 || index >= 4) {
+            return "";
+        }
+        return chartMetrics[index];
+    }
+
+    synchronized String chartMetric(int index) {
+        String custom = rawChartMetric(index);
+        if (isChartable(custom)) {
+            return custom;
+        }
+        String main = metric(index);
+        return isChartable(main) ? main : "cpu";
+    }
+
     synchronized void setMetric(int index, String metric) {
         if (index < 0 || index >= 4 || !isPickable(metric)) {
             return;
@@ -281,6 +322,29 @@ final class HudStyle {
         bumpRev();
     }
 
+    synchronized void setChartOn(int index, boolean on) {
+        if (index < 0 || index >= 4 || chartOn[index] == on) {
+            return;
+        }
+        chartOn[index] = on;
+        bumpRev();
+    }
+
+    synchronized void setChartMetric(int index, String metric) {
+        if (index < 0 || index >= 4) {
+            return;
+        }
+        String stored = "";
+        if (metric != null && !metric.isEmpty() && !CHART_FOLLOW.equals(metric) && isChartable(metric)) {
+            stored = metric;
+        }
+        if (stored.equals(chartMetrics[index])) {
+            return;
+        }
+        chartMetrics[index] = stored;
+        bumpRev();
+    }
+
     synchronized void resetSlot(int index) {
         if (index < 0 || index >= 4) {
             return;
@@ -288,6 +352,8 @@ final class HudStyle {
         titles[index] = "";
         metrics[index] = "";
         subMetrics[index] = "";
+        chartMetrics[index] = "";
+        chartOn[index] = true;
         titleColors[index] = 0;
         valueColors[index] = 0;
         valueSizes[index] = 0;
@@ -309,7 +375,18 @@ final class HudStyle {
                 || "cores".equals(metric) || "gpuN".equals(metric) || "none".equals(metric);
     }
 
+    static boolean isChartable(String metric) {
+        if (metric == null || metric.isEmpty() || "none".equals(metric)
+                || "cores".equals(metric) || "gpuN".equals(metric)) {
+            return false;
+        }
+        return isKnown(metric);
+    }
+
     static String metricLabel(String metric) {
+        if (CHART_FOLLOW.equals(metric)) {
+            return "跟随大字";
+        }
         if ("none".equals(metric)) {
             return "不显示";
         }
@@ -437,6 +514,13 @@ final class HudStyle {
             return 0;
         }
         return clamp(size, MIN_SUB_SIZE, MAX_SUB_SIZE);
+    }
+
+    static String normalizeChartMetric(String metric) {
+        if (metric == null || metric.isEmpty() || CHART_FOLLOW.equals(metric) || !isChartable(metric)) {
+            return "";
+        }
+        return metric;
     }
 
     private static int indexOf(String key) {
