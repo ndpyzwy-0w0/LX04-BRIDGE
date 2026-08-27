@@ -6,6 +6,7 @@ import threading
 import time
 from ctypes import wintypes
 from dataclasses import dataclass
+from pathlib import Path
 
 SRCCOPY = 0x00CC0020
 COLORONCOLOR = 3
@@ -171,6 +172,26 @@ gdiplus.GdipDisposeImage.argtypes = [ctypes.c_void_p]
 gdiplus.GdipSaveImageToStream.argtypes = [
     ctypes.c_void_p, ctypes.c_void_p, ctypes.POINTER(GUID), ctypes.c_void_p,
 ]
+gdiplus.GdipLoadImageFromFile.argtypes = [ctypes.c_wchar_p, ctypes.POINTER(ctypes.c_void_p)]
+gdiplus.GdipLoadImageFromFile.restype = ctypes.c_int
+gdiplus.GdipGetImageWidth.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_uint)]
+gdiplus.GdipGetImageWidth.restype = ctypes.c_int
+gdiplus.GdipGetImageHeight.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_uint)]
+gdiplus.GdipGetImageHeight.restype = ctypes.c_int
+gdiplus.GdipCreateBitmapFromScan0.argtypes = [
+    ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int,
+    ctypes.c_void_p, ctypes.POINTER(ctypes.c_void_p),
+]
+gdiplus.GdipCreateBitmapFromScan0.restype = ctypes.c_int
+gdiplus.GdipGetImageGraphicsContext.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_void_p)]
+gdiplus.GdipSetInterpolationMode.argtypes = [ctypes.c_void_p, ctypes.c_int]
+gdiplus.GdipDrawImageRectRectI.argtypes = [
+    ctypes.c_void_p, ctypes.c_void_p,
+    ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int,
+    ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int,
+    ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
+]
+gdiplus.GdipDeleteGraphics.argtypes = [ctypes.c_void_p]
 ole32.CreateStreamOnHGlobal.argtypes = [wintypes.HGLOBAL, wintypes.BOOL, ctypes.POINTER(ctypes.c_void_p)]
 ole32.GetHGlobalFromStream.argtypes = [ctypes.c_void_p, ctypes.POINTER(wintypes.HGLOBAL)]
 ole32.CoInitializeEx.argtypes = [ctypes.c_void_p, ctypes.c_uint]
@@ -527,6 +548,135 @@ def _hbitmap_to_jpeg(hbitmap, quality: int, stream) -> bytes:
         return data
     finally:
         gdiplus.GdipDisposeImage(image)
+
+
+PixelFormat32bppARGB = 0x26200A
+UnitPixel = 2
+InterpolationHighQualityBicubic = 7
+MAX_STILL_JPEG = 200 * 1024
+
+
+def encode_still(path: str | Path, width: int = TARGET_W, height: int = TARGET_H) -> bytes:
+    """Load a photo, cover-crop to the LX04 screen, and return a JPEG under the FILE payload limit."""
+    _ensure_gdiplus()
+    source = ctypes.c_void_p()
+    status = gdiplus.GdipLoadImageFromFile(str(Path(path)), ctypes.byref(source))
+    if status != 0 or not source:
+        raise RuntimeError("无法打开图片")
+    dest = ctypes.c_void_p()
+    graphics = ctypes.c_void_p()
+    stream = None
+    try:
+        src_w = ctypes.c_uint()
+        src_h = ctypes.c_uint()
+        if gdiplus.GdipGetImageWidth(source, ctypes.byref(src_w)) != 0 or src_w.value <= 0:
+            raise RuntimeError("图片宽度无效")
+        if gdiplus.GdipGetImageHeight(source, ctypes.byref(src_h)) != 0 or src_h.value <= 0:
+            raise RuntimeError("图片高度无效")
+        crop_x, crop_y, crop_w, crop_h = _cover_crop(src_w.value, src_h.value, width, height)
+        status = gdiplus.GdipCreateBitmapFromScan0(
+            width, height, 0, PixelFormat32bppARGB, None, ctypes.byref(dest)
+        )
+        if status != 0 or not dest:
+            raise RuntimeError("无法创建背景图")
+        if gdiplus.GdipGetImageGraphicsContext(dest, ctypes.byref(graphics)) != 0 or not graphics:
+            raise RuntimeError("无法绘制背景图")
+        gdiplus.GdipSetInterpolationMode(graphics, InterpolationHighQualityBicubic)
+        status = gdiplus.GdipDrawImageRectRectI(
+            graphics, source,
+            0, 0, width, height,
+            crop_x, crop_y, crop_w, crop_h,
+            UnitPixel, None, None, None,
+        )
+        if status != 0:
+            raise RuntimeError("缩放背景图失败")
+        stream = _new_istream()
+        last = b""
+        for quality in (82, 70, 58, 46, 36):
+            _istream_setsize(stream, 0)
+            _istream_seek0(stream)
+            last = _gpimage_to_jpeg(dest, quality, stream)
+            if len(last) <= MAX_STILL_JPEG:
+                return last
+        if len(last) > protocol_max_payload():
+            raise RuntimeError("图片太大，请换一张")
+        return last
+    finally:
+        if graphics:
+            gdiplus.GdipDeleteGraphics(graphics)
+        if dest:
+            gdiplus.GdipDisposeImage(dest)
+        gdiplus.GdipDisposeImage(source)
+        if stream:
+            try:
+                _istream_release(stream)
+            except Exception:
+                pass
+
+
+def protocol_max_payload() -> int:
+    try:
+        import protocol
+        return int(protocol.MAX_PAYLOAD)
+    except Exception:
+        return 256 * 1024
+
+
+def _cover_crop(src_w: int, src_h: int, dst_w: int, dst_h: int) -> tuple[int, int, int, int]:
+    src_aspect = src_w / float(src_h)
+    dst_aspect = dst_w / float(dst_h)
+    if src_aspect > dst_aspect:
+        crop_h = src_h
+        crop_w = max(1, int(round(src_h * dst_aspect)))
+        crop_x = max(0, (src_w - crop_w) // 2)
+        crop_y = 0
+    else:
+        crop_w = src_w
+        crop_h = max(1, int(round(src_w / dst_aspect)))
+        crop_x = 0
+        crop_y = max(0, (src_h - crop_h) // 2)
+    if crop_x + crop_w > src_w:
+        crop_w = src_w - crop_x
+    if crop_y + crop_h > src_h:
+        crop_h = src_h - crop_y
+    return crop_x, crop_y, max(1, crop_w), max(1, crop_h)
+
+
+def _gpimage_to_jpeg(image, quality: int, stream) -> bytes:
+    quality_value = ctypes.c_uint32(max(1, min(100, int(quality))))
+    params = EncoderParameters()
+    params.Count = 1
+    params.Parameter[0].Guid = ENCODER_QUALITY
+    params.Parameter[0].NumberOfValues = 1
+    params.Parameter[0].Type = ENCODER_PARAMETER_LONG
+    params.Parameter[0].Value = ctypes.cast(ctypes.byref(quality_value), ctypes.c_void_p)
+    status = gdiplus.GdipSaveImageToStream(
+        image, stream, ctypes.byref(JPEG_CLSID), ctypes.byref(params)
+    )
+    if status != 0:
+        raise RuntimeError("JPEG 编码失败: " + str(status))
+    hglobal = wintypes.HGLOBAL()
+    hr = ole32.GetHGlobalFromStream(stream, ctypes.byref(hglobal))
+    if hr != 0 or not hglobal:
+        raise RuntimeError("无法读取 JPEG")
+    try:
+        size = _istream_size(stream)
+    except Exception:
+        size = int(kernel32.GlobalSize(hglobal))
+    alloc = int(kernel32.GlobalSize(hglobal))
+    if size <= 0 or alloc <= 0:
+        raise RuntimeError("JPEG 为空")
+    size = min(size, alloc)
+    ptr = kernel32.GlobalLock(hglobal)
+    if not ptr:
+        raise RuntimeError("JPEG 为空")
+    try:
+        data = ctypes.string_at(ptr, size)
+    finally:
+        kernel32.GlobalUnlock(hglobal)
+    if len(data) < 24 or data[:2] != b"\xff\xd8":
+        raise RuntimeError("JPEG 损坏")
+    return data
 
 
 class ScreenSender:

@@ -21,6 +21,7 @@ final class Protocol {
     static final byte PLAY = 0x08;
     static final byte VIDEO = 0x09;
     static final byte VIDEO_ACK = 0x0A;
+    static final byte FILE = 0x0B;
 
     static final byte FLAG_MUTED = 0x01;
 

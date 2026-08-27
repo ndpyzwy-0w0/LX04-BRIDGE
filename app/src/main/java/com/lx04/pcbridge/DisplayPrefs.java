@@ -10,6 +10,8 @@ final class DisplayPrefs {
     private static final String KEY_HUD_STYLE = "hud_style";
     private static final String KEY_SCREEN_MIRROR = "screen_mirror";
     private static final String KEY_AUTO_HIDE_MUTE = "auto_hide_mute";
+    private static final String KEY_HUD_BG_SLOT = "hud_bg_slot";
+    private static final String KEY_HUD_BG_ALPHA = "hud_bg_alpha";
 
     private DisplayPrefs() {
     }
@@ -44,6 +46,22 @@ final class DisplayPrefs {
 
     static void setAutoHideMute(Context context, boolean on) {
         prefs(context).edit().putBoolean(KEY_AUTO_HIDE_MUTE, on).apply();
+    }
+
+    static int hudBgSlot(Context context) {
+        return prefs(context).getInt(KEY_HUD_BG_SLOT, HudBackground.NONE);
+    }
+
+    static void setHudBgSlot(Context context, int slot) {
+        prefs(context).edit().putInt(KEY_HUD_BG_SLOT, slot).apply();
+    }
+
+    static int hudBgAlpha(Context context) {
+        return prefs(context).getInt(KEY_HUD_BG_ALPHA, HudBackground.DEFAULT_ALPHA);
+    }
+
+    static void setHudBgAlpha(Context context, int alpha) {
+        prefs(context).edit().putInt(KEY_HUD_BG_ALPHA, alpha).apply();
     }
 
     static String hudStyleJson(Context context) {

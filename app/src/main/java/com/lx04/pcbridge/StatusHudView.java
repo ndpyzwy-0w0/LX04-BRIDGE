@@ -175,6 +175,13 @@ public class StatusHudView extends View {
             return;
         }
 
+        HudBackground.INSTANCE.draw(canvas, w, h);
+        int hudAlpha = HudBackground.INSTANCE.alpha255();
+        boolean faded = hudAlpha < 255;
+        if (faded) {
+            canvas.saveLayerAlpha(0, 0, w, h, hudAlpha);
+        }
+
         float p = dp(12);
         RectF card = new RectF(p, p, w - p, h - p);
         canvas.drawRoundRect(card, dp(18), dp(18), panel);
@@ -223,6 +230,9 @@ public class StatusHudView extends View {
                 s.spkMuted ? "扬声器已静音" : "扬声器", shown);
         if (shown > 0.02f && shown < 1f) {
             postInvalidateOnAnimation();
+        }
+        if (faded) {
+            canvas.restore();
         }
         if (editor.isOpen()) {
             editor.draw(canvas, w, h, lightTheme);
