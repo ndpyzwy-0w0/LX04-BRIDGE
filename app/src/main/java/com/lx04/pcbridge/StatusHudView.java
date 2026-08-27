@@ -60,8 +60,10 @@ public class StatusHudView extends View {
     private boolean muteRevealTap;
     private long mirrorInteractAt;
     private long muteInteractAt;
+    private long lastMuteAnimMs;
+    private float muteChrome = 1f;
     private static final long MUTE_SHOW_MS = 3500;
-    private static final long MUTE_FADE_MS = 280;
+    private static final long MUTE_FADE_MS = 320;
     private final Runnable hideMirrorBar = new Runnable() {
         @Override
         public void run() {
@@ -188,11 +190,16 @@ public class StatusHudView extends View {
             canvas.drawText(clip(dim, mid, w - dp(22) - dp(110)), dp(110), dp(27), dim);
         }
 
-        float muteAlpha = muteBarAlpha();
-        float muteTop = h - dp(64);
+        float mutePad = dp(12);
+        float muteBar = dp(52);
+        float shown = ease(muteChrome);
+        float shownTop = h - mutePad - muteBar;
+        float hiddenTop = h - mutePad;
+        float muteTop = hiddenTop + (shownTop - hiddenTop) * shown;
+        float slide = (1f - shown) * muteBar;
         float muteGap = dp(10);
-        micMuteRect.set(dp(18), muteTop, w / 2f - muteGap / 2f, h - dp(12));
-        spkMuteRect.set(w / 2f + muteGap / 2f, muteTop, w - dp(18), h - dp(12));
+        micMuteRect.set(dp(18), shownTop + slide, w / 2f - muteGap / 2f, h - mutePad + slide);
+        spkMuteRect.set(w / 2f + muteGap / 2f, shownTop + slide, w - dp(18), h - mutePad + slide);
         resetRect.setEmpty();
         if (s.hasPcStats()) {
             drawHardware(canvas, s, w, h, muteTop);
@@ -201,10 +208,10 @@ public class StatusHudView extends View {
         }
 
         drawMuteButton(canvas, micMuteRect, s.micMuted,
-                s.micMuted ? "麦克风已静音" : "麦克风", muteAlpha);
+                s.micMuted ? "麦克风已静音" : "麦克风", shown);
         drawMuteButton(canvas, spkMuteRect, s.spkMuted,
-                s.spkMuted ? "扬声器已静音" : "扬声器", muteAlpha);
-        if (muteAlpha > 0.02f && muteAlpha < 1f) {
+                s.spkMuted ? "扬声器已静音" : "扬声器", shown);
+        if (shown > 0.02f && shown < 1f) {
             postInvalidateOnAnimation();
         }
         if (editor.isOpen()) {
@@ -221,6 +228,7 @@ public class StatusHudView extends View {
     }
 
     void onMuteAutoHideChanged() {
+        lastMuteAnimMs = 0;
         if (BridgeService.STATE.autoHideMute) {
             noteMuteInteract();
         } else {
@@ -243,42 +251,67 @@ public class StatusHudView extends View {
 
     private void noteMuteInteract() {
         muteInteractAt = android.os.SystemClock.uptimeMillis();
+        lastMuteAnimMs = 0;
         touchHandler.removeCallbacks(hideMuteBar);
         if (BridgeService.STATE.autoHideMute) {
             touchHandler.postDelayed(hideMuteBar, MUTE_SHOW_MS);
         }
         invalidate();
+        postInvalidateOnAnimation();
     }
 
     private boolean muteButtonsHidden() {
-        return BridgeService.STATE.autoHideMute && muteBarAlpha() < 0.15f;
+        return BridgeService.STATE.autoHideMute && muteChrome < 0.15f;
     }
 
-    private float muteBarAlpha() {
+    private float desiredMuteChrome() {
         if (!BridgeService.STATE.autoHideMute) {
             return 1f;
         }
+        long now = android.os.SystemClock.uptimeMillis();
         if (menu.blocksHud() || editor.isOpen()) {
-            muteInteractAt = android.os.SystemClock.uptimeMillis();
+            muteInteractAt = now;
             touchHandler.removeCallbacks(hideMuteBar);
             touchHandler.postDelayed(hideMuteBar, MUTE_SHOW_MS);
             return 1f;
         }
         if (muteInteractAt == 0) {
-            muteInteractAt = android.os.SystemClock.uptimeMillis();
+            muteInteractAt = now;
             touchHandler.removeCallbacks(hideMuteBar);
             touchHandler.postDelayed(hideMuteBar, MUTE_SHOW_MS);
             return 1f;
         }
-        long idle = android.os.SystemClock.uptimeMillis() - muteInteractAt;
-        if (idle < MUTE_SHOW_MS) {
-            return 1f;
+        return now - muteInteractAt < MUTE_SHOW_MS ? 1f : 0f;
+    }
+
+    private boolean advanceMuteChrome() {
+        float target = desiredMuteChrome();
+        long now = android.os.SystemClock.uptimeMillis();
+        float dt = lastMuteAnimMs == 0 ? 0f : Math.min(0.05f, (now - lastMuteAnimMs) / 1000f);
+        lastMuteAnimMs = now;
+        float diff = target - muteChrome;
+        if (Math.abs(diff) < 0.012f) {
+            muteChrome = target;
+            return false;
         }
-        float fade = (idle - MUTE_SHOW_MS) / (float) MUTE_FADE_MS;
-        if (fade >= 1f) {
+        float step = (1000f / MUTE_FADE_MS) * Math.max(dt, 1f / 120f);
+        muteChrome += Math.signum(diff) * Math.min(Math.abs(diff), step);
+        if (muteChrome < 0f) {
+            muteChrome = 0f;
+        } else if (muteChrome > 1f) {
+            muteChrome = 1f;
+        }
+        return muteChrome != target;
+    }
+
+    private static float ease(float t) {
+        if (t <= 0f) {
             return 0f;
         }
-        return 1f - fade;
+        if (t >= 1f) {
+            return 1f;
+        }
+        return t * t * (3f - 2f * t);
     }
 
     private void noteMirrorInteract() {
@@ -575,6 +608,9 @@ public class StatusHudView extends View {
             more = true;
         }
         if (!editor.isOpen() && menu.advance()) {
+            more = true;
+        }
+        if (advanceMuteChrome()) {
             more = true;
         }
         if (more) {
