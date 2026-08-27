@@ -37,6 +37,21 @@ user32.MonitorFromRect.argtypes = [ctypes.POINTER(screen_mirror.RECT), wintypes.
 user32.MonitorFromRect.restype = wintypes.HMONITOR
 user32.GetMonitorInfoW.argtypes = [wintypes.HMONITOR, ctypes.POINTER(screen_mirror.MONITORINFOEXW)]
 user32.PostMessageW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
+user32.GetCursorPos.argtypes = [ctypes.POINTER(wintypes.POINT)]
+user32.SetCursorPos.argtypes = [ctypes.c_int, ctypes.c_int]
+user32.SendInput.argtypes = [wintypes.UINT, ctypes.c_void_p, ctypes.c_int]
+user32.SendInput.restype = wintypes.UINT
+user32.GetSystemMetrics.argtypes = [ctypes.c_int]
+user32.PeekMessageW.argtypes = [
+    ctypes.c_void_p, wintypes.HWND, wintypes.UINT, wintypes.UINT, wintypes.UINT
+]
+user32.PeekMessageW.restype = wintypes.BOOL
+user32.TranslateMessage.argtypes = [ctypes.c_void_p]
+user32.DispatchMessageW.argtypes = [ctypes.c_void_p]
+user32.MsgWaitForMultipleObjects.argtypes = [
+    wintypes.DWORD, ctypes.c_void_p, wintypes.BOOL, wintypes.DWORD, wintypes.DWORD
+]
+user32.MsgWaitForMultipleObjects.restype = wintypes.DWORD
 kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
 kernel32.OpenProcess.restype = wintypes.HANDLE
 kernel32.QueryFullProcessImageNameW.argtypes = [
@@ -60,8 +75,21 @@ MONITOR_DEFAULTTONEAREST = 2
 PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 WM_CLOSE = 0x0010
 COINIT_APARTMENTTHREADED = 0x2
-POLL_IDLE_S = 0.18
-POLL_LIVE_S = 0.35
+POLL_IDLE_S = 0.07
+POLL_LIVE_S = 0.10
+PM_REMOVE = 0x0001
+QS_ALLINPUT = 0x04FF
+INPUT_MOUSE = 0
+MOUSEEVENTF_MOVE = 0x0001
+MOUSEEVENTF_LEFTDOWN = 0x0002
+MOUSEEVENTF_LEFTUP = 0x0004
+MOUSEEVENTF_ABSOLUTE = 0x8000
+MOUSEEVENTF_VIRTUALDESK = 0x4000
+SM_XVIRTUALSCREEN = 76
+SM_YVIRTUALSCREEN = 77
+SM_CXVIRTUALSCREEN = 78
+SM_CYVIRTUALSCREEN = 79
+UIA_LEGACY = 10018
 
 SKIP_CLASSES = {
     "Shell_TrayWnd",
@@ -172,6 +200,51 @@ HOST_APP_NAMES = {
     "cmd",
     "命令提示符",
 }
+
+
+class MSG(ctypes.Structure):
+    _fields_ = [
+        ("hwnd", wintypes.HWND),
+        ("message", wintypes.UINT),
+        ("wParam", wintypes.WPARAM),
+        ("lParam", wintypes.LPARAM),
+        ("time", wintypes.DWORD),
+        ("pt", wintypes.POINT),
+    ]
+
+
+class MOUSEINPUT(ctypes.Structure):
+    _fields_ = [
+        ("dx", wintypes.LONG),
+        ("dy", wintypes.LONG),
+        ("mouseData", wintypes.DWORD),
+        ("dwFlags", wintypes.DWORD),
+        ("time", wintypes.DWORD),
+        ("dwExtraInfo", ctypes.c_void_p),
+    ]
+
+
+class INPUT(ctypes.Structure):
+    class _I(ctypes.Union):
+        _fields_ = [("mi", MOUSEINPUT)]
+
+    _anonymous_ = ("i",)
+    _fields_ = [("type", wintypes.DWORD), ("i", _I)]
+
+
+def _pump() -> None:
+    msg = MSG()
+    while user32.PeekMessageW(ctypes.byref(msg), None, 0, 0, PM_REMOVE):
+        user32.TranslateMessage(ctypes.byref(msg))
+        user32.DispatchMessageW(ctypes.byref(msg))
+
+
+def _pump_for(seconds: float) -> None:
+    deadline = time.monotonic() + max(0.0, seconds)
+    while time.monotonic() < deadline:
+        remain = int(max(1.0, (deadline - time.monotonic()) * 1000))
+        user32.MsgWaitForMultipleObjects(0, None, False, min(remain, 30), QS_ALLINPUT)
+        _pump()
 
 
 def _uia_mod():
@@ -363,6 +436,8 @@ def _find_named_toast_windows(automation, uia) -> list:
         key = hwnd or id(el)
         if key in seen:
             continue
+        if not _live_toast(el):
+            continue
         seen.add(key)
         found.append(el)
     return found
@@ -387,16 +462,108 @@ def _has_invoke(el, uia) -> bool:
         return False
 
 
-def _invoke(el, uia) -> bool:
+def _live_toast(el) -> bool:
     try:
-        pat = el.GetCurrentPattern(uia.UIA_InvokePatternId)
-        if pat is None:
+        if bool(el.CurrentIsOffscreen):
             return False
-        inv = pat.QueryInterface(uia.IUIAutomationInvokePattern)
-        inv.Invoke()
+    except Exception:
+        pass
+    hwnd = _hwnd_of(el)
+    if hwnd:
+        if not user32.IsWindow(hwnd) or not user32.IsWindowVisible(hwnd) or user32.IsIconic(hwnd) or _cloaked(hwnd):
+            return False
+        rect = screen_mirror.RECT()
+        if user32.GetWindowRect(hwnd, ctypes.byref(rect)):
+            width = int(rect.right) - int(rect.left)
+            height = int(rect.bottom) - int(rect.top)
+            if width < 140 or height < 40:
+                return False
         return True
+    try:
+        box = el.CurrentBoundingRectangle
+        width = int(getattr(box, "right", 0) or 0)
+        height = int(getattr(box, "bottom", 0) or 0)
+        return width >= 140 and height >= 40
     except Exception:
         return False
+
+
+def _click_point(x: int, y: int) -> None:
+    old = wintypes.POINT()
+    user32.GetCursorPos(ctypes.byref(old))
+    vs_l = int(user32.GetSystemMetrics(SM_XVIRTUALSCREEN))
+    vs_t = int(user32.GetSystemMetrics(SM_YVIRTUALSCREEN))
+    vs_w = max(1, int(user32.GetSystemMetrics(SM_CXVIRTUALSCREEN)))
+    vs_h = max(1, int(user32.GetSystemMetrics(SM_CYVIRTUALSCREEN)))
+    dx = int(round((x - vs_l) * 65535 / vs_w))
+    dy = int(round((y - vs_t) * 65535 / vs_h))
+    flags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK
+
+    def _send(more: int, use_pos: bool = False) -> None:
+        inp = INPUT()
+        inp.type = INPUT_MOUSE
+        if use_pos:
+            inp.mi.dx = dx
+            inp.mi.dy = dy
+            inp.mi.dwFlags = more | flags
+        else:
+            inp.mi.dwFlags = more
+        user32.SendInput(1, ctypes.byref(inp), ctypes.sizeof(INPUT))
+
+    user32.SetCursorPos(int(x), int(y))
+    _send(MOUSEEVENTF_MOVE, True)
+    _pump()
+    _send(MOUSEEVENTF_LEFTDOWN)
+    _pump()
+    _send(MOUSEEVENTF_LEFTUP)
+    _pump()
+    user32.SetCursorPos(int(old.x), int(old.y))
+
+
+def _invoke(el, uia) -> bool:
+    _pump()
+    try:
+        el.SetFocus()
+    except Exception:
+        pass
+    _pump()
+    try:
+        pat = el.GetCurrentPattern(uia.UIA_InvokePatternId)
+        if pat is not None:
+            inv = pat.QueryInterface(uia.IUIAutomationInvokePattern)
+            inv.Invoke()
+            _pump_for(0.05)
+            return True
+    except Exception:
+        pass
+    try:
+        pat = el.GetCurrentPattern(UIA_LEGACY)
+        if pat is not None:
+            acc = pat.QueryInterface(uia.IUIAutomationLegacyIAccessiblePattern)
+            acc.DoDefaultAction()
+            _pump_for(0.05)
+            return True
+    except Exception:
+        pass
+    try:
+        point, ok = el.GetClickablePoint()
+        if ok:
+            _click_point(int(point.x), int(point.y))
+            return True
+    except Exception:
+        pass
+    try:
+        box = el.CurrentBoundingRectangle
+        left = int(getattr(box, "left", 0) or 0)
+        top = int(getattr(box, "top", 0) or 0)
+        width = int(getattr(box, "right", 0) or 0)
+        height = int(getattr(box, "bottom", 0) or 0)
+        if width >= 8 and height >= 8:
+            _click_point(left + width // 2, top + height // 2)
+            return True
+    except Exception:
+        pass
+    return False
 
 
 def _is_chrome_label(name: str) -> bool:
@@ -480,13 +647,15 @@ def read_toast(el, uia) -> ToastContent | None:
 
 
 def _toast_elements(automation, uia) -> list:
-    found = list(_find_named_toast_windows(automation, uia))
+    found = [el for el in _find_named_toast_windows(automation, uia) if _live_toast(el)]
+    if found:
+        return found
     seen = {_hwnd_of(el) for el in found}
     for hwnd in find_toast_hwnds():
         if hwnd in seen:
             continue
         el = _element_from_hwnd(automation, hwnd)
-        if el is not None:
+        if el is not None and _live_toast(el):
             found.append(el)
             seen.add(hwnd)
     return found
@@ -516,11 +685,13 @@ def _find_button(el, uia, label: str, chrome: bool = False):
             ct = int(node.CurrentControlType)
         except Exception:
             continue
-        if name != want:
+        if name.replace(" ", "") != want.replace(" ", ""):
             continue
         if not chrome and _is_chrome_label(name):
             continue
-        if ct in (UIA_BUTTON, UIA_HYPERLINK, UIA_SPLITBUTTON, UIA_MENUITEM) or _has_invoke(node, uia):
+        if ct == UIA_BUTTON:
+            return node
+        if ct in (UIA_HYPERLINK, UIA_SPLITBUTTON, UIA_MENUITEM) or _has_invoke(node, uia):
             return node
     return None
 
@@ -568,6 +739,7 @@ class ToastSender:
         self._jobs: queue.Queue[tuple[str, str]] = queue.Queue()
         self._content: ToastContent | None = None
         self._fingerprint: tuple | None = None
+        self._holdoff = 0.0
         self.title = ""
         self.error = ""
 
@@ -587,6 +759,7 @@ class ToastSender:
         self.error = ""
         self._showing = False
         self._fingerprint = None
+        self._holdoff = 0.0
         self._jobs = queue.Queue()
         self._alive = True
         self._thread = threading.Thread(target=self._loop, daemon=True, name="lx04-toast")
@@ -607,11 +780,10 @@ class ToastSender:
             self._emit(False, None)
 
     def handle_event(self, data: dict) -> None:
-        if not self._showing:
-            return
         cmd = str(data.get("cmd") or "")
         if cmd == "toast_action":
-            self.invoke(str(data.get("id") or data.get("label") or ""))
+            if self._showing:
+                self.invoke(str(data.get("id") or data.get("label") or ""))
         elif cmd == "toast_dismiss":
             self.dismiss()
 
@@ -620,7 +792,18 @@ class ToastSender:
             self._jobs.put(("invoke", button_id))
 
     def dismiss(self) -> None:
+        self._hide()
         self._jobs.put(("dismiss", ""))
+
+    def _hide(self) -> None:
+        self._holdoff = time.monotonic() + 0.7
+        if not self._showing:
+            return
+        self._showing = False
+        with self._lock:
+            self._content = None
+            self._fingerprint = None
+        self._emit(False, None)
 
     def _emit(self, showing: bool, content: ToastContent | None) -> None:
         cb = self.on_change
@@ -647,6 +830,7 @@ class ToastSender:
         try:
             while self._alive:
                 started = time.monotonic()
+                invoked = False
                 while True:
                     try:
                         kind, payload = self._jobs.get_nowait()
@@ -662,27 +846,31 @@ class ToastSender:
                                     if btn.id == payload or btn.label == payload:
                                         label = btn.label
                                         break
-                            if label and not invoke_toast_button(label):
+                            if label and invoke_toast_button(label):
+                                invoked = True
+                                self.error = ""
+                            elif label:
                                 self.error = "未能点按系统通知按钮「" + label + "」"
                         elif kind == "dismiss":
                             dismiss_toasts()
                     except Exception as exc:
                         self.error = str(exc)
+                if invoked:
+                    self._hide()
+                    _pump_for(0.05)
                 try:
                     content = read_current_toast()
                 except Exception as exc:
                     self.error = str(exc)
                     content = None
+                if content is not None and time.monotonic() < self._holdoff:
+                    content = None
                 if content is None:
                     if self._showing:
-                        self._showing = False
-                        with self._lock:
-                            self._content = None
-                            self._fingerprint = None
-                        self._emit(False, None)
+                        self._hide()
                     remain = POLL_IDLE_S - (time.monotonic() - started)
                     if remain > 0 and self._alive:
-                        time.sleep(remain)
+                        _pump_for(remain)
                     continue
                 fp = content.fingerprint()
                 self.title = content.title
@@ -697,7 +885,7 @@ class ToastSender:
                     self._emit(True, content)
                 remain = POLL_LIVE_S - (time.monotonic() - started)
                 if remain > 0 and self._alive:
-                    time.sleep(remain)
+                    _pump_for(remain)
         finally:
             try:
                 ole32.CoUninitialize()
