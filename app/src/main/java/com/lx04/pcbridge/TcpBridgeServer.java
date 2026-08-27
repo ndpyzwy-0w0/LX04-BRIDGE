@@ -21,6 +21,7 @@ final class TcpBridgeServer {
         void onClient(boolean connected, String helloAckName);
         void onControl(JSONObject json);
         void onPlay(byte[] pcm, boolean muted);
+        void onFile(int slot, byte[] jpeg);
     }
 
     private final BridgeState state;
@@ -97,6 +98,15 @@ final class TcpBridgeServer {
             o.put("lightTheme", state.lightTheme);
             o.put("screenMirror", state.screenMirror);
             o.put("hudStyle", state.hudStyle.toStatusJson());
+            JSONObject bg = new JSONObject();
+            bg.put("sel", HudBackground.INSTANCE.selected());
+            bg.put("alpha", HudBackground.INSTANCE.alpha());
+            org.json.JSONArray used = new org.json.JSONArray();
+            for (int i = 0; i < HudBackground.SLOTS; i++) {
+                used.put(HudBackground.INSTANCE.used(i));
+            }
+            bg.put("used", used);
+            o.put("hudBg", bg);
             enqueue(Protocol.STATUS, (byte) 0, o.toString().getBytes(StandardCharsets.UTF_8));
         } catch (Exception ignored) {
         }
@@ -227,6 +237,10 @@ final class TcpBridgeServer {
             }
             if (frame.type == Protocol.CONTROL && frame.payload != null && frame.payload.length > 0) {
                 callbacks.onControl(new JSONObject(new String(frame.payload, StandardCharsets.UTF_8)));
+                return;
+            }
+            if (frame.type == Protocol.FILE && frame.payload != null) {
+                callbacks.onFile(frame.flags & 0xFF, frame.payload);
                 return;
             }
             if (frame.type == Protocol.PLAY && frame.payload != null) {

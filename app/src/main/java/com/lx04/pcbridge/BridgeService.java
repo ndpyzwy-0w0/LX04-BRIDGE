@@ -35,6 +35,7 @@ public class BridgeService extends Service {
         STATE.screenMirror = DisplayPrefs.isScreenMirror(this);
         STATE.autoHideMute = DisplayPrefs.isAutoHideMute(this);
         DisplayPrefs.loadHudStyle(this, STATE.hudStyle);
+        HudBackground.INSTANCE.init(this);
         startAsForeground();
         PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
         if (pm != null) {
@@ -87,6 +88,11 @@ public class BridgeService extends Service {
             }
 
             @Override
+            public void onFile(int slot, byte[] jpeg) {
+                HudBackground.INSTANCE.put(BridgeService.this, slot, jpeg);
+            }
+
+            @Override
             public void onControl(JSONObject json) {
                 String cmd = json.optString("cmd", "");
                 if ("gain".equals(cmd)) {
@@ -123,6 +129,12 @@ public class BridgeService extends Service {
                     return;
                 } else if ("hud_style".equals(cmd)) {
                     applyHudStyle(json);
+                    return;
+                } else if ("hud_bg".equals(cmd)) {
+                    applyHudBg(json);
+                    return;
+                } else if ("hud_opacity".equals(cmd)) {
+                    setHudBgAlpha(BridgeService.this, json.optInt("alpha", HudBackground.DEFAULT_ALPHA));
                     return;
                 } else if ("pc_stats".equals(cmd)) {
                     applyPcStats(json);
@@ -236,6 +248,30 @@ public class BridgeService extends Service {
             return;
         }
         DisplayPrefs.setHudStyleJson(context, STATE.hudStyle.toStoreJson().toString());
+    }
+
+    public static void setHudBgSlot(android.content.Context context, int slot) {
+        HudBackground.INSTANCE.select(context, slot);
+    }
+
+    public static void deleteHudBg(android.content.Context context, int slot) {
+        HudBackground.INSTANCE.delete(context, slot);
+    }
+
+    public static void setHudBgAlpha(android.content.Context context, int alpha) {
+        HudBackground.INSTANCE.setAlpha(context, alpha);
+    }
+
+    private void applyHudBg(JSONObject json) {
+        String op = json.optString("op", json.optString("action", ""));
+        int slot = json.optInt("slot", HudBackground.NONE);
+        if ("select".equals(op)) {
+            setHudBgSlot(this, slot);
+        } else if ("delete".equals(op)) {
+            deleteHudBg(this, slot);
+        } else if ("alpha".equals(op) || "opacity".equals(op)) {
+            setHudBgAlpha(this, json.optInt("alpha", HudBackground.DEFAULT_ALPHA));
+        }
     }
 
     private void applyHudStyle(JSONObject json) {

@@ -11,7 +11,7 @@ import threading
 import time
 import tkinter as tk
 from pathlib import Path
-from tkinter import messagebox, ttk
+from tkinter import filedialog, messagebox, ttk
 
 def _host_dir() -> Path:
     if getattr(sys, "frozen", False):
@@ -121,6 +121,12 @@ class BridgeClient:
         payload = {"cmd": cmd}
         payload.update(fields)
         self._send(protocol.encode_json(protocol.CONTROL, payload, seq=self._next_seq()))
+
+    def send_file(self, jpeg: bytes, slot: int) -> None:
+        if not jpeg or len(jpeg) > protocol.MAX_PAYLOAD:
+            return
+        flags = max(0, min(255, int(slot)))
+        self._send(protocol.encode(protocol.FILE, jpeg, flags=flags, seq=self._next_seq()))
 
     def send_play(self, pcm: bytes, muted: bool = False) -> None:
         flags = protocol.FLAG_MUTED if muted else 0
@@ -337,6 +343,7 @@ class HostApp:
         self._stats_logged = False
         self._hud_need_reconcile = False
         self._hud_from_apk = False
+        self._hud_bg = {"sel": -1, "used": [False, False, False], "alpha": 100}
         self._build()
         threading.Thread(target=pc_stats.snapshot, daemon=True).start()
         self._load_routes()
@@ -539,6 +546,9 @@ class HostApp:
         self.disk_drop = ChoiceDrop(
             stats_row, self.disk_var, self._on_disk_change, combo_bg, combo_fg, padx=0
         )
+        ttk.Button(
+            stats_row, text="上传背景", command=self._upload_hud_bg
+        ).pack(side="right", padx=(0, 6))
         ttk.Button(
             stats_row, text="预览屏幕", command=self._open_hud_preview
         ).pack(side="right", padx=(0, 6))
@@ -1032,6 +1042,86 @@ class HostApp:
             on_change=self._on_hud_style_change,
         )
 
+    def _on_hud_bg_status(self, data: dict) -> None:
+        payload = data.get("hudBg")
+        if not isinstance(payload, dict):
+            return
+        used = payload.get("used") or []
+        flags = []
+        for i in range(3):
+            flags.append(bool(used[i]) if i < len(used) else False)
+        try:
+            sel = int(payload.get("sel", -1))
+        except (TypeError, ValueError):
+            sel = -1
+        try:
+            alpha = int(payload.get("alpha", 100))
+        except (TypeError, ValueError):
+            alpha = 100
+        self._hud_bg = {"sel": sel, "used": flags, "alpha": alpha}
+
+    def _upload_hud_bg(self) -> None:
+        if not self.connected:
+            messagebox.showinfo("LX04", "请先连接音箱，再上传监视页背景。")
+            return
+        path = filedialog.askopenfilename(
+            title="选择监视页背景",
+            filetypes=[
+                ("图片", "*.jpg;*.jpeg;*.png;*.bmp;*.gif;*.webp"),
+                ("所有文件", "*.*"),
+            ],
+        )
+        if not path:
+            return
+        try:
+            jpeg = screen_mirror.encode_still(path)
+        except Exception as exc:
+            messagebox.showerror("LX04", "无法处理这张图片：\n" + str(exc))
+            return
+        slot = self._pick_hud_bg_slot()
+        if slot is None:
+            return
+        self.client.send_file(jpeg, slot)
+        self._log(f"已上传监视页背景到槽位 {slot + 1}（{len(jpeg) // 1024} KB）")
+
+    def _pick_hud_bg_slot(self) -> int | None:
+        used = list(self._hud_bg.get("used") or [False, False, False])
+        while len(used) < 3:
+            used.append(False)
+        for i, taken in enumerate(used):
+            if not taken:
+                return i
+        win = tk.Toplevel(self.root)
+        win.title("背景库已满")
+        win.configure(bg=BG)
+        win.resizable(False, False)
+        result: dict[str, int | None] = {"slot": None}
+        ttk.Label(
+            win,
+            text="音箱已存 3 张背景，请选择要替换的一张：",
+            style="TLabel",
+        ).pack(anchor="w", padx=16, pady=(16, 8))
+        row = ttk.Frame(win)
+        row.pack(fill="x", padx=16, pady=(0, 8))
+
+        def choose(index: int) -> None:
+            result["slot"] = index
+            win.destroy()
+
+        for i in range(3):
+            ttk.Button(row, text=f"替换 {i + 1}", command=lambda n=i: choose(n)).pack(
+                side="left", padx=(0, 8)
+            )
+        ttk.Button(win, text="取消", command=win.destroy).pack(anchor="e", padx=16, pady=(0, 16))
+        win.transient(self.root)
+        win.grab_set()
+        win.update_idletasks()
+        x = self.root.winfo_rootx() + 80
+        y = self.root.winfo_rooty() + 80
+        win.geometry(f"+{x}+{y}")
+        self.root.wait_window(win)
+        return result["slot"]
+
     def _on_hud_style_change(self, state: dict, reset: bool = False) -> None:
         if self._hud_from_apk:
             return
@@ -1503,6 +1593,7 @@ class HostApp:
                 self.sink.push(data.payload, muted=data.muted)
         elif kind == "status":
             self._on_hud_status(data)
+            self._on_hud_bg_status(data)
             if "screenMirror" in data:
                 self._apply_mirror_request(bool(data.get("screenMirror")))
             if "volume" in data:

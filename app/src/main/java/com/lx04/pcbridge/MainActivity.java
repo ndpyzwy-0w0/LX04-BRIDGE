@@ -70,6 +70,7 @@ public class MainActivity extends Activity {
         BridgeService.STATE.screenMirror = DisplayPrefs.isScreenMirror(this);
         BridgeService.STATE.autoHideMute = DisplayPrefs.isAutoHideMute(this);
         DisplayPrefs.loadHudStyle(this, BridgeService.STATE.hudStyle);
+        HudBackground.INSTANCE.init(this);
         applyDisplayRotation(BridgeService.STATE.upsideDown);
         applyChromeColors(BridgeService.STATE.lightTheme);
         hideSystemUi();

@@ -1,6 +1,7 @@
 package com.lx04.pcbridge;
 
 import android.graphics.Canvas;
+import android.graphics.DashPathEffect;
 import android.graphics.Paint;
 import android.graphics.Path;
 import android.graphics.RectF;
@@ -13,6 +14,7 @@ import android.view.ViewConfiguration;
 final class AppMenu {
     private static final int PAGE_HUD = 0;
     private static final int PAGE_SETTINGS = 1;
+    private static final int PAGE_BG = 2;
 
     private final StatusHudView view;
     private final int touchSlop;
@@ -34,6 +36,14 @@ final class AppMenu {
     private final RectF autoHideOffRect = new RectF();
     private final RectF autoHideOnRect = new RectF();
     private final RectF settingsPanel = new RectF();
+    private final RectF bgRow = new RectF();
+    private final RectF[] slotRects = new RectF[] {
+            new RectF(), new RectF(), new RectF(), new RectF()
+    };
+    private final RectF opacityTrack = new RectF();
+    private final RectF opacityKnob = new RectF();
+    private final Paint dash = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final DashPathEffect dashEffect = new DashPathEffect(new float[] {8f, 6f}, 0);
 
     private int page = PAGE_HUD;
     private float offset;
@@ -46,6 +56,10 @@ final class AppMenu {
     private boolean dragging;
     private boolean animating;
     private boolean light;
+    private boolean pageCapture;
+    private boolean slidingOpacity;
+    private boolean longFired;
+    private int pressSlot = -1;
     private long lastAnimMs;
     private long lastOpenMs;
     private VelocityTracker velocity;
@@ -60,16 +74,34 @@ final class AppMenu {
         stroke.setStyle(Paint.Style.STROKE);
         stroke.setStrokeCap(Paint.Cap.ROUND);
         stroke.setStrokeJoin(Paint.Join.ROUND);
+        dash.setStyle(Paint.Style.STROKE);
+        dash.setPathEffect(dashEffect);
     }
 
+    private final Runnable longDelete = new Runnable() {
+        @Override
+        public void run() {
+            if (pressSlot >= 0) {
+                BridgeService.deleteHudBg(view.getContext(), pressSlot);
+                pressSlot = -1;
+                longFired = true;
+                view.invalidate();
+            }
+        }
+    };
+
     boolean blocksHud() {
-        return page == PAGE_SETTINGS || dragging || offset > 1f;
+        return page == PAGE_SETTINGS || page == PAGE_BG || dragging || offset > 1f;
     }
 
     void close() {
         page = PAGE_HUD;
         tracking = false;
         dragging = false;
+        pageCapture = false;
+        slidingOpacity = false;
+        pressSlot = -1;
+        view.removeCallbacks(longDelete);
         recycleVelocity();
         animateTo(0);
         view.invalidate();
@@ -77,6 +109,11 @@ final class AppMenu {
 
     void handleBack() {
         if (dragging || tracking) {
+            return;
+        }
+        if (page == PAGE_BG) {
+            page = PAGE_SETTINGS;
+            view.invalidate();
             return;
         }
         if (page == PAGE_SETTINGS) {
@@ -127,7 +164,9 @@ final class AppMenu {
     void draw(Canvas canvas, int w, int h, boolean lightTheme) {
         light = lightTheme;
         drawerW = Math.min(dp(208), w * 0.4f);
-        if (page == PAGE_SETTINGS) {
+        if (page == PAGE_BG) {
+            drawBgSettings(canvas, w, h);
+        } else if (page == PAGE_SETTINGS) {
             drawSettings(canvas, w, h);
         }
         float shown = Math.max(0f, Math.min(drawerW, offset));
@@ -154,7 +193,7 @@ final class AppMenu {
         canvas.drawText("系统设置", settingsRow.left + dp(14), settingsRow.top + dp(32), text);
         dim.setColor(colDim());
         dim.setTextSize(dp(11));
-        canvas.drawText("深色 / 浅色", settingsRow.left + dp(14), settingsRow.top + dp(46), dim);
+        canvas.drawText("深色 / 浅色 / 背景", settingsRow.left + dp(14), settingsRow.top + dp(46), dim);
         drawChevron(canvas, settingsRow.right - dp(18), settingsRow.centerY(), dp(8), colDim(), false);
 
         boolean mirroring = BridgeService.STATE.screenMirror;
@@ -183,19 +222,19 @@ final class AppMenu {
         text.setColor(colText());
         text.setTextSize(dp(16));
         drawChevron(canvas, backRect.left + dp(22), backRect.centerY(), dp(9), colText(), true);
-        canvas.drawText("返回", backRect.left + dp(34), backRect.top + dp(32), text);
+        canvas.drawText("返回", backRect.left + dp(34), backRect.top + dp(30), text);
 
         String title = "系统设置";
         text.setTextSize(dp(18));
         float tw = text.measureText(title);
-        canvas.drawText(title, settingsPanel.centerX() - tw / 2f, settingsPanel.top + dp(32), text);
+        canvas.drawText(title, settingsPanel.centerX() - tw / 2f, settingsPanel.top + dp(30), text);
 
         dim.setColor(colDim());
         dim.setTextSize(dp(13));
-        canvas.drawText("外观", settingsPanel.left + dp(18), settingsPanel.top + dp(78), dim);
+        canvas.drawText("外观", settingsPanel.left + dp(18), settingsPanel.top + dp(64), dim);
 
-        float top = settingsPanel.top + dp(92);
-        float btnH = dp(52);
+        float top = settingsPanel.top + dp(74);
+        float btnH = dp(44);
         float gap = dp(10);
         float inner = settingsPanel.width() - dp(36);
         float btnW = (inner - gap) / 2f;
@@ -206,12 +245,12 @@ final class AppMenu {
 
         dim.setTextSize(dp(12));
         canvas.drawText("与电脑上位机的「浅色」开关同步。",
-                settingsPanel.left + dp(18), lightRect.bottom + dp(28), dim);
+                settingsPanel.left + dp(18), lightRect.bottom + dp(20), dim);
 
         dim.setTextSize(dp(13));
-        canvas.drawText("静音按钮", settingsPanel.left + dp(18), lightRect.bottom + dp(52), dim);
+        canvas.drawText("静音按钮", settingsPanel.left + dp(18), lightRect.bottom + dp(42), dim);
 
-        float hideTop = lightRect.bottom + dp(64);
+        float hideTop = lightRect.bottom + dp(50);
         autoHideOffRect.set(settingsPanel.left + dp(18), hideTop,
                 settingsPanel.left + dp(18) + btnW, hideTop + btnH);
         autoHideOnRect.set(autoHideOffRect.right + gap, hideTop,
@@ -222,7 +261,146 @@ final class AppMenu {
 
         dim.setTextSize(dp(12));
         canvas.drawText("开启后空闲会隐藏，点屏幕可再次呼出。",
-                settingsPanel.left + dp(18), autoHideOnRect.bottom + dp(22), dim);
+                settingsPanel.left + dp(18), autoHideOnRect.bottom + dp(18), dim);
+
+        bgRow.set(settingsPanel.left + dp(18), autoHideOnRect.bottom + dp(30),
+                settingsPanel.right - dp(18), autoHideOnRect.bottom + dp(76));
+        card.setColor(colCard());
+        canvas.drawRoundRect(bgRow, dp(12), dp(12), card);
+        text.setTextSize(dp(16));
+        text.setColor(colText());
+        canvas.drawText("监视页背景", bgRow.left + dp(14), bgRow.top + dp(20), text);
+        dim.setColor(colDim());
+        dim.setTextSize(dp(11));
+        canvas.drawText("自定义图片 / 元素透明度", bgRow.left + dp(14), bgRow.top + dp(36), dim);
+        drawChevron(canvas, bgRow.right - dp(18), bgRow.centerY(), dp(8), colDim(), false);
+    }
+
+    private void drawBgSettings(Canvas canvas, int w, int h) {
+        scrim.setColor(0xCC000000);
+        canvas.drawRect(0, 0, w, h, scrim);
+        float p = dp(10);
+        settingsPanel.set(p, p, w - p, h - p);
+        applyPanelColor();
+        canvas.drawRoundRect(settingsPanel, dp(16), dp(16), panel);
+
+        backRect.set(settingsPanel.left, settingsPanel.top, settingsPanel.left + dp(88),
+                settingsPanel.top + dp(48));
+        text.setColor(colText());
+        text.setTextSize(dp(16));
+        drawChevron(canvas, backRect.left + dp(22), backRect.centerY(), dp(9), colText(), true);
+        canvas.drawText("返回", backRect.left + dp(34), backRect.top + dp(32), text);
+
+        String title = "监视页背景";
+        text.setTextSize(dp(18));
+        float tw = text.measureText(title);
+        canvas.drawText(title, settingsPanel.centerX() - tw / 2f, settingsPanel.top + dp(32), text);
+
+        dim.setColor(colDim());
+        dim.setTextSize(dp(13));
+        canvas.drawText("背景库", settingsPanel.left + dp(18), settingsPanel.top + dp(72), dim);
+
+        float gap = dp(8);
+        float inner = settingsPanel.width() - dp(36);
+        float slotW = (inner - gap * 3) / 4f;
+        float slotH = dp(68);
+        float slotTop = settingsPanel.top + dp(84);
+        int selected = HudBackground.INSTANCE.selected();
+        String[] labels = new String[] {"默认", "背景 1", "背景 2", "背景 3"};
+        for (int i = 0; i < 4; i++) {
+            float left = settingsPanel.left + dp(18) + (slotW + gap) * i;
+            slotRects[i].set(left, slotTop, left + slotW, slotTop + slotH);
+            boolean sel = i == 0 ? selected == HudBackground.NONE : selected == i - 1;
+            drawBgSlot(canvas, slotRects[i], i, labels[i], sel);
+        }
+
+        dim.setTextSize(dp(12));
+        canvas.drawText("点选使用。长按已存背景可删除。",
+                settingsPanel.left + dp(18), slotTop + slotH + dp(22), dim);
+        canvas.drawText("图片从电脑上位机上传，最多 3 张。",
+                settingsPanel.left + dp(18), slotTop + slotH + dp(40), dim);
+
+        dim.setTextSize(dp(13));
+        float opTop = slotTop + slotH + dp(62);
+        canvas.drawText("元素不透明度", settingsPanel.left + dp(18), opTop, dim);
+        int alpha = HudBackground.INSTANCE.alpha();
+        String pct = alpha + "%";
+        text.setTextSize(dp(14));
+        text.setColor(colText());
+        float pw = text.measureText(pct);
+        canvas.drawText(pct, settingsPanel.right - dp(18) - pw, opTop, text);
+
+        float trackH = dp(8);
+        float trackTop = opTop + dp(16);
+        opacityTrack.set(settingsPanel.left + dp(18), trackTop,
+                settingsPanel.right - dp(18), trackTop + trackH);
+        card.setColor(light ? 0xFFD5DDE8 : 0xFF1E2A44);
+        canvas.drawRoundRect(opacityTrack, dp(4), dp(4), card);
+        float t = (alpha - HudBackground.MIN_ALPHA)
+                / (float) (HudBackground.MAX_ALPHA - HudBackground.MIN_ALPHA);
+        float fillRight = opacityTrack.left + opacityTrack.width() * Math.max(0f, Math.min(1f, t));
+        tmpFill(canvas, opacityTrack.left, opacityTrack.top, fillRight, opacityTrack.bottom, 0xFF3DDC97);
+        float knob = dp(16);
+        float kx = fillRight;
+        opacityKnob.set(kx - knob / 2f, opacityTrack.centerY() - knob / 2f,
+                kx + knob / 2f, opacityTrack.centerY() + knob / 2f);
+        card.setColor(0xFF3DDC97);
+        canvas.drawRoundRect(opacityKnob, knob / 2f, knob / 2f, card);
+
+        dim.setTextSize(dp(12));
+        dim.setColor(colDim());
+        canvas.drawText("卡片和按钮变透明，背景图保持清晰。",
+                settingsPanel.left + dp(18), opacityTrack.bottom + dp(26), dim);
+    }
+
+    private void tmpFill(Canvas canvas, float l, float t, float r, float b, int color) {
+        if (r <= l) {
+            return;
+        }
+        int prev = card.getColor();
+        card.setColor(color);
+        canvas.drawRoundRect(l, t, r, b, dp(4), dp(4), card);
+        card.setColor(prev);
+    }
+
+    private void drawBgSlot(Canvas canvas, RectF rect, int index, String label, boolean selected) {
+        boolean filled = index > 0 && HudBackground.INSTANCE.used(index - 1);
+        if (selected) {
+            card.setColor(light ? 0xFFD7F6E7 : 0xFF1C3A32);
+            stroke.setStrokeWidth(dp(2));
+            stroke.setColor(0xFF3DDC97);
+        } else {
+            card.setColor(colCard());
+            stroke.setStrokeWidth(dp(1));
+            stroke.setColor(light ? 0xFFD3DCE8 : 0xFF2A3A58);
+        }
+        canvas.drawRoundRect(rect, dp(10), dp(10), card);
+        RectF inner = new RectF(rect.left + dp(6), rect.top + dp(6),
+                rect.right - dp(6), rect.bottom - dp(22));
+        if (index == 0) {
+            card.setColor(light ? 0xFFF3F5F8 : 0xFF0B1220);
+            canvas.drawRoundRect(inner, dp(6), dp(6), card);
+        } else if (filled) {
+            canvas.save();
+            canvas.clipRect(inner);
+            HudBackground.INSTANCE.drawThumbnail(canvas, index - 1, inner);
+            canvas.restore();
+        } else {
+            dash.setStrokeWidth(dp(1.2f));
+            dash.setColor(light ? 0xFFB7C4D6 : 0xFF3A4C6A);
+            canvas.drawRoundRect(inner, dp(6), dp(6), dash);
+            dim.setColor(colDim());
+            dim.setTextSize(dp(11));
+            String empty = "空";
+            float ew = dim.measureText(empty);
+            canvas.drawText(empty, inner.centerX() - ew / 2f, inner.centerY() + dp(4), dim);
+        }
+        canvas.drawRoundRect(rect, dp(10), dp(10), stroke);
+        text.setTextSize(dp(11));
+        text.setColor(selected ? 0xFF3DDC97 : colText());
+        float lw = text.measureText(label);
+        canvas.drawText(label, rect.centerX() - lw / 2f, rect.bottom - dp(7), text);
+        text.setColor(colText());
     }
 
     private void drawModeButton(Canvas canvas, RectF rect, String label, boolean selected) {
@@ -266,14 +444,37 @@ final class AppMenu {
         downOffset = offset;
         dragging = false;
         animating = false;
+        pageCapture = false;
+        slidingOpacity = false;
+        longFired = false;
+        pressSlot = -1;
+        view.removeCallbacks(longDelete);
         obtainVelocity().addMovement(event);
         drawerW = drawerWidth(w);
+        if (page == PAGE_BG && hitOpacity(x, y)) {
+            pageCapture = true;
+            slidingOpacity = true;
+            setOpacityFromX(x);
+            tracking = true;
+            return true;
+        }
+        if (page == PAGE_BG) {
+            int slot = slotAt(x, y);
+            if (slot >= 0 && HudBackground.INSTANCE.used(slot)) {
+                pressSlot = slot;
+                view.postDelayed(longDelete, 450);
+            }
+        }
         boolean edge = x >= w - edgeWidth(w);
         tracking = blocksHud() || edge;
         return tracking;
     }
 
     boolean onMove(float x, float y, int w, MotionEvent event) {
+        if (pageCapture && slidingOpacity) {
+            setOpacityFromX(x);
+            return true;
+        }
         if (!tracking && !blocksHud()) {
             return false;
         }
@@ -282,7 +483,18 @@ final class AppMenu {
         float adx = Math.abs(dx);
         float ady = Math.abs(y - downY);
         if (!dragging) {
-            if (adx < touchSlop || adx < ady) {
+            if (adx < touchSlop && ady < touchSlop) {
+                return pageCapture;
+            }
+            if (pressSlot >= 0) {
+                view.removeCallbacks(longDelete);
+                pressSlot = -1;
+            }
+            if (page == PAGE_SETTINGS || page == PAGE_BG) {
+                if (adx < ady || adx < touchSlop) {
+                    return true;
+                }
+            } else if (adx < touchSlop || adx < ady) {
                 return false;
             }
             dragging = true;
@@ -293,6 +505,15 @@ final class AppMenu {
     }
 
     boolean onUp(float x, float y, int w, MotionEvent event) {
+        view.removeCallbacks(longDelete);
+        if (pageCapture) {
+            pageCapture = false;
+            slidingOpacity = false;
+            recycleVelocity();
+            tracking = false;
+            dragging = false;
+            return true;
+        }
         if (!tracking && !blocksHud()) {
             recycleVelocity();
             return false;
@@ -305,6 +526,7 @@ final class AppMenu {
         dragging = false;
         tracking = false;
         if (wasDrag) {
+            pressSlot = -1;
             snap(w, vx);
             return true;
         }
@@ -351,12 +573,42 @@ final class AppMenu {
                 setAutoHideMute(true);
                 return true;
             }
+            if (bgRow.contains(x, y)) {
+                openBgSettings();
+                return true;
+            }
+            return true;
+        }
+        if (page == PAGE_BG) {
+            if (longFired) {
+                longFired = false;
+                return true;
+            }
+            if (backRect.contains(x, y)) {
+                page = PAGE_SETTINGS;
+                view.invalidate();
+                return true;
+            }
+            if (slotRects[0].contains(x, y)) {
+                BridgeService.setHudBgSlot(view.getContext(), HudBackground.NONE);
+                view.invalidate();
+                return true;
+            }
+            int slot = slotAt(x, y);
+            if (slot >= 0 && HudBackground.INSTANCE.used(slot)) {
+                BridgeService.setHudBgSlot(view.getContext(), slot);
+                view.invalidate();
+            }
             return true;
         }
         return false;
     }
 
     void onCancel() {
+        view.removeCallbacks(longDelete);
+        pageCapture = false;
+        slidingOpacity = false;
+        pressSlot = -1;
         tracking = false;
         dragging = false;
         recycleVelocity();
@@ -364,6 +616,39 @@ final class AppMenu {
             animateTo(offset >= drawerW * 0.4f ? drawerW : 0);
         }
         view.invalidate();
+    }
+
+    private void openBgSettings() {
+        page = PAGE_BG;
+        view.invalidate();
+    }
+
+    private boolean hitOpacity(float x, float y) {
+        float pad = dp(14);
+        return x >= opacityTrack.left - pad && x <= opacityTrack.right + pad
+                && y >= opacityTrack.top - pad && y <= opacityTrack.bottom + pad;
+    }
+
+    private void setOpacityFromX(float x) {
+        float t = (x - opacityTrack.left) / Math.max(1f, opacityTrack.width());
+        if (t < 0f) {
+            t = 0f;
+        } else if (t > 1f) {
+            t = 1f;
+        }
+        int alpha = Math.round(HudBackground.MIN_ALPHA
+                + t * (HudBackground.MAX_ALPHA - HudBackground.MIN_ALPHA));
+        BridgeService.setHudBgAlpha(view.getContext(), alpha);
+        view.invalidate();
+    }
+
+    private int slotAt(float x, float y) {
+        for (int i = 1; i < slotRects.length; i++) {
+            if (slotRects[i].contains(x, y)) {
+                return i - 1;
+            }
+        }
+        return -1;
     }
 
     private void openSettings() {
