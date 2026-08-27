@@ -175,6 +175,7 @@ public class StatusHudView extends View {
             return;
         }
 
+        boolean customBg = HudBackground.INSTANCE.hasImage();
         HudBackground.INSTANCE.draw(canvas, w, h);
         int hudAlpha = HudBackground.INSTANCE.alpha255();
         boolean faded = hudAlpha < 255;
@@ -182,9 +183,11 @@ public class StatusHudView extends View {
             canvas.saveLayerAlpha(0, 0, w, h, hudAlpha);
         }
 
-        float p = dp(12);
-        RectF card = new RectF(p, p, w - p, h - p);
-        canvas.drawRoundRect(card, dp(18), dp(18), panel);
+        if (!customBg) {
+            float p = dp(12);
+            RectF card = new RectF(p, p, w - p, h - p);
+            canvas.drawRoundRect(card, dp(18), dp(18), panel);
+        }
 
         pulse = (pulse + 0.08f) % ((float) (Math.PI * 2));
         boolean live = s.clientConnected && (
