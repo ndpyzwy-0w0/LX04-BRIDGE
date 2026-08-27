@@ -1,4 +1,4 @@
-"""Find adb.exe, list USB devices, and open TCP 17890/17891 over the USB cable."""
+"""Find adb.exe, list USB devices, and open TCP 17890/17891/17892 over the USB cable."""
 from __future__ import annotations
 
 import os
@@ -11,6 +11,7 @@ from pathlib import Path
 CREATE_NO_WINDOW = 0x08000000
 PORT = 17890
 VIDEO_PORT = 17891
+TOAST_PORT = 17892
 PKG = "com.lx04.pcbridge"
 SERVICE = PKG + "/.BridgeService"
 
@@ -141,7 +142,7 @@ def release_speaker_mic(adb: str, serial: str | None = None) -> str:
 def usb_forward(adb: str, serial: str | None = None) -> None:
     args = ["-s", serial] if serial else []
     last_err = ""
-    for port in (PORT, VIDEO_PORT):
+    for port in (PORT, VIDEO_PORT, TOAST_PORT):
         _run(adb, [*args, "forward", "--remove", f"tcp:{port}"])
         result = _run(adb, [*args, "forward", f"tcp:{port}", f"tcp:{port}"])
         if result.returncode != 0:

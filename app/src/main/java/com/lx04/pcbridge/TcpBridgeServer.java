@@ -27,6 +27,7 @@ final class TcpBridgeServer {
     private final BridgeState state;
     private final Callbacks callbacks;
     private final ArrayBlockingQueue<byte[]> outbound = new ArrayBlockingQueue<>(12);
+    private final ArrayBlockingQueue<byte[]> events = new ArrayBlockingQueue<>(8);
     private final AtomicInteger seq = new AtomicInteger();
     private volatile boolean running;
     private ServerSocket server;
@@ -68,6 +69,7 @@ final class TcpBridgeServer {
             acceptThread.interrupt();
         }
         outbound.clear();
+        events.clear();
     }
 
     void sendAudio(byte[] pcm, int length, boolean muted) {
@@ -83,7 +85,12 @@ final class TcpBridgeServer {
         if (client == null || json == null) {
             return;
         }
-        enqueue(Protocol.EVENT, (byte) 0, json.toString().getBytes(StandardCharsets.UTF_8));
+        byte[] frame = Protocol.encode(Protocol.EVENT, (byte) 0, seq.incrementAndGet(),
+                SystemClock.elapsedRealtime(), json.toString().getBytes(StandardCharsets.UTF_8));
+        if (!events.offer(frame)) {
+            events.poll();
+            events.offer(frame);
+        }
     }
 
     void sendStatus() {
@@ -182,9 +189,15 @@ final class TcpBridgeServer {
                     lastStatus = SystemClock.elapsedRealtime();
                     sendStatus();
                 }
-                byte[] frame = outbound.poll();
+                byte[] frame = events.poll();
+                if (frame == null) {
+                    frame = outbound.poll();
+                }
                 if (frame != null) {
                     out.write(frame);
+                    if (frame.length >= Protocol.HEADER_SIZE && frame[4] == Protocol.EVENT) {
+                        out.flush();
+                    }
                 } else {
                     Thread.sleep(4);
                 }
@@ -272,6 +285,7 @@ final class TcpBridgeServer {
             o.put("encoding", "pcm_s16le");
             o.put("port", Protocol.PORT);
             o.put("videoPort", Protocol.VIDEO_PORT);
+            o.put("toastPort", Protocol.TOAST_PORT);
             return o.toString().getBytes(StandardCharsets.UTF_8);
         } catch (Exception e) {
             return "{}".getBytes(StandardCharsets.UTF_8);

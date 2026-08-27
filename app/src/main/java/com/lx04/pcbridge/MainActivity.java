@@ -13,6 +13,7 @@ import android.view.View;
 import android.view.WindowManager;
 
 public class MainActivity extends Activity {
+    private static volatile MainActivity foreground;
     private StatusHudView hud;
     private boolean appliedUpsideDown;
     private boolean appliedLightTheme;
@@ -35,6 +36,20 @@ public class MainActivity extends Activity {
             handler.postDelayed(this, delay);
         }
     };
+
+    static void refreshHud() {
+        MainActivity activity = foreground;
+        if (activity == null) {
+            return;
+        }
+        StatusHudView view = activity.hud;
+        if (view == null) {
+            return;
+        }
+        view.postInvalidate();
+        activity.handler.removeCallbacks(activity.tick);
+        activity.handler.post(activity.tick);
+    }
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -70,8 +85,8 @@ public class MainActivity extends Activity {
             }
 
             @Override
-            public void onToastAction(String id) {
-                BridgeService.sendToastAction(id);
+            public void onToastAction(String id, String label) {
+                BridgeService.sendToastAction(id, label);
             }
 
             @Override
@@ -96,6 +111,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
+        foreground = this;
         hideSystemUi();
         handler.post(tick);
     }
@@ -103,6 +119,9 @@ public class MainActivity extends Activity {
     @Override
     protected void onPause() {
         handler.removeCallbacks(tick);
+        if (foreground == this) {
+            foreground = null;
+        }
         super.onPause();
     }
 
