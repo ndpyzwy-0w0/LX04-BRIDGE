@@ -12,8 +12,8 @@ COLORONCOLOR = 3
 MONITORINFOF_PRIMARY = 1
 CCHDEVICENAME = 32
 ENCODER_PARAMETER_LONG = 4
-JPEG_QUALITY = 6
-JPEG_QUALITY_SMALL = 4
+JPEG_QUALITY = 8
+JPEG_QUALITY_SMALL = 5
 MAX_JPEG = 20 * 1024
 TARGET_W = 800
 TARGET_H = 480
@@ -22,6 +22,35 @@ FRAME_INTERVAL_SLOW = 0.10
 MONITOR_REFRESH = 2.0
 GRABBER_REOPEN_FRAMES = 400
 ACK_WAIT_S = 0.28
+
+
+@dataclass(frozen=True)
+class QualityPreset:
+    key: str
+    quality: int
+    quality_small: int
+    max_jpeg: int
+    ack_wait: float
+    interval: float
+
+
+QUALITY_PRESETS = (
+    QualityPreset("流畅", 8, 5, 20 * 1024, 0.28, 0.05),
+    QualityPreset("清晰", 18, 12, 36 * 1024, 0.30, 0.05),
+    QualityPreset("高清", 36, 24, 56 * 1024, 0.35, 0.045),
+    QualityPreset("最高", 58, 40, 96 * 1024, 0.45, 0.04),
+)
+QUALITY_KEYS = [item.key for item in QUALITY_PRESETS]
+DEFAULT_QUALITY = "清晰"
+
+
+def pick_quality(name: str) -> QualityPreset:
+    wanted = (name or "").strip()
+    for item in QUALITY_PRESETS:
+        if item.key == wanted:
+            return item
+    return QUALITY_PRESETS[1]
+
 
 user32 = ctypes.WinDLL("user32", use_last_error=True)
 gdi32 = ctypes.WinDLL("gdi32", use_last_error=True)
@@ -378,7 +407,13 @@ class _Grabber:
         gdi32.SetStretchBltMode(self.dst_dc, COLORONCOLOR)
         self.stream = _new_istream()
 
-    def grab(self, monitor: Monitor, quality: int | None = None) -> bytes:
+    def grab(
+        self,
+        monitor: Monitor,
+        quality: int | None = None,
+        max_jpeg: int | None = None,
+        quality_small: int | None = None,
+    ) -> bytes:
         if not self.dst_dc or self.frames >= GRABBER_REOPEN_FRAMES:
             self.close()
             self.open()
@@ -405,9 +440,11 @@ class _Grabber:
         if not ok:
             raise RuntimeError("截取屏幕失败")
         q = JPEG_QUALITY if quality is None else quality
+        cap = MAX_JPEG if max_jpeg is None else max_jpeg
+        small = JPEG_QUALITY_SMALL if quality_small is None else quality_small
         data = self._encode(q)
-        if quality is None and len(data) > MAX_JPEG:
-            data = self._encode(JPEG_QUALITY_SMALL)
+        if len(data) > cap and small < q:
+            data = self._encode(small)
         self.frames += 1
         return data
 
@@ -503,11 +540,19 @@ class ScreenSender:
         self._latest_at = 0.0
         self._new_frame = threading.Event()
         self._ack = threading.Event()
+        self._preset = pick_quality(DEFAULT_QUALITY)
         self._send_s = FRAME_INTERVAL
         self.monitor_key = ""
         self.title = ""
         self.error = ""
         self.frames = 0
+
+    def set_quality(self, name: str) -> QualityPreset:
+        self._preset = pick_quality(name)
+        return self._preset
+
+    def quality_key(self) -> str:
+        return self._preset.key
 
     def running(self) -> bool:
         return self._alive
@@ -593,8 +638,14 @@ class ScreenSender:
                             self.title = chosen.label()
                     if chosen is None:
                         raise RuntimeError("显示器已断开")
-                    quality = JPEG_QUALITY_SMALL if self._send_s > 0.07 else None
-                    jpeg = grabber.grab(chosen, quality)
+                    preset = self._preset
+                    quality = preset.quality_small if self._send_s > 0.08 else preset.quality
+                    jpeg = grabber.grab(
+                        chosen,
+                        quality,
+                        max_jpeg=preset.max_jpeg,
+                        quality_small=preset.quality_small,
+                    )
                     if self._alive and jpeg:
                         self._put(jpeg)
                         self.frames += 1
@@ -603,7 +654,8 @@ class ScreenSender:
                     grabber.close()
                     time.sleep(0.4)
                     continue
-                interval = min(FRAME_INTERVAL_SLOW, max(FRAME_INTERVAL, self._send_s * 1.4))
+                preset = self._preset
+                interval = min(FRAME_INTERVAL_SLOW, max(preset.interval, self._send_s * 1.4))
                 remain = interval - (time.monotonic() - started)
                 if remain > 0:
                     time.sleep(remain)
@@ -631,5 +683,5 @@ class ScreenSender:
             except Exception as exc:
                 self.error = str(exc)
             if self._alive:
-                self._ack.wait(timeout=ACK_WAIT_S)
+                self._ack.wait(timeout=self._preset.ack_wait)
             self._send_s = self._send_s * 0.65 + (time.monotonic() - t0) * 0.35
