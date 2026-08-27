@@ -15,6 +15,7 @@ import org.json.JSONObject;
 
 public class BridgeService extends Service {
     public static final BridgeState STATE = new BridgeState();
+    private static BridgeService instance;
 
     private AudioCapture capture;
     private AudioPlayback playback;
@@ -28,6 +29,7 @@ public class BridgeService extends Service {
     @Override
     public void onCreate() {
         super.onCreate();
+        instance = this;
         STATE.androidRelease = android.os.Build.VERSION.RELEASE;
         STATE.apkVersion = AppVersion.read(this);
         STATE.upsideDown = DisplayPrefs.isUpsideDown(this);
@@ -47,11 +49,7 @@ public class BridgeService extends Service {
         capture = new AudioCapture(this::onAudio);
         playback = new AudioPlayback();
         audioManager = (AudioManager) getSystemService(AUDIO_SERVICE);
-        videoServer = new TcpVideoServer(jpeg -> {
-            if (STATE.screenMirror) {
-                ScreenMirror.INSTANCE.accept(jpeg);
-            }
-        });
+        videoServer = new TcpVideoServer(ScreenMirror.INSTANCE::accept);
         server = new TcpBridgeServer(STATE, new TcpBridgeServer.Callbacks() {
             @Override
             public void prepareForClient() {
@@ -66,6 +64,8 @@ public class BridgeService extends Service {
                     STATE.sparks.clear();
                     ScreenMirror.INSTANCE.clear();
                     STATE.mirrorTitle = "";
+                    STATE.toastOverlay = false;
+                    STATE.toastTitle = "";
                 }
                 if (connected) {
                     playback.start();
@@ -145,6 +145,19 @@ public class BridgeService extends Service {
                         STATE.mirrorTitle = json.optString("title", "");
                     }
                     return;
+                } else if ("toast_overlay".equals(cmd)) {
+                    boolean on = json.optBoolean("on", false);
+                    STATE.toastOverlay = on;
+                    if (json.has("title")) {
+                        STATE.toastTitle = json.optString("title", "");
+                    }
+                    if (!on) {
+                        STATE.toastTitle = "";
+                        if (!STATE.screenMirror) {
+                            ScreenMirror.INSTANCE.clear();
+                        }
+                    }
+                    return;
                 }
                 refreshHeadline();
             }
@@ -190,6 +203,9 @@ public class BridgeService extends Service {
         if (wakeLock != null && wakeLock.isHeld()) {
             wakeLock.release();
         }
+        if (instance == this) {
+            instance = null;
+        }
         super.onDestroy();
     }
 
@@ -206,6 +222,32 @@ public class BridgeService extends Service {
     public static void toggleSpkMute() {
         STATE.spkMuted = !STATE.spkMuted;
         refreshHeadlineStatic();
+    }
+
+    public static void sendPointer(float x, float y, String act) {
+        BridgeService svc = instance;
+        if (svc == null || svc.server == null || act == null || act.isEmpty()) {
+            return;
+        }
+        if (x < 0f) {
+            x = 0f;
+        } else if (x > 1f) {
+            x = 1f;
+        }
+        if (y < 0f) {
+            y = 0f;
+        } else if (y > 1f) {
+            y = 1f;
+        }
+        try {
+            JSONObject o = new JSONObject();
+            o.put("cmd", "pointer");
+            o.put("act", act);
+            o.put("x", x);
+            o.put("y", y);
+            svc.server.sendEvent(o);
+        } catch (Exception ignored) {
+        }
     }
 
     public static void resetHudStyle(android.content.Context context) {
@@ -274,8 +316,10 @@ public class BridgeService extends Service {
         STATE.screenMirror = on;
         STATE.flushStatus = true;
         if (!on) {
-            ScreenMirror.INSTANCE.clear();
             STATE.mirrorTitle = "";
+            if (!STATE.toastOverlay) {
+                ScreenMirror.INSTANCE.clear();
+            }
         }
         if (context != null) {
             DisplayPrefs.setScreenMirror(context, on);

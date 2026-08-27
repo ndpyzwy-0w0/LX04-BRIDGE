@@ -79,6 +79,13 @@ final class TcpBridgeServer {
         enqueue(Protocol.AUDIO, muted ? Protocol.FLAG_MUTED : 0, payload);
     }
 
+    void sendEvent(JSONObject json) {
+        if (client == null || json == null) {
+            return;
+        }
+        enqueue(Protocol.EVENT, (byte) 0, json.toString().getBytes(StandardCharsets.UTF_8));
+    }
+
     void sendStatus() {
         try {
             JSONObject o = new JSONObject();
@@ -97,6 +104,7 @@ final class TcpBridgeServer {
             o.put("volume", BridgeService.musicVolume());
             o.put("lightTheme", state.lightTheme);
             o.put("screenMirror", state.screenMirror);
+            o.put("toastOverlay", state.toastOverlay);
             o.put("hudStyle", state.hudStyle.toStatusJson());
             JSONObject bg = new JSONObject();
             bg.put("sel", HudBackground.INSTANCE.selected());

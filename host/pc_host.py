@@ -31,6 +31,7 @@ import hud_preview
 import pc_stats
 import protocol
 import screen_mirror
+import toast_mirror
 import vb_cable
 import win_endpoint
 import win_mic
@@ -220,6 +221,11 @@ class BridgeClient:
         elif frame.type == protocol.STATUS:
             self.status = frame.json()
             self.on_event("status", self.status)
+        elif frame.type == protocol.EVENT:
+            try:
+                self.on_event("event", frame.json())
+            except Exception:
+                pass
         elif frame.type == protocol.PING:
             self._send(protocol.encode(protocol.PONG, seq=self._next_seq()))
 
@@ -321,6 +327,7 @@ class HostApp:
         self.pc_stats_enabled = tk.BooleanVar(value=True)
         self.upside_down = tk.BooleanVar(value=False)
         self.light_theme = tk.BooleanVar(value=False)
+        self.toast_mirror = tk.BooleanVar(value=False)
         self.disk_var = tk.StringVar()
         self.monitor_var = tk.StringVar()
         self.quality_var = tk.StringVar(value=screen_mirror.DEFAULT_QUALITY)
@@ -329,6 +336,8 @@ class HostApp:
         self._monitors: list[screen_mirror.Monitor] = []
         self.mirror = screen_mirror.ScreenSender(self._send_mirror_frame)
         self._mirror_logged = False
+        self.toast = toast_mirror.ToastSender(self._send_toast_frame, self._on_toast_change)
+        self._toast_logged = False
         self.inject_var = tk.StringVar()
         self.spk_dev_var = tk.StringVar()
         self._inject_devices: list[tuple[str, str | int, str]] = []
@@ -579,6 +588,27 @@ class HostApp:
             style="CardDim.TLabel",
         ).pack(side="left")
 
+        toast_row = ttk.Frame(card, style="Card.TFrame")
+        toast_row.pack(fill="x", padx=16, pady=(0, 8))
+        tk.Checkbutton(
+            toast_row,
+            text="同步系统弹窗",
+            variable=self.toast_mirror,
+            command=self._on_toast_mirror_change,
+            bg=PANEL,
+            fg=TEXT,
+            selectcolor="#1E2A44",
+            activebackground=PANEL,
+            activeforeground=TEXT,
+            highlightthickness=0,
+            font=("Segoe UI", 10),
+        ).pack(side="left")
+        ttk.Label(
+            toast_row,
+            text="开了后右下角 Windows / Cursor 提示会放大到音箱，可直接点按。",
+            style="CardDim.TLabel",
+        ).pack(side="left", padx=8)
+
         row2 = ttk.Frame(card, style="Card.TFrame")
         row2.pack(fill="x", padx=16, pady=(0, 8))
         ttk.Button(row2, text="试音", command=self._on_test_tone).pack(side="left")
@@ -677,6 +707,7 @@ class HostApp:
         self.pc_stats_enabled.set(bool(data.get("pc_stats", True)))
         self.upside_down.set(bool(data.get("upside_down", False)))
         self.light_theme.set(bool(data.get("light_theme", False)))
+        self.toast_mirror.set(bool(data.get("toast_mirror", False)))
         self._saved_inject = str(data.get("inject") or "")
         self._saved_spk = str(data.get("speaker") or "")
         self._saved_disk = str(data.get("pc_disk") or "")
@@ -695,6 +726,7 @@ class HostApp:
             "pc_stats": bool(self.pc_stats_enabled.get()),
             "upside_down": bool(self.upside_down.get()),
             "light_theme": bool(self.light_theme.get()),
+            "toast_mirror": bool(self.toast_mirror.get()),
             "pc_disk": self._selected_disk(),
             "pc_monitor": self._selected_monitor_key(),
             "mirror_quality": self.quality_var.get(),
@@ -866,9 +898,69 @@ class HostApp:
         self._log("镜像码率: " + preset.key)
 
     def _send_mirror_frame(self, jpeg: bytes) -> None:
-        if not self.connected or not self.mirror.running():
+        if not self.connected or not self.mirror.running() or self.toast.showing():
             return
         self.client.send_video(jpeg)
+
+    def _send_toast_frame(self, jpeg: bytes) -> None:
+        if not self.connected or not self.toast.showing():
+            return
+        if self.client.video_sock is None:
+            try:
+                self.client.connect_video("127.0.0.1", protocol.VIDEO_PORT)
+            except Exception:
+                return
+        self.client.send_video(jpeg)
+
+    def _on_toast_change(self, showing: bool, title: str) -> None:
+        try:
+            self.root.after(0, lambda s=showing, t=title: self._apply_toast_change(s, t))
+        except Exception:
+            pass
+
+    def _apply_toast_change(self, showing: bool, title: str) -> None:
+        if not self.connected:
+            return
+        if showing:
+            if self.client.video_sock is None:
+                try:
+                    self.client.connect_video("127.0.0.1", protocol.VIDEO_PORT)
+                except Exception as exc:
+                    self._log("屏幕通道未打开: " + str(exc))
+                    return
+            self.mirror.pause()
+            self.client.send_control("toast_overlay", on=True, title=title or "系统弹窗")
+            if not self._toast_logged:
+                self._toast_logged = True
+                self._log("系统弹窗已同步到音箱" + ((": " + title) if title else ""))
+            return
+        self._toast_logged = False
+        self.client.send_control("toast_overlay", on=False)
+        self.mirror.resume()
+
+    def _on_toast_mirror_change(self) -> None:
+        if not self._routes_ready:
+            return
+        self._save_routes()
+        self._sync_toast_mirror()
+        if self.toast_mirror.get():
+            self._log("已开启系统弹窗同步：右下角提示会显示在音箱上，点按即可操作。")
+        else:
+            self._log("已关闭系统弹窗同步")
+
+    def _sync_toast_mirror(self) -> None:
+        if self.connected and self.toast_mirror.get():
+            self.toast.start()
+            return
+        was_showing = self.toast.showing()
+        self.toast.stop()
+        self._toast_logged = False
+        if was_showing and self.connected:
+            try:
+                self.client.send_control("toast_overlay", on=False)
+            except Exception:
+                pass
+        self.mirror.resume()
 
     def _apply_mirror_request(self, on: bool) -> None:
         if on and self.connected:
@@ -1394,6 +1486,7 @@ class HostApp:
                 self._apply_speaker_route()
             else:
                 self._log("扬声器通路已关闭。可用「音箱试音」检查喇叭。")
+            self._sync_toast_mirror()
             self.headline.configure(text="USB 已连接")
         except Exception as exc:
             self._session = False
@@ -1401,6 +1494,10 @@ class HostApp:
             self._restore_render()
             try:
                 self.client.close()
+            except Exception:
+                pass
+            try:
+                self.toast.stop()
             except Exception:
                 pass
             try:
@@ -1440,6 +1537,8 @@ class HostApp:
         self._restore_render()
         self.mirror.stop()
         self._mirror_logged = False
+        self.toast.stop()
+        self._toast_logged = False
         self.connected = False
         self._stats_logged = False
         if self.adb and self._serial:
@@ -1523,6 +1622,7 @@ class HostApp:
             self._begin_hud_reconcile()
         except Exception as exc:
             self._log("重连后恢复通路失败: " + str(exc))
+        self._sync_toast_mirror()
 
     def _revive_gave_up(self, err: str) -> None:
         self._reviving = False
@@ -1533,6 +1633,8 @@ class HostApp:
         self._restore_render()
         self.mirror.stop()
         self._mirror_logged = False
+        self.toast.stop()
+        self._toast_logged = False
         if self.adb and self._serial:
             try:
                 adb_usb.release_speaker_mic(self.adb, self._serial)
@@ -1559,7 +1661,13 @@ class HostApp:
 
     def _on_bridge_event(self, kind: str, data) -> None:
         if kind == "video_ack":
-            self.mirror.note_ack()
+            if self.toast.showing():
+                self.toast.note_ack()
+            else:
+                self.mirror.note_ack()
+            return
+        if kind == "event":
+            self.toast.handle_pointer(data if isinstance(data, dict) else {})
             return
         self.root.after(0, lambda: self._handle_event(kind, data))
 
@@ -1652,6 +1760,8 @@ class HostApp:
             self.connected = False
             self.mirror.stop()
             self._mirror_logged = False
+            self.toast.stop()
+            self._toast_logged = False
             self._draw_meter(self.meter, 0)
             self._draw_meter(self.spk_meter, 0)
             if not self._session:
@@ -1680,6 +1790,9 @@ class HostApp:
         if self.mirror.running() and self.mirror.frames and not self._mirror_logged:
             self._mirror_logged = True
             self._log("屏幕镜像已出画面: " + (self.mirror.title or self.monitor_var.get()))
+        if self.toast.error:
+            self._log("系统弹窗: " + self.toast.error)
+            self.toast.error = ""
         self.root.after(80, self._tick)
 
     def _draw_meter(self, canvas: tk.Canvas, level: float) -> None:

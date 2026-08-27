@@ -31,7 +31,7 @@ public class MainActivity extends Activity {
                 }
                 hud.invalidate();
             }
-            long delay = BridgeService.STATE.screenMirror ? 16 : 50;
+            long delay = (BridgeService.STATE.screenMirror || BridgeService.STATE.toastOverlay) ? 16 : 50;
             handler.postDelayed(this, delay);
         }
     };
@@ -62,6 +62,11 @@ public class MainActivity extends Activity {
             @Override
             public void onHudStyleChanged() {
                 BridgeService.persistHudStyle(MainActivity.this);
+            }
+
+            @Override
+            public void onPointer(float x, float y, String act) {
+                BridgeService.sendPointer(x, y, act);
             }
         });
         setContentView(hud);

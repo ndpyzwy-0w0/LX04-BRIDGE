@@ -374,6 +374,15 @@ def list_monitors() -> list[Monitor]:
     return list(box[0])  # type: ignore[arg-type]
 
 
+def letterbox(src_w: int, src_h: int, dst_w: int = TARGET_W, dst_h: int = TARGET_H) -> tuple[int, int, int, int]:
+    scale = min(dst_w / max(1, src_w), dst_h / max(1, src_h))
+    dest_w = max(1, int(src_w * scale))
+    dest_h = max(1, int(src_h * scale))
+    dest_x = (dst_w - dest_w) // 2
+    dest_y = (dst_h - dest_h) // 2
+    return dest_x, dest_y, dest_w, dest_h
+
+
 def pick_monitor(monitors: list[Monitor], saved_key: str = "") -> Monitor | None:
     if not monitors:
         return None
@@ -438,16 +447,30 @@ class _Grabber:
         if not self.dst_dc or self.frames >= GRABBER_REOPEN_FRAMES:
             self.close()
             self.open()
+        return self.grab_region(
+            monitor.left, monitor.top, monitor.width, monitor.height,
+            quality=quality, max_jpeg=max_jpeg, quality_small=quality_small,
+        )
+
+    def grab_region(
+        self,
+        left: int,
+        top: int,
+        width: int,
+        height: int,
+        quality: int | None = None,
+        max_jpeg: int | None = None,
+        quality_small: int | None = None,
+    ) -> bytes:
+        if not self.dst_dc or self.frames >= GRABBER_REOPEN_FRAMES:
+            self.close()
+            self.open()
         fill = RECT(0, 0, TARGET_W, TARGET_H)
         user32.FillRect(self.dst_dc, ctypes.byref(fill), self.brush)
-        scale = min(TARGET_W / monitor.width, TARGET_H / monitor.height)
-        dest_w = max(1, int(monitor.width * scale))
-        dest_h = max(1, int(monitor.height * scale))
-        dest_x = (TARGET_W - dest_w) // 2
-        dest_y = (TARGET_H - dest_h) // 2
+        dest_x, dest_y, dest_w, dest_h = letterbox(width, height)
         ok = gdi32.StretchBlt(
             self.dst_dc, dest_x, dest_y, dest_w, dest_h,
-            self.src_dc, monitor.left, monitor.top, monitor.width, monitor.height,
+            self.src_dc, left, top, width, height,
             SRCCOPY,
         )
         if not ok:
@@ -455,7 +478,7 @@ class _Grabber:
             self.open()
             ok = gdi32.StretchBlt(
                 self.dst_dc, dest_x, dest_y, dest_w, dest_h,
-                self.src_dc, monitor.left, monitor.top, monitor.width, monitor.height,
+                self.src_dc, left, top, width, height,
                 SRCCOPY,
             )
         if not ok:
@@ -692,6 +715,7 @@ class ScreenSender:
         self._ack = threading.Event()
         self._preset = pick_quality(DEFAULT_QUALITY)
         self._send_s = FRAME_INTERVAL
+        self._paused = False
         self.monitor_key = ""
         self.title = ""
         self.error = ""
@@ -723,6 +747,7 @@ class ScreenSender:
             self._latest_at = 0.0
         self._new_frame.clear()
         self._ack.clear()
+        self._paused = False
         self._alive = True
         self._capture_thread = threading.Thread(
             target=self._capture_loop, args=(chosen.key,), daemon=True, name="lx04-mirror-cap"
@@ -746,6 +771,13 @@ class ScreenSender:
         for thread in threads:
             if thread is not None and thread.is_alive() and thread is not threading.current_thread():
                 thread.join(timeout=1.0)
+
+    def pause(self) -> None:
+        self._paused = True
+        self._ack.set()
+
+    def resume(self) -> None:
+        self._paused = False
 
     def note_ack(self) -> None:
         self._ack.set()
@@ -775,6 +807,9 @@ class ScreenSender:
         try:
             while self._alive:
                 started = time.monotonic()
+                if self._paused:
+                    time.sleep(0.05)
+                    continue
                 with self._slot:
                     waiting = self._latest is not None
                 if waiting:
@@ -818,6 +853,9 @@ class ScreenSender:
 
     def _send_loop(self) -> None:
         while self._alive:
+            if self._paused:
+                time.sleep(0.05)
+                continue
             self._new_frame.wait(timeout=0.2)
             self._new_frame.clear()
             jpeg, _captured_at = self._take()
