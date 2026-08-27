@@ -3,6 +3,7 @@ package com.lx04.pcbridge;
 import android.content.Context;
 import android.graphics.Canvas;
 import android.graphics.Paint;
+import android.graphics.Path;
 import android.graphics.RectF;
 import android.graphics.Typeface;
 import android.util.AttributeSet;
@@ -48,6 +49,11 @@ public class StatusHudView extends View {
     private final Paint dim = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint meterBg = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint meter = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint sparkStroke = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint sparkFill = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Path sparkPath = new Path();
+    private final Path sparkFillPath = new Path();
+    private final float[] sparkBuf = new float[SparkHistory.LEN];
     private final Paint button = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final RectF playRect = new RectF();
     private final RectF micMuteRect = new RectF();
@@ -139,6 +145,10 @@ public class StatusHudView extends View {
         text.setColor(colText);
         meter.setColor(0xFF3DDC97);
         accent.setColor(0xFF3DDC97);
+        sparkStroke.setStyle(Paint.Style.STROKE);
+        sparkStroke.setStrokeCap(Paint.Cap.ROUND);
+        sparkStroke.setStrokeJoin(Paint.Join.ROUND);
+        sparkFill.setStyle(Paint.Style.FILL);
     }
 
     @Override
@@ -467,9 +477,11 @@ public class StatusHudView extends View {
         float subWant = dp(style.subSize(slot));
         boolean hasSub = sub != null && !sub.isEmpty();
         boolean hasFoot = foot != null && !foot.isEmpty();
+        boolean showChart = style.chartOn(slot);
         float barSpace = dp(16);
         float footSpace = hasFoot ? dp(16) : 0;
-        float usableBottom = y + ch - barSpace - footSpace;
+        float chartMin = showChart ? dp(36) : 0;
+        float usableBottom = y + ch - barSpace - footSpace - (showChart ? chartMin + dp(4) : 0);
 
         int titleColor = style.titleColor(slot);
         dim.setColor(titleColor != 0 ? titleColor : colDim);
@@ -543,20 +555,118 @@ public class StatusHudView extends View {
             dim.setTextSize(subWant);
             canvas.drawText(clip(dim, sub, innerW), x + padX, subBase, dim);
         }
-        if (hasFoot) {
-            dim.setTextSize(dp(11));
-            canvas.drawText(clip(dim, foot, innerW), x + padX, y + ch - barSpace - dp(2), dim);
-        }
         canvas.restore();
         dim.setColor(colDim);
 
         float barTop = y + ch - dp(14);
+        float chartBottom = y + ch - barSpace - footSpace - dp(2);
+        if (showChart) {
+            float chartTop = subBottom + dp(6);
+            if (chartBottom - chartTop >= dp(18)) {
+                drawSparkline(canvas, x + dp(10), chartTop, x + cw - dp(10), chartBottom,
+                        style.chartMetric(slot), valueColor);
+            }
+        }
+        if (hasFoot) {
+            dim.setTextSize(dp(11));
+            dim.setColor(colDim);
+            canvas.drawText(clip(dim, foot, innerW), x + padX, y + ch - barSpace - dp(2), dim);
+        }
+
         tmpRect.set(x + dp(10), barTop, x + cw - dp(10), barTop + dp(7));
         canvas.drawRoundRect(tmpRect, dp(4), dp(4), meterBg);
         float fill = Float.isNaN(usage) ? 0.04f : Math.max(0.04f, Math.min(1f, usage / 100f));
         meter.setColor(valueColor);
         tmpRect.right = tmpRect.left + Math.max(dp(6), (cw - dp(20)) * fill);
         canvas.drawRoundRect(tmpRect, dp(4), dp(4), meter);
+    }
+
+    private void drawSparkline(Canvas canvas, float left, float top, float right, float bottom,
+            String metric, int color) {
+        float width = right - left;
+        float height = bottom - top;
+        if (width < dp(12) || height < dp(12)) {
+            return;
+        }
+        sparkStroke.setStrokeWidth(dp(1.5f));
+        sparkStroke.setColor(color);
+        sparkFill.setColor((color & 0x00FFFFFF) | 0x33000000);
+        int n = BridgeService.STATE.sparks.copy(metric, sparkBuf);
+        if (n < 2) {
+            float mid = (top + bottom) / 2f;
+            canvas.drawLine(left, mid, right, mid, sparkStroke);
+            return;
+        }
+        float min = Float.POSITIVE_INFINITY;
+        float max = Float.NEGATIVE_INFINITY;
+        int valid = 0;
+        for (int i = 0; i < n; i++) {
+            float v = sparkBuf[i];
+            if (Float.isNaN(v)) {
+                continue;
+            }
+            valid++;
+            if (v < min) {
+                min = v;
+            }
+            if (v > max) {
+                max = v;
+            }
+        }
+        if (valid < 2) {
+            float mid = (top + bottom) / 2f;
+            canvas.drawLine(left, mid, right, mid, sparkStroke);
+            return;
+        }
+        float lo;
+        float hi;
+        if (SparkHistory.percentScale(metric)) {
+            lo = 0f;
+            hi = 100f;
+        } else if (SparkHistory.tempScale(metric)) {
+            lo = 0f;
+            hi = Math.max(100f, max);
+        } else {
+            float pad = Math.max(1f, (max - min) * 0.15f);
+            lo = min - pad;
+            hi = max + pad;
+            if (lo < 0f && min >= 0f) {
+                lo = 0f;
+            }
+        }
+        if (hi - lo < 1f) {
+            hi = lo + 1f;
+        }
+        sparkPath.reset();
+        sparkFillPath.reset();
+        boolean started = false;
+        float firstX = left;
+        float lastX = left;
+        for (int i = 0; i < n; i++) {
+            float v = sparkBuf[i];
+            if (Float.isNaN(v)) {
+                started = false;
+                continue;
+            }
+            float x = left + width * i / (n - 1f);
+            float y = bottom - ((v - lo) / (hi - lo)) * height;
+            if (!started) {
+                sparkPath.moveTo(x, y);
+                sparkFillPath.moveTo(x, bottom);
+                sparkFillPath.lineTo(x, y);
+                firstX = x;
+                started = true;
+            } else {
+                sparkPath.lineTo(x, y);
+                sparkFillPath.lineTo(x, y);
+            }
+            lastX = x;
+        }
+        sparkFillPath.lineTo(lastX, bottom);
+        sparkFillPath.lineTo(firstX, bottom);
+        sparkFillPath.close();
+        canvas.drawPath(sparkFillPath, sparkFill);
+        canvas.drawPath(sparkPath, sparkStroke);
     }
 
     private void drawPlayMeter(Canvas canvas, BridgeState s, int w) {

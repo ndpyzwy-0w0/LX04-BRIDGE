@@ -52,6 +52,7 @@ final class BridgeState {
     volatile long pcUptime;
     volatile int pcCores;
     final HudStyle hudStyle = new HudStyle();
+    final SparkHistory sparks = new SparkHistory();
 
     boolean hasPcStats() {
         return pcStatsValid && clientConnected && pcStatsAt != 0
