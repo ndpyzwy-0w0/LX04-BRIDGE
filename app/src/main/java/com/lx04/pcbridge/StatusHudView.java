@@ -57,8 +57,19 @@ public class StatusHudView extends View {
     private float pulse;
     private boolean lightTheme;
     private boolean wasMirroring;
+    private boolean muteRevealTap;
     private long mirrorInteractAt;
+    private long muteInteractAt;
+    private static final long MUTE_SHOW_MS = 3500;
+    private static final long MUTE_FADE_MS = 280;
     private final Runnable hideMirrorBar = new Runnable() {
+        @Override
+        public void run() {
+            invalidate();
+            postInvalidateOnAnimation();
+        }
+    };
+    private final Runnable hideMuteBar = new Runnable() {
         @Override
         public void run() {
             invalidate();
@@ -177,6 +188,7 @@ public class StatusHudView extends View {
             canvas.drawText(clip(dim, mid, w - dp(22) - dp(110)), dp(110), dp(27), dim);
         }
 
+        float muteAlpha = muteBarAlpha();
         float muteTop = h - dp(64);
         float muteGap = dp(10);
         micMuteRect.set(dp(18), muteTop, w / 2f - muteGap / 2f, h - dp(12));
@@ -189,9 +201,12 @@ public class StatusHudView extends View {
         }
 
         drawMuteButton(canvas, micMuteRect, s.micMuted,
-                s.micMuted ? "麦克风已静音" : "麦克风");
+                s.micMuted ? "麦克风已静音" : "麦克风", muteAlpha);
         drawMuteButton(canvas, spkMuteRect, s.spkMuted,
-                s.spkMuted ? "扬声器已静音" : "扬声器");
+                s.spkMuted ? "扬声器已静音" : "扬声器", muteAlpha);
+        if (muteAlpha > 0.02f && muteAlpha < 1f) {
+            postInvalidateOnAnimation();
+        }
         if (editor.isOpen()) {
             editor.draw(canvas, w, h, lightTheme);
         } else {
@@ -205,6 +220,16 @@ public class StatusHudView extends View {
         }
     }
 
+    void onMuteAutoHideChanged() {
+        if (BridgeService.STATE.autoHideMute) {
+            noteMuteInteract();
+        } else {
+            touchHandler.removeCallbacks(hideMuteBar);
+            muteInteractAt = 0;
+            invalidate();
+        }
+    }
+
     void handleBack() {
         if (editor.isOpen()) {
             editor.close();
@@ -214,6 +239,46 @@ public class StatusHudView extends View {
             noteMirrorInteract();
         }
         menu.handleBack();
+    }
+
+    private void noteMuteInteract() {
+        muteInteractAt = android.os.SystemClock.uptimeMillis();
+        touchHandler.removeCallbacks(hideMuteBar);
+        if (BridgeService.STATE.autoHideMute) {
+            touchHandler.postDelayed(hideMuteBar, MUTE_SHOW_MS);
+        }
+        invalidate();
+    }
+
+    private boolean muteButtonsHidden() {
+        return BridgeService.STATE.autoHideMute && muteBarAlpha() < 0.15f;
+    }
+
+    private float muteBarAlpha() {
+        if (!BridgeService.STATE.autoHideMute) {
+            return 1f;
+        }
+        if (menu.blocksHud() || editor.isOpen()) {
+            muteInteractAt = android.os.SystemClock.uptimeMillis();
+            touchHandler.removeCallbacks(hideMuteBar);
+            touchHandler.postDelayed(hideMuteBar, MUTE_SHOW_MS);
+            return 1f;
+        }
+        if (muteInteractAt == 0) {
+            muteInteractAt = android.os.SystemClock.uptimeMillis();
+            touchHandler.removeCallbacks(hideMuteBar);
+            touchHandler.postDelayed(hideMuteBar, MUTE_SHOW_MS);
+            return 1f;
+        }
+        long idle = android.os.SystemClock.uptimeMillis() - muteInteractAt;
+        if (idle < MUTE_SHOW_MS) {
+            return 1f;
+        }
+        float fade = (idle - MUTE_SHOW_MS) / (float) MUTE_FADE_MS;
+        if (fade >= 1f) {
+            return 0f;
+        }
+        return 1f - fade;
     }
 
     private void noteMirrorInteract() {
@@ -300,13 +365,20 @@ public class StatusHudView extends View {
         dim.setColor(colDim);
     }
 
-    private void drawMuteButton(Canvas canvas, RectF rect, boolean muted, String label) {
+    private void drawMuteButton(Canvas canvas, RectF rect, boolean muted, String label, float alpha) {
+        if (alpha <= 0.02f) {
+            return;
+        }
+        int a = Math.max(1, Math.min(255, (int) (255 * alpha)));
         button.setColor(muted ? colButtonMute : colButton);
+        button.setAlpha(a);
         canvas.drawRoundRect(rect, dp(12), dp(12), button);
+        button.setAlpha(255);
         text.setTextSize(dp(16));
-        text.setColor(colText);
+        text.setColor((a << 24) | (colText & 0x00FFFFFF));
         float tw = text.measureText(label);
         canvas.drawText(label, rect.centerX() - tw / 2f, rect.top + rect.height() * 0.66f, text);
+        text.setColor(colText);
     }
 
     private void drawClassic(Canvas canvas, BridgeState s, int w, int h, float muteTop) {
@@ -522,6 +594,9 @@ public class StatusHudView extends View {
         if (action == MotionEvent.ACTION_DOWN) {
             if (BridgeService.STATE.screenMirror) {
                 noteMirrorInteract();
+            } else if (BridgeService.STATE.autoHideMute) {
+                muteRevealTap = muteButtonsHidden();
+                noteMuteInteract();
             }
             menu.onDown(x, y, w, event);
             if (menu.blocksHud()) {
@@ -551,6 +626,7 @@ public class StatusHudView extends View {
             return true;
         }
         if (action == MotionEvent.ACTION_CANCEL) {
+            muteRevealTap = false;
             menu.onCancel();
             touchHandler.removeCallbacks(longPress);
             pressSlot = -1;
@@ -560,12 +636,17 @@ public class StatusHudView extends View {
             touchHandler.removeCallbacks(longPress);
             pressSlot = -1;
             if (menu.onUp(x, y, w, event)) {
+                muteRevealTap = false;
                 return true;
             }
             if (menu.blocksHud()) {
                 return true;
             }
             if (BridgeService.STATE.screenMirror) {
+                return true;
+            }
+            if (muteRevealTap) {
+                muteRevealTap = false;
                 return true;
             }
             if (micMuteRect.contains(x, y)) {

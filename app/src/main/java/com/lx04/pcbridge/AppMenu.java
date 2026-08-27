@@ -31,6 +31,8 @@ final class AppMenu {
     private final RectF backRect = new RectF();
     private final RectF darkRect = new RectF();
     private final RectF lightRect = new RectF();
+    private final RectF autoHideOffRect = new RectF();
+    private final RectF autoHideOnRect = new RectF();
     private final RectF settingsPanel = new RectF();
 
     private int page = PAGE_HUD;
@@ -205,6 +207,22 @@ final class AppMenu {
         dim.setTextSize(dp(12));
         canvas.drawText("与电脑上位机的「浅色」开关同步。",
                 settingsPanel.left + dp(18), lightRect.bottom + dp(28), dim);
+
+        dim.setTextSize(dp(13));
+        canvas.drawText("静音按钮", settingsPanel.left + dp(18), lightRect.bottom + dp(52), dim);
+
+        float hideTop = lightRect.bottom + dp(64);
+        autoHideOffRect.set(settingsPanel.left + dp(18), hideTop,
+                settingsPanel.left + dp(18) + btnW, hideTop + btnH);
+        autoHideOnRect.set(autoHideOffRect.right + gap, hideTop,
+                autoHideOffRect.right + gap + btnW, hideTop + btnH);
+        boolean autoHide = BridgeService.STATE.autoHideMute;
+        drawModeButton(canvas, autoHideOffRect, "常显", !autoHide);
+        drawModeButton(canvas, autoHideOnRect, "自动隐藏", autoHide);
+
+        dim.setTextSize(dp(12));
+        canvas.drawText("开启后空闲会隐藏，点屏幕可再次呼出。",
+                settingsPanel.left + dp(18), autoHideOnRect.bottom + dp(22), dim);
     }
 
     private void drawModeButton(Canvas canvas, RectF rect, String label, boolean selected) {
@@ -325,6 +343,14 @@ final class AppMenu {
                 setLight(true);
                 return true;
             }
+            if (autoHideOffRect.contains(x, y)) {
+                setAutoHideMute(false);
+                return true;
+            }
+            if (autoHideOnRect.contains(x, y)) {
+                setAutoHideMute(true);
+                return true;
+            }
             return true;
         }
         return false;
@@ -375,6 +401,12 @@ final class AppMenu {
 
     private void setLight(boolean wantLight) {
         BridgeService.setLightTheme(view.getContext(), wantLight);
+        view.invalidate();
+    }
+
+    private void setAutoHideMute(boolean on) {
+        BridgeService.setAutoHideMute(view.getContext(), on);
+        view.onMuteAutoHideChanged();
         view.invalidate();
     }
 

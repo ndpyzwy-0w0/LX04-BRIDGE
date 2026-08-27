@@ -68,6 +68,7 @@ public class MainActivity extends Activity {
         BridgeService.STATE.upsideDown = DisplayPrefs.isUpsideDown(this);
         BridgeService.STATE.lightTheme = DisplayPrefs.isLightTheme(this);
         BridgeService.STATE.screenMirror = DisplayPrefs.isScreenMirror(this);
+        BridgeService.STATE.autoHideMute = DisplayPrefs.isAutoHideMute(this);
         DisplayPrefs.loadHudStyle(this, BridgeService.STATE.hudStyle);
         applyDisplayRotation(BridgeService.STATE.upsideDown);
         applyChromeColors(BridgeService.STATE.lightTheme);
