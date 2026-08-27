@@ -52,6 +52,24 @@ user32.MsgWaitForMultipleObjects.argtypes = [
     wintypes.DWORD, ctypes.c_void_p, wintypes.BOOL, wintypes.DWORD, wintypes.DWORD
 ]
 user32.MsgWaitForMultipleObjects.restype = wintypes.DWORD
+user32.SetWinEventHook.argtypes = [
+    wintypes.DWORD,
+    wintypes.DWORD,
+    wintypes.HMODULE,
+    ctypes.c_void_p,
+    wintypes.DWORD,
+    wintypes.DWORD,
+    wintypes.DWORD,
+]
+user32.SetWinEventHook.restype = wintypes.HANDLE
+user32.UnhookWinEvent.argtypes = [wintypes.HANDLE]
+user32.UnhookWinEvent.restype = wintypes.BOOL
+kernel32.CreateEventW.argtypes = [ctypes.c_void_p, wintypes.BOOL, wintypes.BOOL, wintypes.LPCWSTR]
+kernel32.CreateEventW.restype = wintypes.HANDLE
+kernel32.SetEvent.argtypes = [wintypes.HANDLE]
+kernel32.SetEvent.restype = wintypes.BOOL
+kernel32.ResetEvent.argtypes = [wintypes.HANDLE]
+kernel32.ResetEvent.restype = wintypes.BOOL
 kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
 kernel32.OpenProcess.restype = wintypes.HANDLE
 kernel32.QueryFullProcessImageNameW.argtypes = [
@@ -75,10 +93,18 @@ MONITOR_DEFAULTTONEAREST = 2
 PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 WM_CLOSE = 0x0010
 COINIT_APARTMENTTHREADED = 0x2
-POLL_IDLE_S = 0.07
-POLL_LIVE_S = 0.10
+POLL_IDLE_S = 0.04
+POLL_LIVE_S = 0.05
+HOLD_OFF_S = 0.55
 PM_REMOVE = 0x0001
 QS_ALLINPUT = 0x04FF
+WAIT_OBJECT_0 = 0
+WAIT_TIMEOUT = 0x102
+EVENT_OBJECT_CREATE = 0x8000
+EVENT_OBJECT_SHOW = 0x8002
+OBJID_WINDOW = 0
+WINEVENT_OUTOFCONTEXT = 0x0000
+WINEVENT_SKIPOWNPROCESS = 0x0002
 INPUT_MOUSE = 0
 MOUSEEVENTF_MOVE = 0x0001
 MOUSEEVENTF_LEFTDOWN = 0x0002
@@ -211,6 +237,27 @@ class MSG(ctypes.Structure):
         ("time", wintypes.DWORD),
         ("pt", wintypes.POINT),
     ]
+
+
+WINEVENTPROC = ctypes.WINFUNCTYPE(
+    None,
+    wintypes.HANDLE,
+    wintypes.DWORD,
+    wintypes.HWND,
+    wintypes.LONG,
+    wintypes.LONG,
+    wintypes.DWORD,
+    wintypes.DWORD,
+)
+user32.SetWinEventHook.argtypes = [
+    wintypes.DWORD,
+    wintypes.DWORD,
+    wintypes.HMODULE,
+    WINEVENTPROC,
+    wintypes.DWORD,
+    wintypes.DWORD,
+    wintypes.DWORD,
+]
 
 
 class MOUSEINPUT(ctypes.Structure):
@@ -348,42 +395,50 @@ def _looks_like_toast(
     return bool(ex_style & WS_EX_TOPMOST) and proc in TOAST_PROCESSES
 
 
+def _hwnd_is_toast(hwnd: int, our_pid: int = 0, require_visible: bool = True) -> bool:
+    if not hwnd or not user32.IsWindow(hwnd):
+        return False
+    if require_visible:
+        if not user32.IsWindowVisible(hwnd) or user32.IsIconic(hwnd) or _cloaked(hwnd):
+            return False
+    pid = wintypes.DWORD(0)
+    user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+    if our_pid and int(pid.value) == our_pid:
+        return False
+    class_name = _class_name(hwnd)
+    if class_name in SKIP_CLASSES:
+        return False
+    rect = screen_mirror.RECT()
+    if not user32.GetWindowRect(hwnd, ctypes.byref(rect)):
+        return False
+    left, top, right, bottom = int(rect.left), int(rect.top), int(rect.right), int(rect.bottom)
+    width, height = right - left, bottom - top
+    if width < 120 or height < 32:
+        return False
+    work = _work_area(rect)
+    if work is None:
+        return False
+    if not _in_toast_dock(left, top, right, bottom, work):
+        return False
+    style = int(user32.GetWindowLongW(hwnd, GWL_STYLE) or 0)
+    ex_style = int(user32.GetWindowLongW(hwnd, GWL_EXSTYLE) or 0)
+    if ex_style & WS_EX_TRANSPARENT:
+        return False
+    if require_visible and not (style & WS_VISIBLE):
+        return False
+    proc = _process_name(int(pid.value))
+    title = _title(hwnd)
+    return _looks_like_toast(class_name, title, width, height, work, ex_style, proc)
+
+
 def find_toast_hwnds() -> list[int]:
     screen_mirror._thread_dpi()
     found: list[int] = []
     our_pid = os.getpid()
 
     def _enum(hwnd, _lparam):
-        if not user32.IsWindowVisible(hwnd) or user32.IsIconic(hwnd) or _cloaked(hwnd):
-            return 1
-        pid = wintypes.DWORD(0)
-        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
-        if int(pid.value) == our_pid:
-            return 1
-        class_name = _class_name(hwnd)
-        if class_name in SKIP_CLASSES:
-            return 1
-        rect = screen_mirror.RECT()
-        if not user32.GetWindowRect(hwnd, ctypes.byref(rect)):
-            return 1
-        left, top, right, bottom = int(rect.left), int(rect.top), int(rect.right), int(rect.bottom)
-        width, height = right - left, bottom - top
-        work = _work_area(rect)
-        if work is None:
-            return 1
-        if not _in_toast_dock(left, top, right, bottom, work):
-            return 1
-        style = int(user32.GetWindowLongW(hwnd, GWL_STYLE) or 0)
-        ex_style = int(user32.GetWindowLongW(hwnd, GWL_EXSTYLE) or 0)
-        if ex_style & WS_EX_TRANSPARENT:
-            return 1
-        if not (style & WS_VISIBLE):
-            return 1
-        proc = _process_name(int(pid.value))
-        title = _title(hwnd)
-        if not _looks_like_toast(class_name, title, width, height, work, ex_style, proc):
-            return 1
-        found.append(int(hwnd))
+        if _hwnd_is_toast(int(hwnd), our_pid):
+            found.append(int(hwnd))
         return 1
 
     cb = WNDENUMPROC(_enum)
@@ -646,9 +701,15 @@ def read_toast(el, uia) -> ToastContent | None:
     )
 
 
-def _toast_elements(automation, uia) -> list:
+def _toast_elements(automation, uia, hwnd_hint: int = 0, enum_windows: bool = False) -> list:
+    found = []
+    if hwnd_hint:
+        el = _element_from_hwnd(automation, hwnd_hint)
+        if el is not None and _live_toast(el):
+            found.append(el)
+            return found
     found = [el for el in _find_named_toast_windows(automation, uia) if _live_toast(el)]
-    if found:
+    if found or not enum_windows:
         return found
     seen = {_hwnd_of(el) for el in found}
     for hwnd in find_toast_hwnds():
@@ -661,10 +722,10 @@ def _toast_elements(automation, uia) -> list:
     return found
 
 
-def read_current_toast() -> ToastContent | None:
+def read_current_toast(hwnd_hint: int = 0, enum_windows: bool = False) -> ToastContent | None:
     screen_mirror._thread_dpi()
     automation, uia = _auto()
-    for el in _toast_elements(automation, uia):
+    for el in _toast_elements(automation, uia, hwnd_hint, enum_windows):
         content = read_toast(el, uia)
         if content is not None and (content.title or content.body or content.buttons):
             return content
@@ -696,9 +757,9 @@ def _find_button(el, uia, label: str, chrome: bool = False):
     return None
 
 
-def invoke_toast_button(label: str) -> bool:
+def invoke_toast_button(label: str, hwnd_hint: int = 0) -> bool:
     automation, uia = _auto()
-    for el in _toast_elements(automation, uia):
+    for el in _toast_elements(automation, uia, hwnd_hint, enum_windows=True):
         btn = _find_button(el, uia, label)
         if btn is not None and _invoke(btn, uia):
             return True
@@ -708,7 +769,7 @@ def invoke_toast_button(label: str) -> bool:
 def dismiss_toasts() -> None:
     try:
         automation, uia = _auto()
-        for el in _toast_elements(automation, uia):
+        for el in _toast_elements(automation, uia, enum_windows=True):
             for chrome in (
                 "将此通知移动到通知中心",
                 "Move this notification to Notification Center",
@@ -730,16 +791,23 @@ def dismiss_toasts() -> None:
 
 
 class ToastSender:
-    def __init__(self, on_change=None) -> None:
+    def __init__(self, on_change=None, on_log=None) -> None:
         self.on_change = on_change
+        self.on_log = on_log
         self._alive = False
         self._showing = False
         self._thread: threading.Thread | None = None
         self._lock = threading.Lock()
         self._jobs: queue.Queue[tuple[str, str]] = queue.Queue()
         self._content: ToastContent | None = None
+        self._last_buttons: list[ToastButtonInfo] = []
         self._fingerprint: tuple | None = None
         self._holdoff = 0.0
+        self._wake = None
+        self._hint_hwnd = 0
+        self._idle_n = 0
+        self._hooks: list = []
+        self._winevent_proc = None
         self.title = ""
         self.error = ""
 
@@ -760,6 +828,9 @@ class ToastSender:
         self._showing = False
         self._fingerprint = None
         self._holdoff = 0.0
+        self._hint_hwnd = 0
+        self._last_buttons = []
+        self._idle_n = 0
         self._jobs = queue.Queue()
         self._alive = True
         self._thread = threading.Thread(target=self._loop, daemon=True, name="lx04-toast")
@@ -769,41 +840,139 @@ class ToastSender:
         was_showing = self._showing
         self._alive = False
         self._showing = False
+        self._signal()
         thread = self._thread
         self._thread = None
         if thread is not None and thread is not threading.current_thread() and thread.is_alive():
             thread.join(timeout=1.0)
+        if thread is not None and thread.is_alive():
+            self._unhook()
+            self._close_wake()
         with self._lock:
             self._content = None
             self._fingerprint = None
+            self._last_buttons = []
         if was_showing:
             self._emit(False, None)
 
     def handle_event(self, data: dict) -> None:
         cmd = str(data.get("cmd") or "")
         if cmd == "toast_action":
-            if self._showing:
-                self.invoke(str(data.get("id") or data.get("label") or ""))
+            label = str(data.get("label") or data.get("id") or "")
+            resolved = self._label_for(label)
+            self._note("音箱点了按钮「" + (resolved or label or "?") + "」")
+            if resolved:
+                self._jobs.put(("invoke", resolved))
+                self._signal()
+            else:
+                self._note("没有对应的系统通知按钮，无法点按")
+            self._hide()
         elif cmd == "toast_dismiss":
+            self._note("音箱关闭了弹窗页")
             self.dismiss()
 
     def invoke(self, button_id: str) -> None:
         if button_id:
             self._jobs.put(("invoke", button_id))
+            self._signal()
 
     def dismiss(self) -> None:
         self._hide()
         self._jobs.put(("dismiss", ""))
+        self._signal()
+
+    def _label_for(self, token: str) -> str:
+        token = (token or "").strip()
+        with self._lock:
+            buttons = list(self._content.buttons if self._content is not None else self._last_buttons)
+        for btn in buttons:
+            if btn.id == token or btn.label == token:
+                return btn.label
+        return token
 
     def _hide(self) -> None:
-        self._holdoff = time.monotonic() + 0.7
+        self._holdoff = time.monotonic() + HOLD_OFF_S
         if not self._showing:
             return
         self._showing = False
         with self._lock:
+            if self._content is not None:
+                self._last_buttons = list(self._content.buttons)
             self._content = None
             self._fingerprint = None
         self._emit(False, None)
+
+    def _note(self, line: str) -> None:
+        cb = self.on_log
+        if cb is None:
+            self.error = line
+            return
+        try:
+            cb(line)
+        except Exception:
+            self.error = line
+
+    def _signal(self) -> None:
+        handle = self._wake
+        if handle:
+            kernel32.SetEvent(handle)
+
+    def _close_wake(self) -> None:
+        handle = self._wake
+        self._wake = None
+        if handle:
+            kernel32.CloseHandle(handle)
+
+    def _unhook(self) -> None:
+        for hook in self._hooks:
+            try:
+                user32.UnhookWinEvent(hook)
+            except Exception:
+                pass
+        self._hooks = []
+        self._winevent_proc = None
+
+    def _on_win_event(self, _hook, _event, hwnd, id_object, id_child, _thread, _time) -> None:
+        try:
+            if not self._alive or not hwnd or int(id_object) != OBJID_WINDOW or int(id_child) != 0:
+                return
+            handle = int(hwnd)
+            if not _hwnd_is_toast(handle, os.getpid(), require_visible=False):
+                return
+            self._hint_hwnd = handle
+            self._signal()
+        except Exception:
+            pass
+
+    def _hook_windows(self) -> None:
+        proc = WINEVENTPROC(self._on_win_event)
+        self._winevent_proc = proc
+        flags = WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS
+        hook = user32.SetWinEventHook(
+            EVENT_OBJECT_CREATE, EVENT_OBJECT_SHOW, None, proc, 0, 0, flags
+        )
+        if hook:
+            self._hooks.append(hook)
+
+    def _wait(self, seconds: float) -> None:
+        deadline = time.monotonic() + max(0.0, seconds)
+        handle = self._wake
+        while self._alive and time.monotonic() < deadline:
+            if not self._jobs.empty():
+                return
+            remain = int((deadline - time.monotonic()) * 1000)
+            if remain <= 0:
+                return
+            wait_ms = min(remain, 25)
+            if handle:
+                slot = wintypes.HANDLE(int(handle))
+                user32.MsgWaitForMultipleObjects(1, ctypes.byref(slot), False, wait_ms, QS_ALLINPUT)
+                kernel32.ResetEvent(handle)
+            else:
+                user32.MsgWaitForMultipleObjects(0, None, False, wait_ms, QS_ALLINPUT)
+            _pump()
+            if self._hint_hwnd:
+                return
 
     def _emit(self, showing: bool, content: ToastContent | None) -> None:
         cb = self.on_change
@@ -823,10 +992,13 @@ class ToastSender:
             except Exception:
                 pass
         screen_mirror._thread_dpi()
+        self._wake = kernel32.CreateEventW(None, True, False, None)
         try:
             _auto()
+            self._hook_windows()
         except Exception as exc:
             self.error = "无法初始化系统通知接口: " + str(exc)
+            self._note(self.error)
         try:
             while self._alive:
                 started = time.monotonic()
@@ -839,29 +1011,31 @@ class ToastSender:
                     try:
                         if kind == "invoke":
                             label = payload
-                            with self._lock:
-                                content = self._content
-                            if content is not None:
-                                for btn in content.buttons:
-                                    if btn.id == payload or btn.label == payload:
-                                        label = btn.label
-                                        break
-                            if label and invoke_toast_button(label):
+                            hint = self._hint_hwnd
+                            self._note("正在点按电脑通知「" + label + "」")
+                            ok = bool(label) and invoke_toast_button(label, hint)
+                            if ok:
                                 invoked = True
-                                self.error = ""
-                            elif label:
-                                self.error = "未能点按系统通知按钮「" + label + "」"
+                                self._note("已点按电脑通知「" + label + "」")
+                            else:
+                                self._note("未能点按电脑通知「" + label + "」")
                         elif kind == "dismiss":
                             dismiss_toasts()
+                            self._note("已关闭电脑通知")
                     except Exception as exc:
-                        self.error = str(exc)
+                        self._note("点按电脑通知出错: " + str(exc))
                 if invoked:
                     self._hide()
-                    _pump_for(0.05)
+                    self._hint_hwnd = 0
+                    _pump_for(0.03)
+                hint = self._hint_hwnd
+                self._hint_hwnd = 0
+                self._idle_n += 1
+                enum_windows = bool(hint) or (self._idle_n % 10 == 0)
                 try:
-                    content = read_current_toast()
+                    content = read_current_toast(hint, enum_windows)
                 except Exception as exc:
-                    self.error = str(exc)
+                    self._note("读取系统通知失败: " + str(exc))
                     content = None
                 if content is not None and time.monotonic() < self._holdoff:
                     content = None
@@ -870,12 +1044,13 @@ class ToastSender:
                         self._hide()
                     remain = POLL_IDLE_S - (time.monotonic() - started)
                     if remain > 0 and self._alive:
-                        _pump_for(remain)
+                        self._wait(remain)
                     continue
                 fp = content.fingerprint()
                 self.title = content.title
                 with self._lock:
                     self._content = content
+                    self._last_buttons = list(content.buttons)
                     changed = fp != self._fingerprint
                     self._fingerprint = fp
                 if not self._showing:
@@ -885,8 +1060,10 @@ class ToastSender:
                     self._emit(True, content)
                 remain = POLL_LIVE_S - (time.monotonic() - started)
                 if remain > 0 and self._alive:
-                    _pump_for(remain)
+                    self._wait(remain)
         finally:
+            self._unhook()
+            self._close_wake()
             try:
                 ole32.CoUninitialize()
             except Exception:

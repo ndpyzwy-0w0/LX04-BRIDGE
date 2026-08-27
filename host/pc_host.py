@@ -54,6 +54,7 @@ class BridgeClient:
         self.on_event = on_event
         self.sock: socket.socket | None = None
         self.video_sock: socket.socket | None = None
+        self.toast_sock: socket.socket | None = None
         self.alive = False
         self.seq = 0
         self.hello: dict = {}
@@ -61,8 +62,10 @@ class BridgeClient:
         self.frames = 0
         self._thread: threading.Thread | None = None
         self._video_thread: threading.Thread | None = None
+        self._toast_thread: threading.Thread | None = None
         self._send_lock = threading.Lock()
         self._video_lock = threading.Lock()
+        self._toast_lock = threading.Lock()
         self._seq_lock = threading.Lock()
         self.generation = 0
 
@@ -98,6 +101,33 @@ class BridgeClient:
         self._video_thread = threading.Thread(target=self._video_loop, args=(sock,), daemon=True, name="lx04-video-ack")
         self._video_thread.start()
 
+    def connect_toast(self, host: str, port: int) -> bool:
+        self.close_toast()
+        try:
+            sock = socket.create_connection((host, port), timeout=5)
+            sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+            try:
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 8 * 1024)
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 8 * 1024)
+            except OSError:
+                pass
+            sock.settimeout(None)
+        except OSError:
+            return False
+        self.toast_sock = sock
+        self._toast_thread = threading.Thread(target=self._toast_loop, args=(sock,), daemon=True, name="lx04-toast-ch")
+        self._toast_thread.start()
+        return True
+
+    def close_toast(self) -> None:
+        sock = self.toast_sock
+        self.toast_sock = None
+        if sock is not None:
+            try:
+                sock.close()
+            except OSError:
+                pass
+
     def close_video(self) -> None:
         sock = self.video_sock
         self.video_sock = None
@@ -110,6 +140,7 @@ class BridgeClient:
     def close(self) -> None:
         self.alive = False
         self.close_video()
+        self.close_toast()
         sock = self.sock
         self.sock = None
         if sock is not None:
@@ -122,6 +153,25 @@ class BridgeClient:
         payload = {"cmd": cmd}
         payload.update(fields)
         self._send(protocol.encode_json(protocol.CONTROL, payload, seq=self._next_seq()))
+
+    def send_toast(self, cmd: str, **fields) -> None:
+        payload = {"cmd": cmd}
+        payload.update(fields)
+        data = protocol.encode_json(protocol.CONTROL, payload, seq=self._next_seq())
+        sock = self.toast_sock
+        if sock is not None:
+            try:
+                with self._toast_lock:
+                    if self.toast_sock is not sock:
+                        raise OSError("toast socket replaced")
+                    sock.sendall(data)
+                return
+            except OSError:
+                self.close_toast()
+        self._send(data)
+
+    def toast_channel(self) -> str:
+        return "17892" if self.toast_sock is not None else "17890"
 
     def send_file(self, jpeg: bytes, slot: int) -> None:
         if not jpeg or len(jpeg) > protocol.MAX_PAYLOAD:
@@ -163,6 +213,25 @@ class BridgeClient:
             pass
         if sock is self.video_sock:
             self.close_video()
+
+    def _toast_loop(self, sock: socket.socket) -> None:
+        try:
+            while self.alive and sock is self.toast_sock:
+                header = _read_exact(sock, protocol.HEADER.size)
+                decoded = protocol.try_decode_header(header)
+                if decoded is None:
+                    break
+                msg_type, _flags, _seq, _timestamp_ms, length = decoded
+                payload = _read_exact(sock, length) if length else b""
+                if msg_type == protocol.EVENT:
+                    try:
+                        self.on_event("event", json.loads(payload.decode("utf-8")) if payload else {})
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+        if sock is self.toast_sock:
+            self.close_toast()
 
     def _next_seq(self) -> int:
         with self._seq_lock:
@@ -336,7 +405,7 @@ class HostApp:
         self._monitors: list[screen_mirror.Monitor] = []
         self.mirror = screen_mirror.ScreenSender(self._send_mirror_frame)
         self._mirror_logged = False
-        self.toast = toast_mirror.ToastSender(self._on_toast_change)
+        self.toast = toast_mirror.ToastSender(self._on_toast_change, self._on_toast_log)
         self._toast_logged = False
         self.inject_var = tk.StringVar()
         self.spk_dev_var = tk.StringVar()
@@ -902,28 +971,44 @@ class HostApp:
             return
         self.client.send_video(jpeg)
 
-    def _on_toast_change(self, showing: bool, content) -> None:
+    def _on_toast_log(self, line: str) -> None:
         try:
-            self.root.after(0, lambda s=showing, c=content: self._apply_toast_change(s, c))
+            self.root.after(0, lambda l=line: self._log(l))
         except Exception:
             pass
 
-    def _apply_toast_change(self, showing: bool, content) -> None:
-        if not self.connected:
-            return
+    def _on_toast_change(self, showing: bool, content) -> None:
+        if self.connected:
+            try:
+                if showing:
+                    payload = content.as_control() if content is not None else {"title": "系统弹窗"}
+                    self.client.send_toast("toast_overlay", on=True, **payload)
+                else:
+                    self.client.send_toast("toast_overlay", on=False)
+            except Exception:
+                pass
+        try:
+            self.root.after(0, lambda s=showing, c=content: self._apply_toast_ui(s, c))
+        except Exception:
+            pass
+
+    def _apply_toast_ui(self, showing: bool, content) -> None:
         if showing:
             self.mirror.pause()
-            payload = content.as_control() if content is not None else {"title": "系统弹窗"}
-            self.client.send_control("toast_overlay", on=True, **payload)
-            if not self._toast_logged:
-                self._toast_logged = True
-                title = ""
-                if content is not None:
-                    title = content.title or content.app
-                self._log("系统弹窗已同步到音箱" + ((": " + title) if title else ""))
+            title = ""
+            buttons = ""
+            if content is not None:
+                title = content.title or content.app
+                if content.buttons:
+                    buttons = "  按钮[" + "][".join(b.label for b in content.buttons) + "]"
+            fp = (title, buttons)
+            if fp != getattr(self, "_toast_ui_fp", None):
+                self._toast_ui_fp = fp
+                via = self.client.toast_channel()
+                self._log("系统弹窗已同步到音箱（" + via + "）" + ((": " + title) if title else "") + buttons)
             return
+        self._toast_ui_fp = None
         self._toast_logged = False
-        self.client.send_control("toast_overlay", on=False)
         self.mirror.resume()
 
     def _on_toast_mirror_change(self) -> None:
@@ -932,7 +1017,8 @@ class HostApp:
         self._save_routes()
         self._sync_toast_mirror()
         if self.toast_mirror.get():
-            self._log("已开启系统弹窗同步：系统通知的文字和按钮会显示在音箱上，点按即操作电脑通知。")
+            via = self.client.toast_channel() if self.connected else "17892"
+            self._log("已开启系统弹窗同步（独立通道 " + via + "）：系统通知的文字和按钮会显示在音箱上，点按即操作电脑通知。")
         else:
             self._log("已关闭系统弹窗同步")
 
@@ -945,7 +1031,7 @@ class HostApp:
         self._toast_logged = False
         if was_showing and self.connected:
             try:
-                self.client.send_control("toast_overlay", on=False)
+                self.client.send_toast("toast_overlay", on=False)
             except Exception:
                 pass
         self.mirror.resume()
@@ -1512,6 +1598,16 @@ class HostApp:
                     self.client.connect_video("127.0.0.1", protocol.VIDEO_PORT)
                 except Exception:
                     pass
+                toast_ok = False
+                for toast_try in range(4):
+                    if self.client.connect_toast("127.0.0.1", protocol.TOAST_PORT):
+                        toast_ok = True
+                        break
+                    time.sleep(0.12 * (toast_try + 1))
+                if toast_ok:
+                    self._log("系统弹窗走独立通道 17892")
+                else:
+                    self._log("系统弹窗通道 17892 未接通，暂走 17890")
                 return
             except Exception as exc:
                 last_err = exc
@@ -1570,6 +1666,10 @@ class HostApp:
                         self.client.connect_video("127.0.0.1", protocol.VIDEO_PORT)
                     except Exception:
                         pass
+                    for toast_try in range(4):
+                        if self.client.connect_toast("127.0.0.1", protocol.TOAST_PORT):
+                            break
+                        time.sleep(0.12 * (toast_try + 1))
                     if not self._session:
                         self.client.close()
                         self._reviving = False
@@ -1654,10 +1754,17 @@ class HostApp:
         if kind == "event":
             data = data if isinstance(data, dict) else {}
             cmd = str(data.get("cmd") or "")
+            if cmd == "toast_ack":
+                title = str(data.get("title") or "")
+                if data.get("on"):
+                    self._on_toast_log("音箱已显示弹窗" + (("「" + title + "」") if title else ""))
+                else:
+                    self._on_toast_log("音箱已退出弹窗页")
+                return
             if cmd == "toast_dismiss":
                 self._toast_logged = False
                 try:
-                    self.client.send_control("toast_overlay", on=False)
+                    self.client.send_toast("toast_overlay", on=False)
                 except Exception:
                     pass
                 self.mirror.resume()

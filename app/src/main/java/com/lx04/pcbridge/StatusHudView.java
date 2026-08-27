@@ -22,7 +22,7 @@ public class StatusHudView extends View {
 
         void onPointer(float x, float y, String act);
 
-        void onToastAction(String id);
+        void onToastAction(String id, String label);
 
         void onToastDismiss();
     }
@@ -1026,8 +1026,10 @@ public class StatusHudView extends View {
                 int btn = toastButtonAt(x, y);
                 if (toastPressBtn >= 0 && btn == toastPressBtn && listener != null) {
                     String[] ids = BridgeService.STATE.toastButtonIds;
+                    String[] labels = BridgeService.STATE.toastButtonLabels;
                     String id = (ids != null && btn < ids.length) ? ids[btn] : String.valueOf(btn);
-                    listener.onToastAction(id);
+                    String label = (labels != null && btn < labels.length) ? labels[btn] : "";
+                    listener.onToastAction(id, label);
                     clearToastOverlay();
                 } else if (toastPressOutside && !toastCard.contains(x, y) && listener != null) {
                     listener.onToastDismiss();

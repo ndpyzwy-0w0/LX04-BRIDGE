@@ -22,6 +22,7 @@ public class BridgeService extends Service {
     private AudioPlayback playback;
     private TcpBridgeServer server;
     private TcpVideoServer videoServer;
+    private TcpToastServer toastServer;
     private UsbMonitor usbMonitor;
     private PowerManager.WakeLock wakeLock;
     private long lastAudioMs;
@@ -51,6 +52,7 @@ public class BridgeService extends Service {
         playback = new AudioPlayback();
         audioManager = (AudioManager) getSystemService(AUDIO_SERVICE);
         videoServer = new TcpVideoServer(ScreenMirror.INSTANCE::accept);
+        toastServer = new TcpToastServer(BridgeService::applyToastOverlay);
         server = new TcpBridgeServer(STATE, new TcpBridgeServer.Callbacks() {
             @Override
             public void prepareForClient() {
@@ -147,45 +149,7 @@ public class BridgeService extends Service {
                     }
                     return;
                 } else if ("toast_overlay".equals(cmd)) {
-                    boolean on = json.optBoolean("on", false);
-                    STATE.toastOverlay = on;
-                    if (json.has("title")) {
-                        STATE.toastTitle = json.optString("title", "");
-                    }
-                    if (json.has("app")) {
-                        STATE.toastApp = json.optString("app", "");
-                    }
-                    if (json.has("body")) {
-                        STATE.toastBody = json.optString("body", "");
-                    }
-                    JSONArray buttons = json.optJSONArray("buttons");
-                    if (buttons != null) {
-                        int n = buttons.length();
-                        String[] ids = new String[n];
-                        String[] labels = new String[n];
-                        for (int i = 0; i < n; i++) {
-                            JSONObject b = buttons.optJSONObject(i);
-                            if (b == null) {
-                                ids[i] = String.valueOf(i);
-                                labels[i] = "";
-                            } else {
-                                ids[i] = b.optString("id", String.valueOf(i));
-                                labels[i] = b.optString("label", "");
-                            }
-                        }
-                        STATE.toastButtonIds = ids;
-                        STATE.toastButtonLabels = labels;
-                    }
-                    if (!on) {
-                        STATE.toastTitle = "";
-                        STATE.toastApp = "";
-                        STATE.toastBody = "";
-                        STATE.toastButtonIds = new String[0];
-                        STATE.toastButtonLabels = new String[0];
-                        if (!STATE.screenMirror) {
-                            ScreenMirror.INSTANCE.clear();
-                        }
-                    }
+                    applyToastOverlay(json);
                     return;
                 }
                 refreshHeadline();
@@ -199,6 +163,7 @@ public class BridgeService extends Service {
         usbMonitor.start();
         server.start();
         videoServer.start();
+        toastServer.start();
         Watchdog.schedule(this);
         refreshHeadline();
     }
@@ -221,6 +186,9 @@ public class BridgeService extends Service {
         }
         if (videoServer != null) {
             videoServer.stop();
+        }
+        if (toastServer != null) {
+            toastServer.stop();
         }
         if (server != null) {
             server.stop();
@@ -253,29 +221,89 @@ public class BridgeService extends Service {
         refreshHeadlineStatic();
     }
 
-    public static void sendToastAction(String id) {
-        BridgeService svc = instance;
-        if (svc == null || svc.server == null) {
-            return;
-        }
+    public static void sendToastAction(String id, String label) {
         try {
             JSONObject o = new JSONObject();
             o.put("cmd", "toast_action");
             o.put("id", id == null ? "" : id);
-            svc.server.sendEvent(o);
+            o.put("label", label == null ? "" : label);
+            sendToastEvent(o);
         } catch (Exception ignored) {
         }
     }
 
     public static void sendToastDismiss() {
-        BridgeService svc = instance;
-        if (svc == null || svc.server == null) {
-            return;
-        }
         try {
             JSONObject o = new JSONObject();
             o.put("cmd", "toast_dismiss");
-            svc.server.sendEvent(o);
+            sendToastEvent(o);
+        } catch (Exception ignored) {
+        }
+    }
+
+    private static void sendToastEvent(JSONObject json) {
+        BridgeService svc = instance;
+        if (svc == null) {
+            return;
+        }
+        if (svc.toastServer != null && svc.toastServer.sendEvent(json)) {
+            return;
+        }
+        if (svc.server != null) {
+            svc.server.sendEvent(json);
+        }
+    }
+
+    static void applyToastOverlay(JSONObject json) {
+        if (json == null || !"toast_overlay".equals(json.optString("cmd", ""))) {
+            return;
+        }
+        boolean on = json.optBoolean("on", false);
+        STATE.toastOverlay = on;
+        if (json.has("title")) {
+            STATE.toastTitle = json.optString("title", "");
+        }
+        if (json.has("app")) {
+            STATE.toastApp = json.optString("app", "");
+        }
+        if (json.has("body")) {
+            STATE.toastBody = json.optString("body", "");
+        }
+        JSONArray buttons = json.optJSONArray("buttons");
+        if (buttons != null) {
+            int n = buttons.length();
+            String[] ids = new String[n];
+            String[] labels = new String[n];
+            for (int i = 0; i < n; i++) {
+                JSONObject b = buttons.optJSONObject(i);
+                if (b == null) {
+                    ids[i] = String.valueOf(i);
+                    labels[i] = "";
+                } else {
+                    ids[i] = b.optString("id", String.valueOf(i));
+                    labels[i] = b.optString("label", "");
+                }
+            }
+            STATE.toastButtonIds = ids;
+            STATE.toastButtonLabels = labels;
+        }
+        if (!on) {
+            STATE.toastTitle = "";
+            STATE.toastApp = "";
+            STATE.toastBody = "";
+            STATE.toastButtonIds = new String[0];
+            STATE.toastButtonLabels = new String[0];
+            if (!STATE.screenMirror) {
+                ScreenMirror.INSTANCE.clear();
+            }
+        }
+        MainActivity.refreshHud();
+        try {
+            JSONObject ack = new JSONObject();
+            ack.put("cmd", "toast_ack");
+            ack.put("on", on);
+            ack.put("title", STATE.toastTitle);
+            sendToastEvent(ack);
         } catch (Exception ignored) {
         }
     }
