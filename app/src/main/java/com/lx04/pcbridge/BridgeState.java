@@ -11,6 +11,10 @@ final class BridgeState {
     volatile boolean lightTheme;
     volatile boolean screenMirror;
     volatile boolean autoHideMute;
+    volatile boolean clockDate = true;
+    volatile boolean clockHour = true;
+    volatile boolean clockMinute = true;
+    volatile boolean clockSecond = true;
     volatile boolean flushStatus;
     volatile String mirrorTitle = "";
     volatile boolean permissionDenied;

@@ -34,6 +34,7 @@ public class BridgeService extends Service {
         STATE.lightTheme = DisplayPrefs.isLightTheme(this);
         STATE.screenMirror = DisplayPrefs.isScreenMirror(this);
         STATE.autoHideMute = DisplayPrefs.isAutoHideMute(this);
+        loadClockPrefs(this);
         DisplayPrefs.loadHudStyle(this, STATE.hudStyle);
         HudBackground.INSTANCE.init(this);
         startAsForeground();
@@ -228,6 +229,44 @@ public class BridgeService extends Service {
         STATE.autoHideMute = on;
         if (context != null) {
             DisplayPrefs.setAutoHideMute(context, on);
+        }
+    }
+
+    public static void loadClockPrefs(android.content.Context context) {
+        if (context == null) {
+            return;
+        }
+        STATE.clockDate = DisplayPrefs.clockDate(context);
+        STATE.clockHour = DisplayPrefs.clockHour(context);
+        STATE.clockMinute = DisplayPrefs.clockMinute(context);
+        STATE.clockSecond = DisplayPrefs.clockSecond(context);
+    }
+
+    public static void setClockDate(android.content.Context context, boolean on) {
+        STATE.clockDate = on;
+        if (context != null) {
+            DisplayPrefs.setClockDate(context, on);
+        }
+    }
+
+    public static void setClockHour(android.content.Context context, boolean on) {
+        STATE.clockHour = on;
+        if (context != null) {
+            DisplayPrefs.setClockHour(context, on);
+        }
+    }
+
+    public static void setClockMinute(android.content.Context context, boolean on) {
+        STATE.clockMinute = on;
+        if (context != null) {
+            DisplayPrefs.setClockMinute(context, on);
+        }
+    }
+
+    public static void setClockSecond(android.content.Context context, boolean on) {
+        STATE.clockSecond = on;
+        if (context != null) {
+            DisplayPrefs.setClockSecond(context, on);
         }
     }
 

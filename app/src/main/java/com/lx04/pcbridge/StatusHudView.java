@@ -1000,20 +1000,59 @@ public class StatusHudView extends View {
 
     private float drawClock(Canvas canvas, int w, float baseline, int color, float size) {
         String clock = clockText();
+        if (clock.isEmpty()) {
+            return w - dp(22);
+        }
         text.setTextSize(size);
         text.setColor(color);
         float tw = text.measureText(clock);
-        float x = w - dp(16) - tw;
+        float x = w - dp(40) - tw;
         canvas.drawText(clock, x, baseline, text);
         text.setColor(colText);
         return x;
     }
 
     private static String clockText() {
+        BridgeState s = BridgeService.STATE;
+        if (!s.clockDate && !s.clockHour && !s.clockMinute && !s.clockSecond) {
+            return "";
+        }
         java.util.Calendar c = java.util.Calendar.getInstance();
-        return String.format(java.util.Locale.US, "%02d:%02d",
-                c.get(java.util.Calendar.HOUR_OF_DAY),
-                c.get(java.util.Calendar.MINUTE));
+        StringBuilder out = new StringBuilder();
+        if (s.clockDate) {
+            out.append(c.get(java.util.Calendar.MONTH) + 1)
+                    .append("月")
+                    .append(c.get(java.util.Calendar.DAY_OF_MONTH))
+                    .append("日");
+        }
+        if (s.clockHour || s.clockMinute || s.clockSecond) {
+            if (out.length() > 0) {
+                out.append("  ");
+            }
+            boolean started = false;
+            if (s.clockHour) {
+                out.append(pad2(c.get(java.util.Calendar.HOUR_OF_DAY)));
+                started = true;
+            }
+            if (s.clockMinute) {
+                if (started) {
+                    out.append(':');
+                }
+                out.append(pad2(c.get(java.util.Calendar.MINUTE)));
+                started = true;
+            }
+            if (s.clockSecond) {
+                if (started) {
+                    out.append(':');
+                }
+                out.append(pad2(c.get(java.util.Calendar.SECOND)));
+            }
+        }
+        return out.toString();
+    }
+
+    private static String pad2(int value) {
+        return value < 10 ? "0" + value : String.valueOf(value);
     }
 
     private static String formatUptime(long seconds) {

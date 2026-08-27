@@ -528,10 +528,11 @@ def draw_hud(canvas: tk.Canvas, state: dict) -> None:
     canvas.create_oval(dp(15), dp(15), dp(29), dp(29), fill=OK, outline="")
     top_font = _font(12)
     canvas.create_text(dp(36), dp(27), text="USB ADB", fill=colors["dim"], font=top_font, anchor="sw")
-    clock = datetime.now().strftime("%H:%M")
+    now = datetime.now()
+    clock = f"{now.month}月{now.day}日  {now.strftime('%H:%M:%S')}"
     clock_font = _font(13, medium=True)
     clock_w = tkfont.Font(font=clock_font).measure(clock)
-    clock_x = w - dp(16) - clock_w
+    clock_x = w - dp(40) - clock_w
     canvas.create_text(clock_x, dp(27), text=clock, fill=colors["text"], font=clock_font, anchor="sw")
     mid_font = _font(11)
     mid = _fit(mid_font, "电脑  ·  预览", max(0, clock_x - dp(12) - dp(110)))

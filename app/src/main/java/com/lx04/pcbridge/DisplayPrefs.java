@@ -10,6 +10,10 @@ final class DisplayPrefs {
     private static final String KEY_HUD_STYLE = "hud_style";
     private static final String KEY_SCREEN_MIRROR = "screen_mirror";
     private static final String KEY_AUTO_HIDE_MUTE = "auto_hide_mute";
+    private static final String KEY_CLOCK_DATE = "clock_date";
+    private static final String KEY_CLOCK_HOUR = "clock_hour";
+    private static final String KEY_CLOCK_MINUTE = "clock_minute";
+    private static final String KEY_CLOCK_SECOND = "clock_second";
     private static final String KEY_HUD_BG_SLOT = "hud_bg_slot";
     private static final String KEY_HUD_BG_ALPHA = "hud_bg_alpha";
 
@@ -46,6 +50,38 @@ final class DisplayPrefs {
 
     static void setAutoHideMute(Context context, boolean on) {
         prefs(context).edit().putBoolean(KEY_AUTO_HIDE_MUTE, on).apply();
+    }
+
+    static boolean clockDate(Context context) {
+        return prefs(context).getBoolean(KEY_CLOCK_DATE, true);
+    }
+
+    static void setClockDate(Context context, boolean on) {
+        prefs(context).edit().putBoolean(KEY_CLOCK_DATE, on).apply();
+    }
+
+    static boolean clockHour(Context context) {
+        return prefs(context).getBoolean(KEY_CLOCK_HOUR, true);
+    }
+
+    static void setClockHour(Context context, boolean on) {
+        prefs(context).edit().putBoolean(KEY_CLOCK_HOUR, on).apply();
+    }
+
+    static boolean clockMinute(Context context) {
+        return prefs(context).getBoolean(KEY_CLOCK_MINUTE, true);
+    }
+
+    static void setClockMinute(Context context, boolean on) {
+        prefs(context).edit().putBoolean(KEY_CLOCK_MINUTE, on).apply();
+    }
+
+    static boolean clockSecond(Context context) {
+        return prefs(context).getBoolean(KEY_CLOCK_SECOND, true);
+    }
+
+    static void setClockSecond(Context context, boolean on) {
+        prefs(context).edit().putBoolean(KEY_CLOCK_SECOND, on).apply();
     }
 
     static int hudBgSlot(Context context) {
