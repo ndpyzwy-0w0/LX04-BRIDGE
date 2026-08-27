@@ -68,6 +68,16 @@ public class MainActivity extends Activity {
             public void onPointer(float x, float y, String act) {
                 BridgeService.sendPointer(x, y, act);
             }
+
+            @Override
+            public void onToastAction(String id) {
+                BridgeService.sendToastAction(id);
+            }
+
+            @Override
+            public void onToastDismiss() {
+                BridgeService.sendToastDismiss();
+            }
         });
         setContentView(hud);
         BridgeService.STATE.upsideDown = DisplayPrefs.isUpsideDown(this);

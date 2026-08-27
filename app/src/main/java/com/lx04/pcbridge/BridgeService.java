@@ -11,6 +11,7 @@ import android.os.IBinder;
 import android.os.PowerManager;
 import android.os.SystemClock;
 
+import org.json.JSONArray;
 import org.json.JSONObject;
 
 public class BridgeService extends Service {
@@ -151,8 +152,36 @@ public class BridgeService extends Service {
                     if (json.has("title")) {
                         STATE.toastTitle = json.optString("title", "");
                     }
+                    if (json.has("app")) {
+                        STATE.toastApp = json.optString("app", "");
+                    }
+                    if (json.has("body")) {
+                        STATE.toastBody = json.optString("body", "");
+                    }
+                    JSONArray buttons = json.optJSONArray("buttons");
+                    if (buttons != null) {
+                        int n = buttons.length();
+                        String[] ids = new String[n];
+                        String[] labels = new String[n];
+                        for (int i = 0; i < n; i++) {
+                            JSONObject b = buttons.optJSONObject(i);
+                            if (b == null) {
+                                ids[i] = String.valueOf(i);
+                                labels[i] = "";
+                            } else {
+                                ids[i] = b.optString("id", String.valueOf(i));
+                                labels[i] = b.optString("label", "");
+                            }
+                        }
+                        STATE.toastButtonIds = ids;
+                        STATE.toastButtonLabels = labels;
+                    }
                     if (!on) {
                         STATE.toastTitle = "";
+                        STATE.toastApp = "";
+                        STATE.toastBody = "";
+                        STATE.toastButtonIds = new String[0];
+                        STATE.toastButtonLabels = new String[0];
                         if (!STATE.screenMirror) {
                             ScreenMirror.INSTANCE.clear();
                         }
@@ -222,6 +251,33 @@ public class BridgeService extends Service {
     public static void toggleSpkMute() {
         STATE.spkMuted = !STATE.spkMuted;
         refreshHeadlineStatic();
+    }
+
+    public static void sendToastAction(String id) {
+        BridgeService svc = instance;
+        if (svc == null || svc.server == null) {
+            return;
+        }
+        try {
+            JSONObject o = new JSONObject();
+            o.put("cmd", "toast_action");
+            o.put("id", id == null ? "" : id);
+            svc.server.sendEvent(o);
+        } catch (Exception ignored) {
+        }
+    }
+
+    public static void sendToastDismiss() {
+        BridgeService svc = instance;
+        if (svc == null || svc.server == null) {
+            return;
+        }
+        try {
+            JSONObject o = new JSONObject();
+            o.put("cmd", "toast_dismiss");
+            svc.server.sendEvent(o);
+        } catch (Exception ignored) {
+        }
     }
 
     public static void sendPointer(float x, float y, String act) {

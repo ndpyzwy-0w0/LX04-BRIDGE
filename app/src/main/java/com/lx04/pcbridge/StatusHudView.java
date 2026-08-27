@@ -21,6 +21,10 @@ public class StatusHudView extends View {
         void onHudStyleChanged();
 
         void onPointer(float x, float y, String act);
+
+        void onToastAction(String id);
+
+        void onToastDismiss();
     }
 
     private Listener listener;
@@ -67,6 +71,13 @@ public class StatusHudView extends View {
     private boolean wasMirroring;
     private boolean muteRevealTap;
     private boolean pointerDown;
+    private final RectF toastCard = new RectF();
+    private final RectF[] toastBtnRects = new RectF[] {
+            new RectF(), new RectF(), new RectF(), new RectF(), new RectF()
+    };
+    private int toastBtnCount;
+    private int toastPressBtn = -1;
+    private boolean toastPressOutside;
     private long mirrorInteractAt;
     private long muteInteractAt;
     private long lastMuteAnimMs;
@@ -377,6 +388,10 @@ public class StatusHudView extends View {
     }
 
     private void drawMirror(Canvas canvas, BridgeState s, int w, int h) {
+        if (s.toastOverlay) {
+            drawToast(canvas, s, w, h);
+            return;
+        }
         bg.setColor(0xFF000000);
         canvas.drawRect(0, 0, w, h, bg);
         bg.setColor(lightTheme ? 0xFFF3F5F8 : 0xFF0B1220);
@@ -418,11 +433,7 @@ public class StatusHudView extends View {
         if (!s.clientConnected) {
             drawMirrorMessage(canvas, w, h, "等待上位机", "连接电脑后开始同步画面");
         } else if (!hasFrame) {
-            if (s.toastOverlay) {
-                drawMirrorMessage(canvas, w, h, "正在同步系统弹窗…", "点按即可操作电脑上的提示");
-            } else {
-                drawMirrorMessage(canvas, w, h, "正在等待电脑画面…", "从右侧滑出菜单可关闭");
-            }
+            drawMirrorMessage(canvas, w, h, "正在等待电脑画面…", "从右侧滑出菜单可关闭");
         } else if (ScreenMirror.INSTANCE.stale()) {
             drawMirrorMessage(canvas, w, h, "画面中断", "从右侧滑出菜单可关闭");
         }
@@ -437,6 +448,157 @@ public class StatusHudView extends View {
         float dw = dim.measureText(detail);
         canvas.drawText(detail, w / 2f - dw / 2f, h / 2f + dp(18), dim);
         dim.setColor(colDim);
+    }
+
+    private void drawToast(Canvas canvas, BridgeState s, int w, int h) {
+        boolean light = s.lightTheme;
+        bg.setColor(light ? 0xFFE8ECF2 : 0xFF10131A);
+        canvas.drawRect(0, 0, w, h, bg);
+        int usbColor = !s.usbConnected ? 0xFFFF5C7A : (s.clientConnected ? 0xFF3DDC97 : 0xFFFFB020);
+        accent.setColor(usbColor);
+        canvas.drawCircle(dp(16), dp(16), dp(6), accent);
+        String barTitle = (s.toastTitle == null || s.toastTitle.isEmpty()) ? "系统弹窗" : s.toastTitle;
+        int barText = light ? 0xFF1A2333 : 0xFFE8EEF8;
+        float clockLeft = drawClock(canvas, w, dp(21), barText, dp(13));
+        text.setTextSize(dp(13));
+        text.setColor(barText);
+        canvas.drawText(clip(text, barTitle, Math.max(0f, clockLeft - dp(12) - dp(30))),
+                dp(30), dp(21), text);
+
+        int cardBg = light ? 0xFFFFFFFF : 0xFF2B2B2B;
+        int fg = light ? 0xFF1A1A1A : 0xFFFFFFFF;
+        int muted = light ? 0xFF5C5C5C : 0xFFC8C8C8;
+        int btnBg = light ? 0xFFF0F0F0 : 0xFF3A3A3A;
+        int accentFg = light ? 0xFF0067C0 : 0xFF4CC2FF;
+        float pad = dp(18);
+        float cardW = Math.min(w - dp(36), dp(420));
+        float innerW = cardW - pad * 2f;
+        float y = dp(48);
+        float x = (w - cardW) / 2f;
+
+        String app = s.toastApp == null ? "" : s.toastApp.trim();
+        String title = s.toastTitle == null ? "" : s.toastTitle.trim();
+        String body = s.toastBody == null ? "" : s.toastBody.trim();
+        String[] labels = s.toastButtonLabels == null ? new String[0] : s.toastButtonLabels;
+        int btnN = Math.min(labels.length, toastBtnRects.length);
+        toastBtnCount = btnN;
+
+        text.setTextSize(dp(12));
+        float appH = app.isEmpty() ? 0f : dp(18);
+        text.setTextSize(dp(20));
+        float titleH = title.isEmpty() ? 0f : measureWrappedHeight(title, innerW, text, dp(24), 3);
+        text.setTextSize(dp(14));
+        float bodyH = body.isEmpty() ? 0f : measureWrappedHeight(body, innerW, text, dp(20), 6);
+        float btnH = btnN > 0 ? dp(40) : 0f;
+        float cardH = pad + appH + titleH + bodyH + (btnN > 0 ? dp(14) + btnH : 0f) + pad;
+        if (cardH < dp(120)) {
+            cardH = dp(120);
+        }
+        if (y + cardH > h - dp(28)) {
+            cardH = Math.max(dp(100), h - dp(28) - y);
+        }
+        toastCard.set(x, y, x + cardW, y + cardH);
+        cardPaint.setColor(cardBg);
+        canvas.drawRoundRect(toastCard, dp(16), dp(16), cardPaint);
+
+        float cy = y + pad;
+        if (!app.isEmpty()) {
+            text.setTextSize(dp(12));
+            text.setColor(muted);
+            canvas.drawText(clip(text, app, innerW), x + pad, cy + dp(12), text);
+            cy += appH;
+        }
+        if (!title.isEmpty()) {
+            text.setTextSize(dp(20));
+            text.setColor(fg);
+            cy += drawWrapped(canvas, title, x + pad, cy, innerW, text, dp(24), 3);
+        }
+        if (!body.isEmpty()) {
+            text.setTextSize(dp(14));
+            text.setColor(muted);
+            cy += drawWrapped(canvas, body, x + pad, cy, innerW, text, dp(20), 6);
+        }
+        for (int i = 0; i < toastBtnRects.length; i++) {
+            toastBtnRects[i].setEmpty();
+        }
+        if (btnN > 0) {
+            float btnY = toastCard.bottom - pad - btnH;
+            float right = toastCard.right - pad;
+            for (int i = btnN - 1; i >= 0; i--) {
+                String label = labels[i] == null ? "" : labels[i];
+                text.setTextSize(dp(14));
+                float tw = Math.max(dp(56), text.measureText(label) + dp(24));
+                float left = right - tw;
+                toastBtnRects[i].set(left, btnY, right, btnY + btnH);
+                button.setColor(btnBg);
+                canvas.drawRoundRect(toastBtnRects[i], dp(8), dp(8), button);
+                text.setColor(i == btnN - 1 ? accentFg : fg);
+                canvas.drawText(label, toastBtnRects[i].centerX() - text.measureText(label) / 2f,
+                        toastBtnRects[i].centerY() + dp(5), text);
+                right = left - dp(8);
+            }
+        }
+        text.setColor(colText);
+        dim.setTextSize(dp(12));
+        dim.setColor(muted);
+        String hint = "点按钮即操作电脑通知 · 点空白处关闭";
+        float hw = dim.measureText(hint);
+        canvas.drawText(hint, w / 2f - hw / 2f, h - dp(14), dim);
+        dim.setColor(colDim);
+        cardPaint.setColor(light ? 0xFFE8EEF5 : 0xFF1A2438);
+        button.setColor(colButton);
+    }
+
+    private float measureWrappedHeight(String value, float maxW, Paint paint, float lineH, int maxLines) {
+        if (value == null || value.isEmpty()) {
+            return 0f;
+        }
+        int lines = 0;
+        String rest = value;
+        while (!rest.isEmpty() && lines < maxLines) {
+            int count = paint.breakText(rest, true, maxW, null);
+            if (count <= 0) {
+                break;
+            }
+            rest = rest.substring(count);
+            lines++;
+        }
+        return Math.max(lineH, lines * lineH);
+    }
+
+    private float drawWrapped(Canvas canvas, String value, float x, float y, float maxW,
+            Paint paint, float lineH, int maxLines) {
+        if (value == null || value.isEmpty()) {
+            return 0f;
+        }
+        int lines = 0;
+        String rest = value;
+        float top = y;
+        while (!rest.isEmpty() && lines < maxLines) {
+            int count = paint.breakText(rest, true, maxW, null);
+            if (count <= 0) {
+                break;
+            }
+            String line = rest.substring(0, count);
+            rest = rest.substring(count);
+            if (!rest.isEmpty() && lines == maxLines - 1) {
+                line = clip(paint, line + rest, maxW);
+                rest = "";
+            }
+            canvas.drawText(line, x, top + lineH - dp(4), paint);
+            top += lineH;
+            lines++;
+        }
+        return lines * lineH;
+    }
+
+    private int toastButtonAt(float x, float y) {
+        for (int i = 0; i < toastBtnCount; i++) {
+            if (toastBtnRects[i].contains(x, y)) {
+                return i;
+            }
+        }
+        return -1;
     }
 
     private void drawMuteButton(Canvas canvas, RectF rect, boolean muted, String label, float alpha) {
@@ -798,8 +960,8 @@ public class StatusHudView extends View {
                 return true;
             }
             if (BridgeService.STATE.toastOverlay) {
-                pointerDown = true;
-                sendPointer(x, y, "down");
+                toastPressBtn = toastButtonAt(x, y);
+                toastPressOutside = toastPressBtn < 0 && !toastCard.contains(x, y);
                 return true;
             }
             pressSlot = cardIndexAt(x, y);
@@ -831,6 +993,8 @@ public class StatusHudView extends View {
             menu.onCancel();
             touchHandler.removeCallbacks(longPress);
             pressSlot = -1;
+            toastPressBtn = -1;
+            toastPressOutside = false;
             cancelPointer();
             return true;
         }
@@ -847,8 +1011,16 @@ public class StatusHudView extends View {
                 return true;
             }
             if (BridgeService.STATE.toastOverlay) {
-                sendPointer(x, y, "up");
-                pointerDown = false;
+                int btn = toastButtonAt(x, y);
+                if (toastPressBtn >= 0 && btn == toastPressBtn && listener != null) {
+                    String[] ids = BridgeService.STATE.toastButtonIds;
+                    String id = (ids != null && btn < ids.length) ? ids[btn] : String.valueOf(btn);
+                    listener.onToastAction(id);
+                } else if (toastPressOutside && !toastCard.contains(x, y) && listener != null) {
+                    listener.onToastDismiss();
+                }
+                toastPressBtn = -1;
+                toastPressOutside = false;
                 return true;
             }
             if (BridgeService.STATE.screenMirror) {
