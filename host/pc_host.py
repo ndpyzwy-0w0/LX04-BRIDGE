@@ -868,7 +868,7 @@ class HostApp:
         self._saved_monitor = chosen.key
         self.client.send_control("mirror_info", title=chosen.label())
         self._save_routes()
-        self._log(("屏幕镜像已切换到: " if restart else "屏幕镜像: ") + chosen.label() + "（投屏时暂停音箱播放，把 USB 留给画面）")
+        self._log(("屏幕镜像已切换到: " if restart else "屏幕镜像: ") + chosen.label())
 
     def _on_pc_stats_change(self) -> None:
         if not self._routes_ready:
@@ -1151,8 +1151,6 @@ class HostApp:
             self.play_peak = 0.0
         else:
             self.play_peak = self.loopback.peak
-        if self.mirror.running():
-            return
         self.client.send_play(pcm, muted=silent)
 
     def _restore_render(self) -> None:
