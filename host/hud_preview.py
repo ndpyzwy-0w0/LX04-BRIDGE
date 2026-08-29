@@ -783,11 +783,30 @@ class PreviewWindow:
         ttk.Label(header, text="折线", style="CardDim.TLabel", width=6).pack(side="left")
         ttk.Label(header, text="折线内容", style="CardDim.TLabel").pack(side="left")
 
+        rows_wrap = tk.Frame(editors, bg="#141C2E")
+        rows_wrap.pack(fill="x", padx=8, pady=(4, 8))
+        scroll = ttk.Scrollbar(rows_wrap, orient="vertical")
+        self._rows_canvas = tk.Canvas(
+            rows_wrap,
+            bg="#141C2E",
+            highlightthickness=0,
+            height=240,
+            yscrollcommand=scroll.set,
+        )
+        scroll.configure(command=self._rows_canvas.yview)
+        scroll.pack(side="right", fill="y")
+        self._rows_canvas.pack(side="left", fill="x", expand=True)
+        self._rows_inner = tk.Frame(self._rows_canvas, bg="#141C2E")
+        self._rows_win = self._rows_canvas.create_window((0, 0), window=self._rows_inner, anchor="nw")
+        self._rows_inner.bind("<Configure>", lambda _e: self._sync_rows_scroll())
+        self._rows_canvas.bind("<Configure>", self._on_rows_canvas)
+        self.root.bind("<MouseWheel>", self._on_rows_wheel)
+
         combo_bg = self._combo_bg
         combo_fg = self._combo_fg
         for index, (_key, label, _metric, _sub) in enumerate(DEFAULT_SLOTS):
             card = self.state["cards"][index]
-            row = tk.Frame(editors, bg="#141C2E")
+            row = tk.Frame(self._rows_inner, bg="#141C2E")
             row.pack(fill="x", padx=8, pady=4)
             ttk.Label(row, text=label, style="Card.TLabel", width=6).pack(side="left", anchor="n", pady=4)
             title_var = tk.StringVar(value=str(card["title"]))
@@ -868,6 +887,7 @@ class PreviewWindow:
         self.root.protocol("WM_DELETE_WINDOW", self._close)
         self._paint_swatches()
         self._redraw()
+        self.root.after_idle(self._sync_rows_scroll)
 
     def apply_state(self, state: dict) -> None:
         self._remote = True
@@ -971,6 +991,29 @@ class PreviewWindow:
                 anchor="w", pady=(2, 0)
             )
         self.sub_metric_vars[index] = vars
+        self._sync_rows_scroll()
+
+    def _sync_rows_scroll(self) -> None:
+        canvas = getattr(self, "_rows_canvas", None)
+        if canvas is None:
+            return
+        canvas.update_idletasks()
+        canvas.configure(scrollregion=canvas.bbox("all") or (0, 0, 0, 0))
+
+    def _on_rows_canvas(self, event) -> None:
+        self._rows_canvas.itemconfigure(self._rows_win, width=event.width)
+
+    def _on_rows_wheel(self, event) -> None:
+        canvas = self._rows_canvas
+        try:
+            x, y = canvas.winfo_pointerx(), canvas.winfo_pointery()
+            left, top = canvas.winfo_rootx(), canvas.winfo_rooty()
+            if not (left <= x < left + canvas.winfo_width() and top <= y < top + canvas.winfo_height()):
+                return
+            canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+            return "break"
+        except tk.TclError:
+            return
 
     def _add_sub(self, index: int) -> None:
         keys = card_sub_metrics(self.state["cards"][index]) or [DEFAULT_SLOTS[index][3]]
