@@ -19,10 +19,8 @@ MAX_JPEG = 20 * 1024
 TARGET_W = 800
 TARGET_H = 480
 FRAME_INTERVAL = 0.04
-FRAME_INTERVAL_SLOW = 0.10
 MONITOR_REFRESH = 2.0
 GRABBER_REOPEN_FRAMES = 400
-ACK_WAIT_S = 0.28
 
 
 @dataclass(frozen=True)
@@ -32,14 +30,13 @@ class QualityPreset:
     quality_small: int
     max_jpeg: int
     ack_wait: float
-    interval: float
 
 
 QUALITY_PRESETS = (
-    QualityPreset("流畅", 8, 5, 20 * 1024, 0.28, 0.05),
-    QualityPreset("清晰", 18, 12, 36 * 1024, 0.30, 0.05),
-    QualityPreset("高清", 36, 24, 56 * 1024, 0.35, 0.045),
-    QualityPreset("最高", 58, 40, 96 * 1024, 0.45, 0.04),
+    QualityPreset("流畅", 8, 5, 20 * 1024, 0.28),
+    QualityPreset("清晰", 18, 12, 36 * 1024, 0.30),
+    QualityPreset("高清", 36, 24, 56 * 1024, 0.35),
+    QualityPreset("最高", 58, 40, 96 * 1024, 0.45),
 )
 QUALITY_KEYS = [item.key for item in QUALITY_PRESETS]
 DEFAULT_QUALITY = "清晰"
@@ -713,6 +710,7 @@ class ScreenSender:
         self._latest_at = 0.0
         self._new_frame = threading.Event()
         self._ack = threading.Event()
+        self._need = threading.Event()
         self._preset = pick_quality(DEFAULT_QUALITY)
         self._send_s = FRAME_INTERVAL
         self._paused = False
@@ -747,6 +745,7 @@ class ScreenSender:
             self._latest_at = 0.0
         self._new_frame.clear()
         self._ack.clear()
+        self._need.clear()
         self._paused = False
         self._alive = True
         self._capture_thread = threading.Thread(
@@ -763,6 +762,7 @@ class ScreenSender:
         self._alive = False
         self._ack.set()
         self._new_frame.set()
+        self._need.set()
         threads = [self._capture_thread, self._send_thread]
         self._capture_thread = None
         self._send_thread = None
@@ -775,8 +775,13 @@ class ScreenSender:
     def pause(self) -> None:
         self._paused = True
         self._ack.set()
+        self._need.set()
+        self._new_frame.set()
 
     def resume(self) -> None:
+        with self._slot:
+            self._latest = None
+        self._new_frame.clear()
         self._paused = False
 
     def note_ack(self) -> None:
@@ -806,15 +811,12 @@ class ScreenSender:
         last_enum = 0.0
         try:
             while self._alive:
+                if not self._need.wait(timeout=0.2):
+                    continue
+                self._need.clear()
+                if not self._alive or self._paused:
+                    continue
                 started = time.monotonic()
-                if self._paused:
-                    time.sleep(0.05)
-                    continue
-                with self._slot:
-                    waiting = self._latest is not None
-                if waiting:
-                    time.sleep(0.004)
-                    continue
                 try:
                     if chosen is None or started - last_enum >= MONITOR_REFRESH:
                         chosen = pick_monitor(_enum_monitors(), key)
@@ -831,19 +833,13 @@ class ScreenSender:
                         max_jpeg=preset.max_jpeg,
                         quality_small=preset.quality_small,
                     )
-                    if self._alive and jpeg:
+                    if self._alive and not self._paused and jpeg:
                         self._put(jpeg)
                         self.frames += 1
                 except Exception as exc:
                     self.error = str(exc)
                     grabber.close()
                     time.sleep(0.4)
-                    continue
-                preset = self._preset
-                interval = min(FRAME_INTERVAL_SLOW, max(preset.interval, self._send_s * 1.4))
-                remain = interval - (time.monotonic() - started)
-                if remain > 0:
-                    time.sleep(remain)
         finally:
             grabber.close()
             try:
@@ -852,18 +848,19 @@ class ScreenSender:
                 pass
 
     def _send_loop(self) -> None:
+        # ponytail: grab only after the previous JPEG is ACKed, so a frame never
+        # sits in the slot aging by one USB RTT. Ceiling: GDI+JPEG; next is DXGI.
         while self._alive:
             if self._paused:
                 time.sleep(0.05)
                 continue
-            self._new_frame.wait(timeout=0.2)
+            self._take()
             self._new_frame.clear()
+            self._need.set()
+            self._new_frame.wait(timeout=0.8)
             jpeg, _captured_at = self._take()
-            if not jpeg or not self._alive:
+            if not jpeg or not self._alive or self._paused:
                 continue
-            newer, _newer_at = self._take()
-            if newer is not None:
-                jpeg = newer
             self._ack.clear()
             t0 = time.monotonic()
             try:
@@ -873,3 +870,37 @@ class ScreenSender:
             if self._alive:
                 self._ack.wait(timeout=self._preset.ack_wait)
             self._send_s = self._send_s * 0.65 + (time.monotonic() - t0) * 0.35
+
+
+def _self_check() -> None:
+    sent: list[bytes] = []
+    sender = ScreenSender(lambda jpeg: sent.append(jpeg) or sender.note_ack())
+    sender._alive = True
+
+    def capture() -> None:
+        while sender._alive:
+            if not sender._need.wait(timeout=0.2):
+                continue
+            sender._need.clear()
+            if sender._alive:
+                sender._put(b"\xff\xd8" + b"x" * 30)
+
+    cap = threading.Thread(target=capture, daemon=True)
+    send = threading.Thread(target=sender._send_loop, daemon=True)
+    cap.start()
+    send.start()
+    deadline = time.monotonic() + 1.0
+    while len(sent) < 3 and time.monotonic() < deadline:
+        time.sleep(0.01)
+    sender._alive = False
+    sender._need.set()
+    sender._new_frame.set()
+    sender._ack.set()
+    cap.join(timeout=1.0)
+    send.join(timeout=1.0)
+    assert len(sent) >= 3, len(sent)
+
+
+if __name__ == "__main__":
+    _self_check()
+    print("screen_mirror ok")
