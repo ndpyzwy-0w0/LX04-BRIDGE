@@ -436,12 +436,12 @@ class HostApp:
         self._route_gen = 0
         self._cable_key = None
         self._stats_busy = False
+        self._closing = False
+        self._stop_lock = threading.Lock()
         self._build()
         threading.Thread(target=pc_stats.snapshot, daemon=True).start()
-        self._load_routes()
-        self.refresh_devices()
-        self.refresh_audio_devices()
-        self._routes_ready = True
+        self._load_route_vars()
+        self.root.after(0, self._boot)
         self.root.after(400, self._tick)
 
     def _build(self) -> None:
@@ -516,7 +516,7 @@ class HostApp:
         row = ttk.Frame(card, style="Card.TFrame")
         row.pack(fill="x", padx=16, pady=12)
         ttk.Label(row, text="USB 设备", style="Card.TLabel").pack(side="left")
-        self.device_var = tk.StringVar()
+        self.device_var = tk.StringVar(value="正在扫描…")
         self.device_drop = ChoiceDrop(
             row, self.device_var, lambda: None, combo_bg, combo_fg, expand=False, width=28
         )
@@ -826,7 +826,7 @@ class HostApp:
             return self._spk_devices[0]
         return None
 
-    def _load_routes(self) -> None:
+    def _load_route_vars(self) -> None:
         try:
             data = json.loads(ROUTES_FILE.read_text(encoding="utf-8"))
         except Exception:
@@ -845,8 +845,6 @@ class HostApp:
         self._saved_monitor = str(data.get("pc_monitor") or "")
         self.quality_var.set(screen_mirror.pick_quality(str(data.get("mirror_quality") or "")).key)
         self.mirror.set_quality(self.quality_var.get())
-        self._refresh_disks()
-        self._refresh_monitors()
         on = _autostart_enabled()
         self.autostart.set(on)
         if on:
@@ -854,6 +852,47 @@ class HostApp:
                 _set_autostart(True)
             except OSError:
                 pass
+
+    def _boot(self) -> None:
+        threading.Thread(target=self._boot_scan, daemon=True, name="lx04-boot").start()
+
+    def _boot_scan(self) -> None:
+        hidden: list[str] = []
+        devices: list[str] = []
+        err = ""
+        try:
+            hidden = win_endpoint.tidy_cable_endpoints()
+        except Exception as exc:
+            err = str(exc)
+        if self.adb:
+            try:
+                devices = adb_usb.list_devices(self.adb)
+            except Exception as exc:
+                err = (err + " " + str(exc)).strip()
+        try:
+            self.root.after(0, lambda: self._boot_apply(hidden, devices, err))
+        except Exception:
+            pass
+
+    def _boot_apply(self, hidden: list[str], devices: list[str], err: str) -> None:
+        if self._closing:
+            return
+        if hidden:
+            self._log("已从系统播放列表隐藏：" + "、".join(hidden))
+        if err:
+            self._log("启动扫描: " + err)
+        self.devices = devices
+        if not self.adb:
+            labels = ["未找到 adb"]
+        else:
+            labels = devices or ["没有 USB 设备（检查数据线 / USB 调试）"]
+        self.device_drop.set_labels(labels)
+        self.device_var.set(labels[0])
+        self._log("USB 设备: " + (", ".join(devices) if devices else "无"))
+        self.refresh_audio_devices(log=True, tidy=False)
+        self._refresh_disks()
+        self._refresh_monitors()
+        self._routes_ready = True
 
     def _save_routes(self) -> None:
         payload = {
@@ -876,10 +915,11 @@ class HostApp:
         except Exception:
             pass
 
-    def refresh_audio_devices(self, log: bool = True) -> None:
-        hidden = win_endpoint.tidy_cable_endpoints()
-        if log and hidden:
-            self._log("已从系统播放列表隐藏：" + "、".join(hidden))
+    def refresh_audio_devices(self, log: bool = True, tidy: bool = True) -> None:
+        if tidy:
+            hidden = win_endpoint.tidy_cable_endpoints()
+            if log and hidden:
+                self._log("已从系统播放列表隐藏：" + "、".join(hidden))
         previous_inject = self.inject_var.get() or getattr(self, "_saved_inject", "")
         previous_spk = self.spk_dev_var.get() or getattr(self, "_saved_spk", "")
         inject_items: list[tuple[str, str | int, str]] = []
@@ -1621,13 +1661,13 @@ class HostApp:
             self.play_peak = self.loopback.peak
         self.client.send_play(pcm, muted=silent)
 
-    def _restore_render(self) -> None:
+    def _restore_render(self, log: bool = True) -> None:
         self.loopback.stop()
         prev = self._prev_render
         self._prev_render = None
         self.play_peak = 0.0
         if prev:
-            if win_endpoint.set_default_render(prev[0]):
+            if win_endpoint.set_default_render(prev[0]) and log:
                 self._log("已恢复系统播放设备: " + prev[1])
 
     def _pcm_peak(self, pcm: bytes) -> float:
@@ -1804,25 +1844,51 @@ class HostApp:
 
     def disconnect(self) -> None:
         self._session = False
-        self.client.close()
-        self.hw.stop(self.adb, self._serial)
-        self.sink.stop()
-        self._restore_render()
-        self.mirror.stop()
-        self._mirror_logged = False
-        self.toast.stop()
-        self._toast_logged = False
         self.connected = False
+        self._mirror_logged = False
+        self._toast_logged = False
         self._stats_logged = False
-        if self.adb and self._serial:
+        if not self._closing:
+            self.headline.configure(text="已断开")
+            self.detail.configure(text="可以重新点连接。")
+            self._draw_meter(self.meter, 0)
+            self._draw_meter(self.spk_meter, 0)
+        threading.Thread(target=self._shutdown_work, daemon=True, name="lx04-disc").start()
+
+    def _shutdown_work(self) -> None:
+        with self._stop_lock:
             try:
-                self._log(adb_usb.release_speaker_mic(self.adb, self._serial))
-            except Exception as exc:
-                self._log("恢复小爱麦失败: " + str(exc))
-        self.headline.configure(text="已断开")
-        self.detail.configure(text="可以重新点连接。")
-        self._draw_meter(self.meter, 0)
-        self._draw_meter(self.spk_meter, 0)
+                self.client.close()
+                if self._serial:
+                    self.hw.stop(self.adb, self._serial)
+                else:
+                    self.hw.stop()
+                self.sink.stop()
+                self._restore_render(log=not self._closing)
+                self.mirror.stop()
+                self.toast.stop()
+                if self.adb and self._serial:
+                    try:
+                        msg = adb_usb.release_speaker_mic(self.adb, self._serial)
+                        if not self._closing:
+                            self._log(msg)
+                    except Exception as exc:
+                        if not self._closing:
+                            self._log("恢复小爱麦失败: " + str(exc))
+            except Exception:
+                pass
+
+    def _on_close(self) -> None:
+        self._closing = True
+        self._session = False
+        self.connected = False
+        try:
+            self.root.withdraw()
+            self.root.update_idletasks()
+        except Exception:
+            pass
+        threading.Thread(target=self._shutdown_work, daemon=False, name="lx04-quit").start()
+        self.root.destroy()
 
     def _begin_revive(self) -> None:
         if self._reviving or not self._session:
@@ -2064,6 +2130,8 @@ class HostApp:
             self._begin_revive()
 
     def _tick(self) -> None:
+        if self._closing:
+            return
         spk = self.loopback.peak if self.loopback.running() else self.play_peak
         self._draw_meter(self.meter, self.sink.peak if self.connected else 0)
         self._draw_meter(self.spk_meter, spk if self.connected else 0)
@@ -2083,7 +2151,10 @@ class HostApp:
         if self.toast.error:
             self._log("系统弹窗: " + self.toast.error)
             self.toast.error = ""
-        self.root.after(80, self._tick)
+        try:
+            self.root.after(80, self._tick)
+        except Exception:
+            return
 
     def _draw_meter(self, canvas: tk.Canvas, level: float) -> None:
         canvas.delete("all")
@@ -2093,6 +2164,8 @@ class HostApp:
         canvas.create_rectangle(0, 0, fill, 22, fill=color, outline="")
 
     def _log(self, line: str) -> None:
+        if self._closing:
+            return
         if threading.current_thread() is not threading.main_thread():
             self._ui(lambda l=line: self._log(l))
             return
@@ -2148,7 +2221,7 @@ def _pick_label(labels: list[str], saved: str, fallback: str | None) -> str:
 def main() -> None:
     root = tk.Tk()
     app = HostApp(root)
-    root.protocol("WM_DELETE_WINDOW", lambda: (app.disconnect(), root.destroy()))
+    root.protocol("WM_DELETE_WINDOW", app._on_close)
     root.mainloop()
 
 
