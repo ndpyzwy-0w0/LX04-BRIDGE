@@ -28,13 +28,6 @@ class HardwareMic:
         args = ["-s", serial] if serial else []
         flags = CREATE_NO_WINDOW if os.name == "nt" else 0
         cwd = str(Path(adb).resolve().parent)
-        subprocess.run(
-            [adb, *args, "shell", "killall tinycap >/dev/null 2>&1"],
-            capture_output=True,
-            timeout=4,
-            creationflags=flags,
-            cwd=cwd,
-        )
         cmd = [
             adb,
             *args,
@@ -76,7 +69,7 @@ class HardwareMic:
                 subprocess.run(
                     [adb, *args, "shell", "killall tinycap >/dev/null 2>&1"],
                     capture_output=True,
-                    timeout=4,
+                    timeout=2,
                     creationflags=flags,
                     cwd=str(Path(adb).resolve().parent),
                 )

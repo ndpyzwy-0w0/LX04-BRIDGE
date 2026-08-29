@@ -155,7 +155,12 @@ class BridgeClient:
     def send_control(self, cmd: str, **fields) -> None:
         payload = {"cmd": cmd}
         payload.update(fields)
-        self._send(protocol.encode_json(protocol.CONTROL, payload, seq=self._next_seq()))
+        data = protocol.encode_json(protocol.CONTROL, payload, seq=self._next_seq())
+        # Tk thread must not wait on USB sendall (socket timeout is 8s).
+        if threading.current_thread() is threading.main_thread():
+            threading.Thread(target=self._send, args=(data,), daemon=True, name="lx04-ctrl").start()
+            return
+        self._send(data)
 
     def send_toast(self, cmd: str, **fields) -> None:
         payload = {"cmd": cmd}
@@ -427,6 +432,10 @@ class HostApp:
         self._hud_need_reconcile = False
         self._hud_from_apk = False
         self._hud_bg = {"sel": -1, "used": [False, False, False], "alpha": 100}
+        self._route_lock = threading.Lock()
+        self._route_gen = 0
+        self._cable_key = None
+        self._stats_busy = False
         self._build()
         threading.Thread(target=pc_stats.snapshot, daemon=True).start()
         self._load_routes()
@@ -772,6 +781,33 @@ class HostApp:
         if not self.sink.available():
             self._log("音频库未安装：在 host 目录执行  pip install -r requirements.txt")
 
+    def _ui(self, fn) -> None:
+        try:
+            if threading.current_thread() is threading.main_thread():
+                fn()
+                return
+            self.root.after(0, fn)
+        except Exception:
+            pass
+
+    def _after_paint(self, fn) -> None:
+        self.root.after_idle(fn)
+
+    def _spawn_route(self, fn) -> None:
+        self._route_gen += 1
+        gen = self._route_gen
+
+        def work() -> None:
+            with self._route_lock:
+                if gen != self._route_gen:
+                    return
+                try:
+                    fn()
+                except Exception as exc:
+                    self._log("切换通路失败: " + str(exc))
+
+        threading.Thread(target=work, daemon=True, name="lx04-route").start()
+
     def _selected_inject(self) -> tuple[str, str | int, str] | None:
         label = self.inject_var.get()
         for item in self._inject_devices:
@@ -879,28 +915,46 @@ class HostApp:
     def _on_mic_route_change(self) -> None:
         if not self._routes_ready:
             return
+        self._after_paint(self._mic_route_job)
+
+    def _mic_route_job(self) -> None:
         self._save_routes()
         if not self.connected:
             return
-        try:
-            self._apply_mic_route()
-        except Exception as exc:
-            self._log("切换麦克风通路失败: " + str(exc))
+        on = bool(self.mic_enabled.get())
+        inject = self._selected_inject()
+        self._spawn_route(lambda: self._apply_mic_route(on=on, inject=inject))
 
     def _on_spk_route_change(self) -> None:
         if not self._routes_ready:
             return
+        self._after_paint(self._spk_route_job)
+
+    def _spk_route_job(self) -> None:
         self._save_routes()
         if not self.connected:
             return
-        try:
-            self._apply_speaker_route()
-        except Exception as exc:
-            self._log("切换扬声器通路失败: " + str(exc))
+        on = bool(self.spk_enabled.get())
+        set_default = bool(self.set_default_spk.get())
+        mic_on = bool(self.mic_enabled.get())
+        speaker = self._selected_speaker()
+        inject = self._selected_inject()
+        self._spawn_route(
+            lambda: self._apply_speaker_route(
+                on=on,
+                speaker=speaker,
+                set_default=set_default,
+                inject=inject,
+                mic_on=mic_on,
+            )
+        )
 
     def _on_upside_down_change(self) -> None:
         if not self._routes_ready:
             return
+        self._after_paint(self._upside_down_job)
+
+    def _upside_down_job(self) -> None:
         self._save_routes()
         self._push_upside_down()
         if self.connected:
@@ -914,6 +968,9 @@ class HostApp:
     def _on_light_theme_change(self) -> None:
         if not self._routes_ready:
             return
+        self._after_paint(self._light_theme_job)
+
+    def _light_theme_job(self) -> None:
         self._save_routes()
         if self._hud_from_apk:
             return
@@ -929,9 +986,12 @@ class HostApp:
     def _on_disk_change(self) -> None:
         if not self._routes_ready:
             return
+        self._after_paint(self._disk_job)
+
+    def _disk_job(self) -> None:
         self._save_routes()
         if self.connected and self.pc_stats_enabled.get():
-            self._push_pc_stats(force=True)
+            self._spawn_stats(force=True)
 
     def _selected_disk(self) -> str:
         label = (self.disk_var.get() or "").strip()
@@ -987,6 +1047,9 @@ class HostApp:
     def _on_monitor_change(self) -> None:
         if not self._routes_ready:
             return
+        self._after_paint(self._monitor_job)
+
+    def _monitor_job(self) -> None:
         self._save_routes()
         if self.mirror.running():
             self._start_mirror(restart=True)
@@ -994,6 +1057,9 @@ class HostApp:
     def _on_quality_change(self) -> None:
         if not self._routes_ready:
             return
+        self._after_paint(self._quality_job)
+
+    def _quality_job(self) -> None:
         preset = self.mirror.set_quality(self.quality_var.get())
         self.quality_var.set(preset.key)
         self._save_routes()
@@ -1047,6 +1113,9 @@ class HostApp:
     def _on_autostart_change(self) -> None:
         if not self._routes_ready:
             return
+        self._after_paint(self._autostart_job)
+
+    def _autostart_job(self) -> None:
         want = bool(self.autostart.get())
         try:
             _set_autostart(want)
@@ -1059,6 +1128,9 @@ class HostApp:
     def _on_toast_mirror_change(self) -> None:
         if not self._routes_ready:
             return
+        self._after_paint(self._toast_mirror_job)
+
+    def _toast_mirror_job(self) -> None:
         self._save_routes()
         if self._toast_sync_after is not None:
             try:
@@ -1069,19 +1141,32 @@ class HostApp:
 
     def _apply_toast_mirror_toggle(self) -> None:
         self._toast_sync_after = None
-        self._sync_toast_mirror()
-        if self.toast.error:
-            self._log("系统弹窗: " + self.toast.error)
-            self.toast.error = ""
-        if self.toast_mirror.get():
-            via = self.client.toast_channel() if self.connected else "17892"
-            self._log("已开启系统弹窗同步（独立通道 " + via + "）：系统通知的标题、正文、按钮会显示在音箱上，点按即点电脑通知。")
-        else:
-            self._log("已关闭系统弹窗同步")
+        on = bool(self.toast_mirror.get())
+        connected = self.connected
 
-    def _sync_toast_mirror(self) -> None:
+        def work() -> None:
+            self._sync_toast_mirror(on=on)
+            err = self.toast.error
+            self.toast.error = ""
+            if err:
+                self._log("系统弹窗: " + err)
+            if on:
+                via = self.client.toast_channel() if connected else "17892"
+                self._log(
+                    "已开启系统弹窗同步（独立通道 "
+                    + via
+                    + "）：系统通知的标题、正文、按钮会显示在音箱上，点按即点电脑通知。"
+                )
+            else:
+                self._log("已关闭系统弹窗同步")
+
+        threading.Thread(target=work, daemon=True, name="lx04-toast-tog").start()
+
+    def _sync_toast_mirror(self, on: bool | None = None) -> None:
         try:
-            if self.connected and self.toast_mirror.get():
+            if on is None:
+                on = bool(self.toast_mirror.get())
+            if self.connected and on:
                 self.toast.start()
                 return
             was_showing = self.toast.showing()
@@ -1106,7 +1191,7 @@ class HostApp:
             self._mirror_logged = False
             self._log("屏幕镜像已关闭，已停止推画面")
             if self.pc_stats_enabled.get():
-                self._push_pc_stats(force=True)
+                self._spawn_stats(force=True)
 
     def _start_mirror(self, restart: bool = False) -> None:
         if not self.connected:
@@ -1132,23 +1217,43 @@ class HostApp:
     def _on_pc_stats_change(self) -> None:
         if not self._routes_ready:
             return
+        self._after_paint(self._pc_stats_job)
+
+    def _pc_stats_job(self) -> None:
         self._save_routes()
         if not self.pc_stats_enabled.get():
             self.pc_line.configure(text="电脑状态：已关闭，音箱屏幕只显示桥接信息。")
             return
         if self.connected:
-            self._push_pc_stats(force=True)
+            self._spawn_stats(force=True)
 
-    def _push_pc_stats(self, force: bool = False) -> None:
+    def _spawn_stats(self, force: bool = False) -> None:
+        if self._stats_busy:
+            return
         if not self.connected or not self.pc_stats_enabled.get():
             return
         if self.mirror.running() and not force:
             return
+        self._stats_busy = True
+        disk = self._selected_disk()
+        threading.Thread(
+            target=self._push_pc_stats,
+            kwargs={"force": force, "disk": disk},
+            daemon=True,
+            name="lx04-stats",
+        ).start()
+
+    def _push_pc_stats(self, force: bool = False, disk: str | None = None) -> None:
         try:
-            snap = pc_stats.snapshot(self._selected_disk())
+            if not self.connected:
+                return
+            if self.mirror.running() and not force:
+                return
+            snap = pc_stats.snapshot(disk or "C:")
             payload = {key: value for key, value in snap.items() if value is not None and value != ""}
             self.client.send_control("pc_stats", **payload)
-            self.pc_line.configure(text=pc_stats.format_line(snap))
+            line = pc_stats.format_line(snap)
+            self._ui(lambda t=line: self.pc_line.configure(text=t))
             if not self._stats_logged:
                 self._stats_logged = True
                 extra = ""
@@ -1156,13 +1261,19 @@ class HostApp:
                     extra = "（CPU 温度未读到；可点「CPU 温度 / Afterburner」打开官网，占用仍会显示）"
                 self._log("已向音箱发送电脑状态" + extra)
         except Exception as exc:
-            self.pc_line.configure(text="电脑状态读取失败: " + str(exc))
+            err = str(exc)
+            self._ui(lambda t=err: self.pc_line.configure(text="电脑状态读取失败: " + t))
             if force:
-                self._log("电脑状态: " + str(exc))
+                self._log("电脑状态: " + err)
+        finally:
+            self._stats_busy = False
 
     def _on_volume_sync_change(self) -> None:
         if not self._routes_ready:
             return
+        self._after_paint(self._volume_sync_job)
+
+    def _volume_sync_job(self) -> None:
         self._save_routes()
         if not self.volume_sync.get():
             self._pc_muted = False
@@ -1210,14 +1321,16 @@ class HostApp:
         self._vol_ignore_pc_until = now + 0.45
         win_volume.set_scalar(level)
 
-    def _apply_mic_route(self) -> None:
-        if not self.mic_enabled.get():
+    def _apply_mic_route(self, on: bool | None = None, inject=None) -> None:
+        if on is None:
+            on = bool(self.mic_enabled.get())
+        if not on:
             self.hw.stop(self.adb, self._serial)
             self.sink.stop()
             self._log("已关闭麦克风通路")
             return
         self.sink.configure(48000, 1)
-        self._start_inject()
+        self._start_inject(inject)
         if self.adb and self._serial and not self.hw.running():
             try:
                 self.hw.start(self.adb, self._serial, self.sink)
@@ -1227,12 +1340,21 @@ class HostApp:
                 self._log("硬件直采失败，回退 APK 麦克风: " + str(exc))
                 self.client.send_control("start_mic")
 
-    def _apply_speaker_route(self) -> None:
-        if not self.spk_enabled.get():
+    def _apply_speaker_route(
+        self,
+        on: bool | None = None,
+        speaker=None,
+        set_default: bool | None = None,
+        inject=None,
+        mic_on: bool | None = None,
+    ) -> None:
+        if on is None:
+            on = bool(self.spk_enabled.get())
+        if not on:
             self._restore_render()
             self._log("已关闭扬声器通路")
             return
-        self._start_speaker()
+        self._start_speaker(speaker=speaker, set_default=set_default, inject=inject, mic_on=mic_on)
 
     def _install_vb(self) -> None:
         if not messagebox.askokcancel("LX04", vb_cable.DONATE_TEXT):
@@ -1255,7 +1377,7 @@ class HostApp:
             if not messagebox.askokcancel("LX04", afterburner.LAUNCH_TEXT):
                 return
             self._log(afterburner.launch(exe))
-            self.root.after(2000, lambda: self._push_pc_stats(force=True))
+            self.root.after(2000, lambda: self._spawn_stats(force=True))
             return
         if not messagebox.askokcancel("LX04", afterburner.DOWNLOAD_TEXT):
             return
@@ -1433,37 +1555,45 @@ class HostApp:
         finally:
             self._hud_from_apk = False
 
-    def _start_inject(self) -> None:
-        selected = self._selected_inject()
+    def _start_inject(self, selected=None) -> None:
+        if selected is None:
+            selected = self._selected_inject()
         if selected is None:
             raise RuntimeError("没有可用的播放设备。请先点刷新，或安装 VB-CABLE。")
         kind, handle, label = selected
         if win_endpoint.is_cable_render(label) or kind == "hidden":
-            prepared = win_endpoint.prepare_vb_cable()
-            for line in prepared.get("logs") or []:
-                self._log(line)
+            key = (kind, handle)
+            if self._cable_key != key:
+                prepared = win_endpoint.prepare_vb_cable()
+                self._cable_key = key
+                for line in prepared.get("logs") or []:
+                    self._log(line)
         if kind == "hidden":
             self.sink.start_hidden_cable(label.replace("  [隐藏]", "").strip())
         else:
             self.sink.start(int(handle))
         rec = win_mic.matching_recording_device(self.sink.device_name)
         rec_name = rec[1] if rec else "CABLE Output"
-        self.mic_var.set("请选择： " + rec_name)
+        self._ui(lambda n=rec_name: self.mic_var.set("请选择： " + n))
         self._log("麦克风已送入: " + self.sink.device_name + "  /  " + label)
         self._log(
             f"注入格式: {self.sink.out_rate}Hz / {self.sink._dtype} / {self.sink.out_channels}ch"
         )
         self._log("语音软件请选择: " + rec_name)
-        self._save_routes()
 
-    def _start_speaker(self) -> None:
-        selected = self._selected_speaker()
+    def _start_speaker(self, speaker=None, set_default: bool | None = None, inject=None, mic_on: bool | None = None) -> None:
+        selected = speaker if speaker is not None else self._selected_speaker()
         if selected is None:
             self._log("没有可环回的播放设备，扬声器通路未打开。可用「音箱试音」检查喇叭。")
             return
         device_id, name = selected
-        inject = self._selected_inject()
-        if self.mic_enabled.get() and inject is not None and win_endpoint.is_cable_render(name) and win_endpoint.is_cable_render(inject[2]):
+        if inject is None:
+            inject = self._selected_inject()
+        if set_default is None:
+            set_default = bool(self.set_default_spk.get())
+        if mic_on is None:
+            mic_on = bool(self.mic_enabled.get())
+        if mic_on and inject is not None and win_endpoint.is_cable_render(name) and win_endpoint.is_cable_render(inject[2]):
             self._log("警告：扬声器和麦克风都选了 VB-CABLE，微信里会串进系统声音。")
         self.loopback.stop()
         self.play_peak = 0.0
@@ -1471,7 +1601,7 @@ class HostApp:
         for line in prepared.get("logs") or []:
             self._log(line)
         device_id = prepared.get("device_id") or device_id
-        if self.set_default_spk.get():
+        if set_default:
             current = win_endpoint.get_default_render()
             if current and current[0] != device_id and self._prev_render is None:
                 self._prev_render = current
@@ -1481,7 +1611,6 @@ class HostApp:
                 self._log("未能把系统播放切到选中的设备。")
         self.loopback.start(device_id, name, self._on_loopback_pcm)
         self._log("扬声器环回: " + name)
-        self._save_routes()
 
     def _on_loopback_pcm(self, pcm: bytes, muted: bool) -> None:
         silent = muted or (self.volume_sync.get() and self._pc_muted)
@@ -1613,7 +1742,7 @@ class HostApp:
             self.client.send_control("gain", gain=round(self.sink.gain, 3))
             if self.volume_sync.get():
                 self._push_pc_volume(force=True)
-            self._push_pc_stats(force=True)
+            self._spawn_stats(force=True)
             self._push_upside_down()
             self._begin_hud_reconcile()
             if self.spk_enabled.get():
@@ -1765,7 +1894,7 @@ class HostApp:
             self.client.send_control("gain", gain=round(self.sink.gain, 3))
             if self.volume_sync.get():
                 self._push_pc_volume(force=True)
-            self._push_pc_stats(force=True)
+            self._spawn_stats(force=True)
             self._push_upside_down()
             self._begin_hud_reconcile()
         except Exception as exc:
@@ -1944,7 +2073,7 @@ class HostApp:
         self._stats_ticks += 1
         if self._stats_ticks >= 12:
             self._stats_ticks = 0
-            self._push_pc_stats()
+            self._spawn_stats()
         if self.mirror.error:
             self._log("屏幕镜像: " + self.mirror.error)
             self.mirror.error = ""
@@ -1964,6 +2093,9 @@ class HostApp:
         canvas.create_rectangle(0, 0, fill, 22, fill=color, outline="")
 
     def _log(self, line: str) -> None:
+        if threading.current_thread() is not threading.main_thread():
+            self._ui(lambda l=line: self._log(l))
+            return
         self.log.insert("end", line + "\n")
         self.log.see("end")
 
