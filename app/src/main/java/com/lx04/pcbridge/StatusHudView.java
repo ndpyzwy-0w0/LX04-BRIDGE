@@ -457,7 +457,7 @@ public class StatusHudView extends View {
         int usbColor = !s.usbConnected ? 0xFFFF5C7A : (s.clientConnected ? 0xFF3DDC97 : 0xFFFFB020);
         accent.setColor(usbColor);
         canvas.drawCircle(dp(16), dp(16), dp(6), accent);
-        String barTitle = (s.toastTitle == null || s.toastTitle.isEmpty()) ? "系统弹窗" : s.toastTitle;
+        String barTitle = "系统弹窗";
         int barText = light ? 0xFF1A2333 : 0xFFE8EEF8;
         float clockLeft = drawClock(canvas, w, dp(21), barText, dp(13));
         text.setTextSize(dp(13));
