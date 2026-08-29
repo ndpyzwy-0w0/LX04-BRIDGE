@@ -25,18 +25,23 @@ def main() -> None:
     assert not tm.stale_toast(nxt, 11, key)
     assert not tm.stale_toast(other, 11, key)
     assert not tm.stale_toast(None, 11, key)
-    skeleton = tm.ToastContent(title="系统弹窗", hwnd=11, partial=True)
-    filled = tm.ToastContent(app="Cursor", title="申请权限", body="用麦克风", hwnd=11)
-    assert skeleton.fingerprint() != filled.fingerprint()
+    title_only = tm.ToastContent(title="申请权限", hwnd=11)
+    with_btns = tm.ToastContent(
+        title="申请权限",
+        hwnd=11,
+        buttons=[tm.ToastButtonInfo("0", "允许"), tm.ToastButtonInfo("1", "拒绝")],
+    )
+    assert tm._richer(title_only, with_btns) is with_btns
+    assert tm._richer(with_btns, title_only) is with_btns
     loop = inspect.getsource(tm.ToastSender._loop)
     hide = inspect.getsource(tm.ToastSender._hide)
-    show = inspect.getsource(tm.ToastSender._show_skeleton)
     winevent = inspect.getsource(tm.ToastSender._on_win_event)
+    sender = inspect.getsource(tm.ToastSender)
     assert "stale_toast" in loop or "_blocked" in loop
-    assert "_show_skeleton" in loop and "POLL_FILL_S" in loop
+    assert "_show_skeleton" not in sender
+    assert "SETTLE_S" in loop and "_candidate" in loop
     assert "_ignore_hwnd" in hide and "_ignore_key" in hide
-    assert "partial" in show
-    assert "_show_skeleton" in winevent
+    assert "_show_skeleton" not in winevent
     print("ok")
 
 
