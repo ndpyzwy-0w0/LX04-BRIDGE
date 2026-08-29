@@ -22,7 +22,14 @@ def main() -> None:
     send = inspect.getsource(pc_host.BridgeClient.send_control)
     assert "_after_paint" in mic and "_after_paint" in spk and "_after_paint" in light
     assert "_apply_mic_route" not in mic
-    assert "threading.Thread" in send and "main_thread" in send
+    init = inspect.getsource(pc_host.HostApp.__init__)
+    assert "_boot" in init
+    assert "refresh_devices" not in init
+    assert "tidy_cable" not in init
+    main_src = inspect.getsource(pc_host.main)
+    assert "_on_close" in main_src
+    close = inspect.getsource(pc_host.HostApp._on_close)
+    assert "withdraw" in close
     print("ok")
 
 
