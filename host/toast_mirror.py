@@ -95,6 +95,7 @@ WM_CLOSE = 0x0010
 COINIT_APARTMENTTHREADED = 0x2
 POLL_IDLE_S = 0.04
 POLL_LIVE_S = 0.05
+POLL_FILL_S = 0.015
 HOLD_OFF_S = 0.55
 PM_REMOVE = 0x0001
 QS_ALLINPUT = 0x04FF
@@ -203,9 +204,17 @@ class ToastContent:
     body: str = ""
     buttons: list[ToastButtonInfo] = field(default_factory=list)
     hwnd: int = 0
+    partial: bool = False
 
     def fingerprint(self) -> tuple:
-        return (self.hwnd, self.app, self.title, self.body, tuple((b.id, b.label) for b in self.buttons))
+        return (
+            self.hwnd,
+            self.app,
+            self.title,
+            self.body,
+            tuple((b.id, b.label) for b in self.buttons),
+            self.partial,
+        )
 
     def as_control(self) -> dict:
         return {
@@ -822,6 +831,7 @@ class ToastSender:
         self._ignore_key: tuple | None = None
         self._wake = None
         self._hint_hwnd = 0
+        self._pending_hwnd = 0
         self._idle_n = 0
         self._hooks: list = []
         self._winevent_proc = None
@@ -857,6 +867,7 @@ class ToastSender:
             self._ignore_hwnd = 0
             self._ignore_key = None
             self._hint_hwnd = 0
+            self._pending_hwnd = 0
             self._last_buttons = []
             self._idle_n = 0
             self._hooks = []
@@ -882,6 +893,7 @@ class ToastSender:
                 self._last_buttons = []
                 self._ignore_hwnd = 0
                 self._ignore_key = None
+                self._pending_hwnd = 0
             if was_showing:
                 self._emit(False, None)
 
@@ -931,8 +943,24 @@ class ToastSender:
                 self._last_buttons = list(self._content.buttons)
                 self._content = None
                 self._fingerprint = None
+            self._pending_hwnd = 0
         if was:
             self._emit(False, None)
+
+    def _show_skeleton(self, hwnd: int) -> None:
+        if not self._alive or self._showing or not hwnd:
+            return
+        if hwnd == self._ignore_hwnd or time.monotonic() < self._holdoff:
+            return
+        content = ToastContent(title="系统弹窗", hwnd=hwnd, partial=True)
+        with self._lock:
+            if not self._alive or self._showing:
+                return
+            self._content = content
+            self._fingerprint = content.fingerprint()
+            self._showing = True
+            self._pending_hwnd = hwnd
+        self._emit(True, content)
 
     def _blocked(self, content: ToastContent | None) -> bool:
         if content is None:
@@ -1000,6 +1028,8 @@ class ToastSender:
                 or title in TOAST_TITLES
             ):
                 self._hint_hwnd = handle
+                if _hwnd_is_toast(handle, os.getpid(), require_visible=False):
+                    self._show_skeleton(handle)
                 self._signal()
         except Exception:
             pass
@@ -1095,6 +1125,14 @@ class ToastSender:
                 self._hint_hwnd = 0
                 if hint and hint == self._ignore_hwnd:
                     hint = 0
+                if not hint and self._pending_hwnd and self._pending_hwnd != self._ignore_hwnd:
+                    hint = self._pending_hwnd
+                if not hint and not self._showing:
+                    hwnds = find_toast_hwnds()
+                    if hwnds and hwnds[0] != self._ignore_hwnd:
+                        hint = hwnds[0]
+                if hint:
+                    self._show_skeleton(hint)
                 self._idle_n += 1
                 enum_windows = bool(hint) or (self._idle_n % 10 == 0)
                 try:
@@ -1105,6 +1143,14 @@ class ToastSender:
                 if content is not None and self._blocked(content):
                     content = None
                 if content is None:
+                    keep_hwnd = hint or self._pending_hwnd
+                    if self._showing and keep_hwnd and keep_hwnd != self._ignore_hwnd and _hwnd_is_toast(
+                        keep_hwnd, os.getpid()
+                    ):
+                        remain = POLL_FILL_S - (time.monotonic() - started)
+                        if remain > 0 and self._alive:
+                            self._wait(remain)
+                        continue
                     if self._showing:
                         self._hide()
                     self._forget_dead_ignore()
@@ -1125,6 +1171,7 @@ class ToastSender:
                         self._ignore_key = None
                         self._content = content
                         self._last_buttons = list(content.buttons)
+                        self._pending_hwnd = content.hwnd or hint
                         changed = fp != self._fingerprint
                         self._fingerprint = fp
                         start_show = not self._showing
