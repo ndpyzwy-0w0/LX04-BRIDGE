@@ -38,6 +38,7 @@ public class BridgeService extends Service {
         STATE.lightTheme = DisplayPrefs.isLightTheme(this);
         STATE.screenMirror = DisplayPrefs.isScreenMirror(this);
         STATE.autoHideMute = DisplayPrefs.isAutoHideMute(this);
+        STATE.bootStart = DisplayPrefs.isBootStart(this);
         loadClockPrefs(this);
         DisplayPrefs.loadHudStyle(this, STATE.hudStyle);
         HudBackground.INSTANCE.init(this);
@@ -355,6 +356,13 @@ public class BridgeService extends Service {
         STATE.autoHideMute = on;
         if (context != null) {
             DisplayPrefs.setAutoHideMute(context, on);
+        }
+    }
+
+    public static void setBootStart(android.content.Context context, boolean on) {
+        STATE.bootStart = on;
+        if (context != null) {
+            DisplayPrefs.setBootStart(context, on);
         }
     }
 

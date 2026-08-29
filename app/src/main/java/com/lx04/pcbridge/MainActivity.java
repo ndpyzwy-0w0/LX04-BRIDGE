@@ -99,6 +99,7 @@ public class MainActivity extends Activity {
         BridgeService.STATE.lightTheme = DisplayPrefs.isLightTheme(this);
         BridgeService.STATE.screenMirror = DisplayPrefs.isScreenMirror(this);
         BridgeService.STATE.autoHideMute = DisplayPrefs.isAutoHideMute(this);
+        BridgeService.STATE.bootStart = DisplayPrefs.isBootStart(this);
         BridgeService.loadClockPrefs(this);
         DisplayPrefs.loadHudStyle(this, BridgeService.STATE.hudStyle);
         HudBackground.INSTANCE.init(this);

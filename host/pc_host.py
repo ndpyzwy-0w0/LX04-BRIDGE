@@ -10,6 +10,7 @@ import sys
 import threading
 import time
 import tkinter as tk
+import winreg
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
@@ -21,6 +22,8 @@ def _host_dir() -> Path:
 
 HOST_DIR = _host_dir()
 ROUTES_FILE = HOST_DIR / "audio_routes.json"
+_RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
+_RUN_NAME = "LX04 PC Bridge"
 if not getattr(sys, "frozen", False) and str(HOST_DIR) not in sys.path:
     sys.path.insert(0, str(HOST_DIR))
 
@@ -397,6 +400,7 @@ class HostApp:
         self.upside_down = tk.BooleanVar(value=False)
         self.light_theme = tk.BooleanVar(value=False)
         self.toast_mirror = tk.BooleanVar(value=False)
+        self.autostart = tk.BooleanVar(value=False)
         self.disk_var = tk.StringVar()
         self.monitor_var = tk.StringVar()
         self.quality_var = tk.StringVar(value=screen_mirror.DEFAULT_QUALITY)
@@ -679,6 +683,27 @@ class HostApp:
             style="CardDim.TLabel",
         ).pack(side="left", padx=8)
 
+        boot_row = ttk.Frame(card, style="Card.TFrame")
+        boot_row.pack(fill="x", padx=16, pady=(0, 8))
+        tk.Checkbutton(
+            boot_row,
+            text="开机自启动",
+            variable=self.autostart,
+            command=self._on_autostart_change,
+            bg=PANEL,
+            fg=TEXT,
+            selectcolor="#1E2A44",
+            activebackground=PANEL,
+            activeforeground=TEXT,
+            highlightthickness=0,
+            font=("Segoe UI", 10),
+        ).pack(side="left")
+        ttk.Label(
+            boot_row,
+            text="登录 Windows 后自动打开上位机。",
+            style="CardDim.TLabel",
+        ).pack(side="left", padx=8)
+
         row2 = ttk.Frame(card, style="Card.TFrame")
         row2.pack(fill="x", padx=16, pady=(0, 8))
         ttk.Button(row2, text="试音", command=self._on_test_tone).pack(side="left")
@@ -786,6 +811,13 @@ class HostApp:
         self.mirror.set_quality(self.quality_var.get())
         self._refresh_disks()
         self._refresh_monitors()
+        on = _autostart_enabled()
+        self.autostart.set(on)
+        if on:
+            try:
+                _set_autostart(True)
+            except OSError:
+                pass
 
     def _save_routes(self) -> None:
         payload = {
@@ -1011,6 +1043,18 @@ class HostApp:
         self._toast_ui_fp = None
         self._toast_logged = False
         self.mirror.resume()
+
+    def _on_autostart_change(self) -> None:
+        if not self._routes_ready:
+            return
+        want = bool(self.autostart.get())
+        try:
+            _set_autostart(want)
+        except OSError as exc:
+            self.autostart.set(_autostart_enabled())
+            self._log("开机自启动设置失败: " + str(exc))
+            return
+        self._log("开机自启动: " + ("已开启，登录 Windows 后自动打开上位机" if want else "已关闭"))
 
     def _on_toast_mirror_change(self) -> None:
         if not self._routes_ready:
@@ -1922,6 +1966,36 @@ class HostApp:
     def _log(self, line: str) -> None:
         self.log.insert("end", line + "\n")
         self.log.see("end")
+
+
+def _autostart_command() -> str:
+    exe = str(Path(sys.executable).resolve())
+    if getattr(sys, "frozen", False):
+        return f'"{exe}"'
+    return f'"{exe}" "{Path(__file__).resolve()}"'
+
+
+def _autostart_enabled() -> bool:
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, _RUN_KEY) as key:
+            value, _typ = winreg.QueryValueEx(key, _RUN_NAME)
+        return bool(str(value or "").strip())
+    except OSError:
+        return False
+
+
+def _set_autostart(on: bool) -> None:
+    key = winreg.CreateKey(winreg.HKEY_CURRENT_USER, _RUN_KEY)
+    try:
+        if on:
+            winreg.SetValueEx(key, _RUN_NAME, 0, winreg.REG_SZ, _autostart_command())
+        else:
+            try:
+                winreg.DeleteValue(key, _RUN_NAME)
+            except FileNotFoundError:
+                pass
+    finally:
+        key.Close()
 
 
 def _pick_label(labels: list[str], saved: str, fallback: str | None) -> str:
