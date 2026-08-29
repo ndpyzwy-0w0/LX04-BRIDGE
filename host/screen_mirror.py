@@ -162,6 +162,17 @@ gdi32.DeleteDC.argtypes = [wintypes.HDC]
 gdi32.CreateSolidBrush.argtypes = [wintypes.COLORREF]
 gdi32.CreateSolidBrush.restype = wintypes.HBRUSH
 user32.FillRect.argtypes = [wintypes.HDC, ctypes.POINTER(RECT), wintypes.HBRUSH]
+user32.GetCursorInfo.argtypes = [ctypes.c_void_p]
+user32.GetCursorInfo.restype = wintypes.BOOL
+user32.GetIconInfo.argtypes = [wintypes.HANDLE, ctypes.c_void_p]
+user32.GetIconInfo.restype = wintypes.BOOL
+user32.GetSystemMetrics.argtypes = [ctypes.c_int]
+user32.GetSystemMetrics.restype = ctypes.c_int
+user32.DrawIconEx.argtypes = [
+    wintypes.HDC, ctypes.c_int, ctypes.c_int, wintypes.HANDLE,
+    ctypes.c_int, ctypes.c_int, ctypes.c_uint, wintypes.HANDLE, ctypes.c_uint,
+]
+user32.DrawIconEx.restype = wintypes.BOOL
 
 gdiplus.GdiplusStartup.argtypes = [ctypes.POINTER(ctypes.c_ulong), ctypes.POINTER(GdiplusStartupInput), ctypes.c_void_p]
 gdiplus.GdipCreateBitmapFromHBITMAP.argtypes = [wintypes.HBITMAP, wintypes.HPALETTE, ctypes.POINTER(ctypes.c_void_p)]
@@ -412,6 +423,48 @@ def capture_jpeg_fit(monitor: Monitor) -> bytes:
         grabber.close()
 
 
+class CURSORINFO(ctypes.Structure):
+    _fields_ = [
+        ("cbSize", wintypes.DWORD),
+        ("flags", wintypes.DWORD),
+        ("hCursor", wintypes.HANDLE),
+        ("ptScreenPos", wintypes.POINT),
+    ]
+
+
+class ICONINFO(ctypes.Structure):
+    _fields_ = [
+        ("fIcon", wintypes.BOOL),
+        ("xHotspot", wintypes.DWORD),
+        ("yHotspot", wintypes.DWORD),
+        ("hbmMask", wintypes.HBITMAP),
+        ("hbmColor", wintypes.HBITMAP),
+    ]
+
+
+def _draw_cursor(hdc, monitor: Monitor, dest: tuple[int, int, int, int]) -> None:
+    info = CURSORINFO()
+    info.cbSize = ctypes.sizeof(CURSORINFO)
+    if not user32.GetCursorInfo(ctypes.byref(info)) or info.flags != 1 or not info.hCursor:
+        return
+    dest_x, dest_y, dest_w, dest_h = dest
+    hot_x = hot_y = 0
+    icon = ICONINFO()
+    if user32.GetIconInfo(info.hCursor, ctypes.byref(icon)):
+        hot_x, hot_y = int(icon.xHotspot), int(icon.yHotspot)
+        if icon.hbmMask:
+            gdi32.DeleteObject(icon.hbmMask)
+        if icon.hbmColor:
+            gdi32.DeleteObject(icon.hbmColor)
+    sx = dest_w / max(1, monitor.width)
+    sy = dest_h / max(1, monitor.height)
+    x = dest_x + int((info.ptScreenPos.x - monitor.left - hot_x) * sx)
+    y = dest_y + int((info.ptScreenPos.y - monitor.top - hot_y) * sy)
+    cw = max(1, int(user32.GetSystemMetrics(13) * sx))
+    ch = max(1, int(user32.GetSystemMetrics(14) * sy))
+    user32.DrawIconEx(hdc, x, y, info.hCursor, cw, ch, 0, None, 3)
+
+
 class _Grabber:
     def __init__(self) -> None:
         self.src_dc = None
@@ -421,6 +474,8 @@ class _Grabber:
         self.brush = None
         self.stream = None
         self.frames = 0
+        self._dxgi = None
+        self._dxgi_skip = 0
 
     def open(self) -> None:
         _ensure_gdiplus()
@@ -442,8 +497,10 @@ class _Grabber:
         quality_small: int | None = None,
     ) -> bytes:
         if not self.dst_dc or self.frames >= GRABBER_REOPEN_FRAMES:
-            self.close()
+            self._close_gdi()
             self.open()
+        if self._blit_dxgi(monitor):
+            return self._finish(quality, max_jpeg, quality_small)
         return self.grab_region(
             monitor.left, monitor.top, monitor.width, monitor.height,
             quality=quality, max_jpeg=max_jpeg, quality_small=quality_small,
@@ -460,7 +517,7 @@ class _Grabber:
         quality_small: int | None = None,
     ) -> bytes:
         if not self.dst_dc or self.frames >= GRABBER_REOPEN_FRAMES:
-            self.close()
+            self._close_gdi()
             self.open()
         fill = RECT(0, 0, TARGET_W, TARGET_H)
         user32.FillRect(self.dst_dc, ctypes.byref(fill), self.brush)
@@ -471,7 +528,7 @@ class _Grabber:
             SRCCOPY,
         )
         if not ok:
-            self.close()
+            self._close_gdi()
             self.open()
             ok = gdi32.StretchBlt(
                 self.dst_dc, dest_x, dest_y, dest_w, dest_h,
@@ -480,6 +537,47 @@ class _Grabber:
             )
         if not ok:
             raise RuntimeError("截取屏幕失败")
+        return self._finish(quality, max_jpeg, quality_small)
+
+    def _blit_dxgi(self, monitor: Monitor) -> bool:
+        import dxgi_grab
+
+        if self._dxgi_skip > 0:
+            self._dxgi_skip -= 1
+            return False
+        try:
+            if self._dxgi is None or self._dxgi.key != monitor.key:
+                if self._dxgi is not None:
+                    self._dxgi.close()
+                    self._dxgi = None
+                grab = dxgi_grab.DxgiGrab()
+                if not grab.open(monitor.key):
+                    self._dxgi_skip = 45
+                    return False
+                self._dxgi = grab
+            box = letterbox(monitor.width, monitor.height)
+            if not self._dxgi.blit(self.dst_dc, self.brush, box, TARGET_W, TARGET_H):
+                return False
+            _draw_cursor(self.dst_dc, monitor, box)
+            return True
+        except dxgi_grab.AccessLost:
+            if self._dxgi is not None:
+                self._dxgi.close()
+                self._dxgi = None
+            return False
+        except Exception:
+            if self._dxgi is not None:
+                self._dxgi.close()
+                self._dxgi = None
+            self._dxgi_skip = 45
+            return False
+
+    def _finish(
+        self,
+        quality: int | None,
+        max_jpeg: int | None,
+        quality_small: int | None,
+    ) -> bytes:
         q = JPEG_QUALITY if quality is None else quality
         cap = MAX_JPEG if max_jpeg is None else max_jpeg
         small = JPEG_QUALITY_SMALL if quality_small is None else quality_small
@@ -506,6 +604,15 @@ class _Grabber:
             return _hbitmap_to_jpeg(self.bmp, quality, self.stream)
 
     def close(self) -> None:
+        if self._dxgi is not None:
+            try:
+                self._dxgi.close()
+            except Exception:
+                pass
+            self._dxgi = None
+        self._close_gdi()
+
+    def _close_gdi(self) -> None:
         if self.stream:
             try:
                 _istream_release(self.stream)
@@ -849,7 +956,7 @@ class ScreenSender:
 
     def _send_loop(self) -> None:
         # ponytail: grab only after the previous JPEG is ACKed, so a frame never
-        # sits in the slot aging by one USB RTT. Ceiling: GDI+JPEG; next is DXGI.
+        # sits in the slot aging by one USB RTT. Ceiling: JPEG encode/decode.
         while self._alive:
             if self._paused:
                 time.sleep(0.05)

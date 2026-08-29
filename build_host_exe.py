@@ -119,6 +119,8 @@ def main() -> int:
         "--hidden-import",
         "screen_mirror",
         "--hidden-import",
+        "dxgi_grab",
+        "--hidden-import",
         "toast_mirror",
         "--hidden-import",
         "comtypes.gen.UIAutomationClient",
