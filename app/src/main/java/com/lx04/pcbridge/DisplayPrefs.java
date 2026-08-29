@@ -10,6 +10,7 @@ final class DisplayPrefs {
     private static final String KEY_HUD_STYLE = "hud_style";
     private static final String KEY_SCREEN_MIRROR = "screen_mirror";
     private static final String KEY_AUTO_HIDE_MUTE = "auto_hide_mute";
+    private static final String KEY_BOOT_START = "boot_start";
     private static final String KEY_CLOCK_DATE = "clock_date";
     private static final String KEY_CLOCK_HOUR = "clock_hour";
     private static final String KEY_CLOCK_MINUTE = "clock_minute";
@@ -50,6 +51,14 @@ final class DisplayPrefs {
 
     static void setAutoHideMute(Context context, boolean on) {
         prefs(context).edit().putBoolean(KEY_AUTO_HIDE_MUTE, on).apply();
+    }
+
+    static boolean isBootStart(Context context) {
+        return prefs(context).getBoolean(KEY_BOOT_START, false);
+    }
+
+    static void setBootStart(Context context, boolean on) {
+        prefs(context).edit().putBoolean(KEY_BOOT_START, on).apply();
     }
 
     static boolean clockDate(Context context) {

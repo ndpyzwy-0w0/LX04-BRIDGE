@@ -12,6 +12,7 @@ final class BridgeState {
     volatile boolean screenMirror;
     volatile boolean toastOverlay;
     volatile boolean autoHideMute;
+    volatile boolean bootStart;
     volatile boolean clockDate = true;
     volatile boolean clockHour = true;
     volatile boolean clockMinute = true;

@@ -40,6 +40,8 @@ final class AppMenu {
     private final RectF clockHourRect = new RectF();
     private final RectF clockMinuteRect = new RectF();
     private final RectF clockSecondRect = new RectF();
+    private final RectF bootOffRect = new RectF();
+    private final RectF bootOnRect = new RectF();
     private final RectF settingsPanel = new RectF();
     private final RectF settingsViewport = new RectF();
     private final RectF bgRow = new RectF();
@@ -219,7 +221,7 @@ final class AppMenu {
         canvas.drawText("系统设置", settingsRow.left + dp(14), settingsRow.top + dp(32), text);
         dim.setColor(colDim());
         dim.setTextSize(dp(11));
-        canvas.drawText("深色 / 浅色 / 时间 / 背景", settingsRow.left + dp(14), settingsRow.top + dp(46), dim);
+        canvas.drawText("外观 / 时间 / 自启 / 背景", settingsRow.left + dp(14), settingsRow.top + dp(46), dim);
         drawChevron(canvas, settingsRow.right - dp(18), settingsRow.centerY(), dp(8), colDim(), false);
 
         boolean mirroring = BridgeService.STATE.screenMirror;
@@ -327,9 +329,23 @@ final class AppMenu {
             dim.setTextSize(dp(12));
             canvas.drawText("右上角逐项开关，全关则不显示。",
                     left, clockSecondRect.bottom + dp(18), dim);
+            dim.setTextSize(dp(13));
+            canvas.drawText("开机自启动", left, clockSecondRect.bottom + dp(42), dim);
         }
 
-        bgRow.set(left, clockSecondRect.bottom + dp(30), right, clockSecondRect.bottom + dp(76));
+        float bootTop = clockSecondRect.bottom + dp(50);
+        bootOffRect.set(left, bootTop, left + btnW, bootTop + btnH);
+        bootOnRect.set(bootOffRect.right + gap, bootTop, right, bootTop + btnH);
+        if (draw) {
+            boolean boot = BridgeService.STATE.bootStart;
+            drawModeButton(canvas, bootOffRect, "关闭", !boot);
+            drawModeButton(canvas, bootOnRect, "开启", boot);
+            dim.setTextSize(dp(12));
+            canvas.drawText("开启后音箱开机自动进入本应用。",
+                    left, bootOnRect.bottom + dp(18), dim);
+        }
+
+        bgRow.set(left, bootOnRect.bottom + dp(30), right, bootOnRect.bottom + dp(76));
         if (draw) {
             card.setColor(colCard());
             canvas.drawRoundRect(bgRow, dp(12), dp(12), card);
@@ -712,6 +728,14 @@ final class AppMenu {
                 view.invalidate();
                 return true;
             }
+            if (hitSetting(bootOffRect, x, y)) {
+                setBootStart(false);
+                return true;
+            }
+            if (hitSetting(bootOnRect, x, y)) {
+                setBootStart(true);
+                return true;
+            }
             if (hitSetting(bgRow, x, y)) {
                 openBgSettings();
                 return true;
@@ -848,6 +872,11 @@ final class AppMenu {
     private void setAutoHideMute(boolean on) {
         BridgeService.setAutoHideMute(view.getContext(), on);
         view.onMuteAutoHideChanged();
+        view.invalidate();
+    }
+
+    private void setBootStart(boolean on) {
+        BridgeService.setBootStart(view.getContext(), on);
         view.invalidate();
     }
 
