@@ -9,6 +9,7 @@ build/pyinstaller/
 captures/
 *.apk
 !dist/LX04-PC-Bridge.apk
+dist/LX04-PC-Bridge-v*.apk
 *.aab
 *.ap_
 *.dex
@@ -25,8 +26,11 @@ host/.venv/
 .externalNativeBuild/
 
 # Do not keep versioned host EXEs; git tracks dist/LX04-PC-Bridge-Host.exe only.
+dist/*.exe
+!dist/LX04-PC-Bridge-Host.exe
 dist/LX04-PC-Bridge-Host-v*.exe
 dist/LX04-PC-Bridge-Host.exe.running
+dist/*.old.exe
 dist/vbcable/
 dist/hificable/
 
