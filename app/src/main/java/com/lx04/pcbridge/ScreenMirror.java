@@ -23,6 +23,7 @@ final class ScreenMirror {
     private byte[] pending;
     private Thread decoder;
     private volatile boolean running;
+    private volatile int epoch;
     private volatile View host;
 
     private ScreenMirror() {
@@ -43,6 +44,9 @@ final class ScreenMirror {
             return;
         }
         synchronized (inLock) {
+            if (!BridgeService.STATE.screenMirror) {
+                return;
+            }
             pending = jpeg;
             inLock.notify();
         }
@@ -50,23 +54,13 @@ final class ScreenMirror {
     }
 
     void clear() {
-        running = false;
+        // Drop refs only. recycle() races the hardware render thread and leftover JPEG decodes.
         synchronized (inLock) {
+            epoch++;
             pending = null;
             inLock.notifyAll();
         }
-        Thread thread = decoder;
-        decoder = null;
-        if (thread != null) {
-            thread.interrupt();
-            try {
-                thread.join(300);
-            } catch (InterruptedException ignored) {
-            }
-        }
         synchronized (lock) {
-            recycle(shown);
-            recycle(scratch);
             shown = null;
             scratch = null;
             frameAt = 0;
@@ -111,6 +105,7 @@ final class ScreenMirror {
     private void decodeLoop() {
         while (running) {
             byte[] jpeg;
+            int myEpoch;
             synchronized (inLock) {
                 while (running && pending == null) {
                     try {
@@ -121,38 +116,33 @@ final class ScreenMirror {
                 }
                 jpeg = pending;
                 pending = null;
+                myEpoch = epoch;
             }
             if (!running || jpeg == null) {
                 continue;
             }
             Bitmap reuse;
             synchronized (lock) {
+                if (myEpoch != epoch) {
+                    continue;
+                }
                 reuse = scratch;
             }
             options.inBitmap = (reuse != null && !reuse.isRecycled() && reuse.isMutable()) ? reuse : null;
-            Bitmap decoded = BitmapFactory.decodeByteArray(jpeg, 0, jpeg.length, options);
+            Bitmap decoded = decode(jpeg);
             if (decoded == null && options.inBitmap != null) {
                 options.inBitmap = null;
-                decoded = BitmapFactory.decodeByteArray(jpeg, 0, jpeg.length, options);
+                decoded = decode(jpeg);
             }
-            if (decoded == null || !running) {
-                if (decoded != null && decoded != reuse) {
-                    decoded.recycle();
-                }
+            if (decoded == null) {
                 continue;
             }
             synchronized (lock) {
-                if (!running) {
-                    if (decoded != shown && decoded != scratch) {
-                        decoded.recycle();
-                    }
+                if (myEpoch != epoch) {
                     continue;
                 }
                 Bitmap oldShown = shown;
                 shown = decoded;
-                if (reuse != null && reuse != decoded && reuse != oldShown) {
-                    recycle(reuse);
-                }
                 scratch = (oldShown != null && oldShown != decoded) ? oldShown : null;
                 frameAt = SystemClock.elapsedRealtime();
             }
@@ -163,9 +153,11 @@ final class ScreenMirror {
         }
     }
 
-    private static void recycle(Bitmap bitmap) {
-        if (bitmap != null && !bitmap.isRecycled()) {
-            bitmap.recycle();
+    private Bitmap decode(byte[] jpeg) {
+        try {
+            return BitmapFactory.decodeByteArray(jpeg, 0, jpeg.length, options);
+        } catch (RuntimeException e) {
+            return null;
         }
     }
 }
