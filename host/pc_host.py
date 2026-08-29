@@ -1524,7 +1524,7 @@ class HostApp:
             samples.append(value)
             samples.append(value)
         pcm = samples.tobytes()
-        step = (rate // 50) * 4
+        step = (rate // 100) * 4
 
         def _send() -> None:
             for offset in range(0, len(pcm), step):
@@ -1533,7 +1533,7 @@ class HostApp:
                 chunk = pcm[offset : offset + step]
                 self.play_peak = max(self.play_peak, self._pcm_peak(chunk))
                 self.client.send_play(chunk)
-                time.sleep(0.02)
+                time.sleep(0.01)
 
         threading.Thread(target=_send, daemon=True).start()
         self._log("已向音箱送出试音。应能从音箱喇叭听到「嘀」。")

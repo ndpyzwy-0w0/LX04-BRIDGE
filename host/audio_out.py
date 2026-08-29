@@ -16,6 +16,8 @@ except ImportError:  # pragma: no cover
 PREFERRED_OUTPUTS = (
     "cable input",
 )
+BLOCK_SEC = 0.01
+QUEUE_PACKETS = 6
 
 
 class AudioSink:
@@ -25,7 +27,7 @@ class AudioSink:
         self.in_channels = 1
         self.out_channels = 1
         self.device: int | None = None
-        self._queue: queue.Queue[bytes] = queue.Queue(maxsize=32)
+        self._queue: queue.Queue[bytes] = queue.Queue(maxsize=QUEUE_PACKETS)
         self._pending = bytearray()
         self._stream = None
         self._lock = threading.Lock()
@@ -123,7 +125,12 @@ class AudioSink:
             )
         )
         extra = None
+        extra_raw = None
         if "WASAPI" in api:
+            try:
+                extra_raw = sd.WasapiSettings(exclusive=False, auto_convert=False)
+            except Exception:
+                extra_raw = None
             try:
                 extra = sd.WasapiSettings(exclusive=False, auto_convert=True)
             except Exception:
@@ -134,16 +141,18 @@ class AudioSink:
         else:
             rate = native_rate or 48000
         attempts: list[tuple[str, int, int, object]] = []
+        if extra_raw is not None:
+            attempts.append(("int16", channels, rate, extra_raw))
         if extra is not None:
             attempts.append(("int16", channels, rate, extra))
             attempts.append(("float32", channels, rate, extra))
         attempts.append(("int16", channels, rate, None))
         if rate != native_rate and native_rate > 0:
-            attempts.append(("int16", channels, native_rate, extra if extra is not None else None))
+            attempts.append(("int16", channels, native_rate, extra if extra is not None else extra_raw))
         if channels > 1:
             attempts.append(("int16", 1, rate, None))
         last_error: Exception | None = None
-        self._queue = queue.Queue(maxsize=32)
+        self._queue = queue.Queue(maxsize=QUEUE_PACKETS)
         self._pending = bytearray()
         self.underruns = 0
         self.callback_error = ""
@@ -153,7 +162,7 @@ class AudioSink:
                 channels=ch,
                 dtype=dtype,
                 device=device,
-                blocksize=max(int(sr * 0.02), 1),
+                blocksize=max(int(sr * BLOCK_SEC), 1),
                 callback=self._callback,
             )
             if settings is not None:
@@ -198,7 +207,7 @@ class AudioSink:
         stream = self._stream
         if stream is None or self._started:
             return
-        if not force and self._queue.qsize() < 4:
+        if not force and self._queue.empty():
             return
         try:
             stream.start()

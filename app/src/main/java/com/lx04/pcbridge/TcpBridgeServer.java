@@ -13,6 +13,7 @@ import java.net.Socket;
 import java.net.SocketTimeoutException;
 import java.nio.charset.StandardCharsets;
 import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 final class TcpBridgeServer {
@@ -26,7 +27,7 @@ final class TcpBridgeServer {
 
     private final BridgeState state;
     private final Callbacks callbacks;
-    private final ArrayBlockingQueue<byte[]> outbound = new ArrayBlockingQueue<>(12);
+    private final ArrayBlockingQueue<byte[]> outbound = new ArrayBlockingQueue<>(6);
     private final ArrayBlockingQueue<byte[]> events = new ArrayBlockingQueue<>(8);
     private final AtomicInteger seq = new AtomicInteger();
     private volatile boolean running;
@@ -191,15 +192,17 @@ final class TcpBridgeServer {
                 }
                 byte[] frame = events.poll();
                 if (frame == null) {
-                    frame = outbound.poll();
+                    try {
+                        frame = outbound.poll(1, TimeUnit.MILLISECONDS);
+                    } catch (InterruptedException e) {
+                        break;
+                    }
                 }
                 if (frame != null) {
                     out.write(frame);
                     if (frame.length >= Protocol.HEADER_SIZE && frame[4] == Protocol.EVENT) {
                         out.flush();
                     }
-                } else {
-                    Thread.sleep(4);
                 }
                 long now = SystemClock.elapsedRealtime();
                 if (now - lastStatus > 250) {

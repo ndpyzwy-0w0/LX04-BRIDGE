@@ -19,7 +19,7 @@ WAVE_FORMAT_EXTENSIBLE = 0xFFFE
 REFTIMES_PER_MS = 10_000
 PLAY_RATE = 48000
 PLAY_CHANNELS = 2
-PACKET_FRAMES = PLAY_RATE // 50  # 20 ms
+PACKET_FRAMES = PLAY_RATE // 100  # 10 ms
 
 
 class WAVEFORMATEX(Structure):
@@ -228,7 +228,7 @@ class SpeakerLoopback:
             hr = client.Initialize(
                 AUDCLNT_SHAREMODE_SHARED,
                 AUDCLNT_STREAMFLAGS_LOOPBACK,
-                200 * REFTIMES_PER_MS,
+                50 * REFTIMES_PER_MS,
                 0,
                 mix,
                 None,
@@ -248,7 +248,7 @@ class SpeakerLoopback:
                 except Exception:
                     next_frames = 0
                 if not next_frames:
-                    time.sleep(0.005)
+                    time.sleep(0.001)
                     continue
                 try:
                     data, nframes, flags, _pos, _qpc = capture.GetBuffer()
@@ -291,3 +291,17 @@ class SpeakerLoopback:
                 comtypes.CoUninitialize()
             except Exception:
                 pass
+
+
+if __name__ == "__main__":
+    import audio_out
+
+    assert PLAY_RATE // PACKET_FRAMES == 100, PACKET_FRAMES
+    assert PACKET_FRAMES * PLAY_CHANNELS * 2 == PLAY_RATE * PLAY_CHANNELS * 2 // 100
+    raw = bytes(range(16))
+    assert _mix_to_s16(raw, 4, 2, 16, False) == raw
+    pcm = b"\x00\x10" * 48
+    assert resample_int16(pcm, 48000, 48000, 1) == pcm
+    assert audio_out.BLOCK_SEC == 0.01
+    assert audio_out.QUEUE_PACKETS <= 8
+    print("ok")

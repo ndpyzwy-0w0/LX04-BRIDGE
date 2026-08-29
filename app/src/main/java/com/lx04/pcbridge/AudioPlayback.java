@@ -1,5 +1,6 @@
 package com.lx04.pcbridge;
 
+import android.media.AudioAttributes;
 import android.media.AudioFormat;
 import android.media.AudioManager;
 import android.media.AudioTrack;
@@ -8,7 +9,7 @@ import android.os.Process;
 import java.util.concurrent.ArrayBlockingQueue;
 
 final class AudioPlayback {
-    private final ArrayBlockingQueue<byte[]> queue = new ArrayBlockingQueue<>(24);
+    private final ArrayBlockingQueue<byte[]> queue = new ArrayBlockingQueue<>(4);
     private volatile boolean running;
     private Thread thread;
     private AudioTrack track;
@@ -24,31 +25,69 @@ final class AudioPlayback {
         }
         stop();
         int rate = 48000;
-        int channels = AudioFormat.CHANNEL_OUT_STEREO;
-        int min = AudioTrack.getMinBufferSize(rate, channels, AudioFormat.ENCODING_PCM_16BIT);
+        int channelMask = AudioFormat.CHANNEL_OUT_STEREO;
+        int min = AudioTrack.getMinBufferSize(rate, channelMask, AudioFormat.ENCODING_PCM_16BIT);
         if (min <= 0) {
             return;
         }
-        int buffer = Math.max(min, rate / 25 * 4);
-        try {
-            track = new AudioTrack(AudioManager.STREAM_MUSIC, rate, channels,
-                    AudioFormat.ENCODING_PCM_16BIT, buffer, AudioTrack.MODE_STREAM);
-            if (track.getState() != AudioTrack.STATE_INITIALIZED) {
-                track.release();
+        AudioFormat format = new AudioFormat.Builder()
+                .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                .setSampleRate(rate)
+                .setChannelMask(channelMask)
+                .build();
+        track = openTrack(format, min, true);
+        if (track == null) {
+            track = openTrack(format, min, false);
+        }
+        if (track == null) {
+            try {
+                track = new AudioTrack(AudioManager.STREAM_MUSIC, rate, channelMask,
+                        AudioFormat.ENCODING_PCM_16BIT, min, AudioTrack.MODE_STREAM);
+                if (track.getState() != AudioTrack.STATE_INITIALIZED) {
+                    track.release();
+                    track = null;
+                    return;
+                }
+            } catch (Exception e) {
                 track = null;
                 return;
             }
+        }
+        try {
             track.play();
         } catch (Exception e) {
-            if (track != null) {
-                track.release();
-                track = null;
-            }
+            track.release();
+            track = null;
             return;
         }
         running = true;
         thread = new Thread(this::loop, "lx04-spk");
         thread.start();
+    }
+
+    private static AudioTrack openTrack(AudioFormat format, int buffer, boolean lowLatency) {
+        try {
+            AudioAttributes attrs = new AudioAttributes.Builder()
+                    .setUsage(lowLatency ? AudioAttributes.USAGE_GAME : AudioAttributes.USAGE_MEDIA)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                    .build();
+            AudioTrack.Builder builder = new AudioTrack.Builder()
+                    .setAudioAttributes(attrs)
+                    .setAudioFormat(format)
+                    .setBufferSizeInBytes(buffer)
+                    .setTransferMode(AudioTrack.MODE_STREAM);
+            if (lowLatency) {
+                builder.setPerformanceMode(AudioTrack.PERFORMANCE_MODE_LOW_LATENCY);
+            }
+            AudioTrack t = builder.build();
+            if (t.getState() != AudioTrack.STATE_INITIALIZED) {
+                t.release();
+                return null;
+            }
+            return t;
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     synchronized void stop() {
@@ -78,19 +117,18 @@ final class AudioPlayback {
         if (!running || pcm == null || pcm.length == 0) {
             return;
         }
-        byte[] copy = pcm.clone();
         if (muted || BridgeService.STATE.volume <= 0.001f) {
-            java.util.Arrays.fill(copy, (byte) 0);
+            java.util.Arrays.fill(pcm, (byte) 0);
             peak = 0f;
         }
-        if (!queue.offer(copy)) {
+        if (!queue.offer(pcm)) {
             queue.poll();
-            queue.offer(copy);
+            queue.offer(pcm);
         }
     }
 
     private void loop() {
-        Process.setThreadPriority(Process.THREAD_PRIORITY_AUDIO);
+        Process.setThreadPriority(Process.THREAD_PRIORITY_URGENT_AUDIO);
         AudioTrack t = track;
         if (t == null) {
             return;
