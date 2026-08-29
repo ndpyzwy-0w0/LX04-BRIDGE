@@ -102,7 +102,7 @@ final class AudioCapture {
             return null;
         }
         int ch = channelMask == AudioFormat.CHANNEL_IN_STEREO ? 2 : 1;
-        int buffer = Math.max(min, rate / 50 * 2 * ch * 8);
+        int buffer = min * 2;
         try {
             AudioRecord rec = new AudioRecord(source, rate, channelMask,
                     AudioFormat.ENCODING_PCM_16BIT, buffer);
@@ -148,12 +148,12 @@ final class AudioCapture {
     }
 
     private void loop() {
-        Process.setThreadPriority(Process.THREAD_PRIORITY_AUDIO);
+        Process.setThreadPriority(Process.THREAD_PRIORITY_URGENT_AUDIO);
         AudioRecord rec = record;
         if (rec == null) {
             return;
         }
-        int frameBytes = Math.max(sampleRate / 50, 320) * 2 * captureChannels;
+        int frameBytes = Math.max(sampleRate / 100, 160) * 2 * captureChannels;
         byte[] buf = new byte[frameBytes];
         byte[] mono = captureChannels == 2 ? new byte[frameBytes / 2] : buf;
         while (running) {
@@ -177,7 +177,7 @@ final class AudioCapture {
     }
 
     private static boolean hasRealSignal(AudioRecord rec, int rate, int ch) {
-        int chunk = Math.max(rate / 50, 320) * 2 * ch;
+        int chunk = Math.max(rate / 100, 160) * 2 * ch;
         byte[] buf = new byte[chunk];
         long sumSq = 0;
         long zeros = 0;

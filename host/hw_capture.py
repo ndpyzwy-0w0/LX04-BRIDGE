@@ -9,7 +9,7 @@ from pathlib import Path
 from audio_out import AudioSink
 
 CREATE_NO_WINDOW = 0x08000000
-CHUNK = 1920  # 20 ms of 48 kHz mono s16le
+CHUNK = 960  # 10 ms of 48 kHz mono s16le
 
 
 class HardwareMic:
