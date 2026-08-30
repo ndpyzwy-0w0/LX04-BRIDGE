@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import array
+import ctypes
 import json
 import math
 import socket
@@ -11,6 +12,7 @@ import threading
 import time
 import tkinter as tk
 import winreg
+from ctypes import wintypes
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
@@ -54,16 +56,54 @@ COMBO_FG = "#1A2333"
 COMBO_BG = "#F3F6FB"
 
 
+_user32 = ctypes.windll.user32
+_shell32 = ctypes.windll.shell32
+_LRESULT = ctypes.c_ssize_t
+_WNDPROC = ctypes.WINFUNCTYPE(_LRESULT, wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM)
+_WM_TRAY = 0x8001
+_WM_LBUTTONUP = 0x0202
+_WM_LBUTTONDBLCLK = 0x0203
+_WM_RBUTTONUP = 0x0205
+_NIM_ADD, _NIM_DELETE = 0, 2
+_NIF_MESSAGE, _NIF_ICON, _NIF_TIP = 1, 2, 4
+_GWLP_WNDPROC = -4
+_IDI_APPLICATION = 32512
+_TPM_RIGHTBUTTON = 0x0002
+_TPM_RETURNCMD = 0x0100
+_MF_STRING = 0x0000
+_TRAY_OPEN, _TRAY_QUIT = 1, 2
+
+
+class _POINT(ctypes.Structure):
+    _fields_ = [("x", wintypes.LONG), ("y", wintypes.LONG)]
+
+
+class _NOTIFYICONDATAW(ctypes.Structure):
+    _fields_ = [
+        ("cbSize", wintypes.DWORD),
+        ("hWnd", wintypes.HWND),
+        ("uID", wintypes.UINT),
+        ("uFlags", wintypes.UINT),
+        ("uCallbackMessage", wintypes.UINT),
+        ("hIcon", wintypes.HICON),
+        ("szTip", wintypes.WCHAR * 128),
+        ("dwState", wintypes.DWORD),
+        ("dwStateMask", wintypes.DWORD),
+        ("szInfo", wintypes.WCHAR * 256),
+        ("uVersion", wintypes.UINT),
+        ("szInfoTitle", wintypes.WCHAR * 64),
+        ("dwInfoFlags", wintypes.DWORD),
+        ("guidItem", ctypes.c_byte * 16),
+        ("hBalloonIcon", wintypes.HICON),
+    ]
+
+
 def _enable_dpi() -> None:
     try:
-        import ctypes
-
         ctypes.windll.shcore.SetProcessDpiAwareness(2)
     except Exception:
         try:
-            import ctypes
-
-            ctypes.windll.user32.SetProcessDPIAware()
+            _user32.SetProcessDPIAware()
         except Exception:
             pass
 
@@ -481,6 +521,7 @@ class HostApp:
         self.light_theme = tk.BooleanVar(value=False)
         self.toast_mirror = tk.BooleanVar(value=False)
         self.autostart = tk.BooleanVar(value=False)
+        self.minimize_to_tray = tk.BooleanVar(value=False)
         self.disk_var = tk.StringVar()
         self.monitor_var = tk.StringVar()
         self.quality_var = tk.StringVar(value=screen_mirror.DEFAULT_QUALITY)
@@ -513,6 +554,12 @@ class HostApp:
         self._stats_busy = False
         self._closing = False
         self._stop_lock = threading.Lock()
+        self._tray_hwnd = 0
+        self._tray_icon = 0
+        self._tray_icon_owned = False
+        self._tray_shown = False
+        self._old_wndproc = 0
+        self._tray_wndproc = None
         self._build()
         threading.Thread(target=pc_stats.snapshot, daemon=True).start()
         self._load_route_vars()
@@ -775,6 +822,9 @@ class HostApp:
         boot = self._row(page)
         self._check(boot, "开机自启动", self.autostart, self._on_autostart_change)
         self._hint(page, "登录 Windows 后自动打开上位机。")
+        tray = self._row(page)
+        self._check(tray, "关闭后最小化到托盘", self.minimize_to_tray, self._on_tray_pref_change)
+        self._hint(page, "开了后点窗口关闭会藏到托盘继续跑。左键图标恢复窗口，右键可选退出。")
 
     def _build_tab_log(self, nb: ttk.Notebook) -> None:
         page = ttk.Frame(nb, style="Card.TFrame")
@@ -848,6 +898,7 @@ class HostApp:
         self.upside_down.set(bool(data.get("upside_down", False)))
         self.light_theme.set(bool(data.get("light_theme", False)))
         self.toast_mirror.set(bool(data.get("toast_mirror", False)))
+        self.minimize_to_tray.set(bool(data.get("minimize_to_tray", False)))
         self._saved_inject = str(data.get("inject") or "")
         self._saved_spk = str(data.get("speaker") or "")
         self._saved_disk = str(data.get("pc_disk") or "")
@@ -913,6 +964,7 @@ class HostApp:
             "upside_down": bool(self.upside_down.get()),
             "light_theme": bool(self.light_theme.get()),
             "toast_mirror": bool(self.toast_mirror.get()),
+            "minimize_to_tray": bool(self.minimize_to_tray.get()),
             "pc_disk": self._selected_disk(),
             "pc_monitor": self._selected_monitor_key(),
             "mirror_quality": self.quality_var.get(),
@@ -1173,6 +1225,15 @@ class HostApp:
             self._log("开机自启动设置失败: " + str(exc))
             return
         self._log("开机自启动: " + ("已开启，登录 Windows 后自动打开上位机" if want else "已关闭"))
+
+    def _on_tray_pref_change(self) -> None:
+        if not self._routes_ready:
+            return
+        self._save_routes()
+        on = bool(self.minimize_to_tray.get())
+        self._log("关闭后最小化到托盘: " + ("已开启" if on else "已关闭"))
+        if not on and self._tray_shown:
+            self._restore_from_tray()
 
     def _on_toast_mirror_change(self) -> None:
         if not self._routes_ready:
@@ -1887,10 +1948,14 @@ class HostApp:
             except Exception:
                 pass
 
-    def _on_close(self) -> None:
+    def _on_close(self, force: bool = False) -> None:
+        if _close_goes_to_tray(self._closing, force, bool(self.minimize_to_tray.get())):
+            self._hide_to_tray()
+            return
         self._closing = True
         self._session = False
         self.connected = False
+        self._tray_remove()
         try:
             self.root.withdraw()
             self.root.update_idletasks()
@@ -1898,6 +1963,152 @@ class HostApp:
             pass
         threading.Thread(target=self._shutdown_work, daemon=False, name="lx04-quit").start()
         self.root.destroy()
+
+    def _tk_hwnd(self) -> int:
+        try:
+            self.root.update_idletasks()
+            frame = self.root.wm_frame()
+            if frame:
+                return int(str(frame), 16)
+        except Exception:
+            pass
+        return int(self.root.winfo_id())
+
+    def _tray_load_icon(self) -> int:
+        if self._tray_icon:
+            return self._tray_icon
+        small = (wintypes.HICON * 1)()
+        n = _shell32.ExtractIconExW(str(Path(sys.executable).resolve()), 0, None, small, 1)
+        if n:
+            self._tray_icon = int(small[0] or 0)
+            self._tray_icon_owned = bool(self._tray_icon)
+        if not self._tray_icon:
+            _user32.LoadIconW.argtypes = [wintypes.HINSTANCE, ctypes.c_void_p]
+            _user32.LoadIconW.restype = wintypes.HICON
+            self._tray_icon = int(_user32.LoadIconW(None, _IDI_APPLICATION) or 0)
+            self._tray_icon_owned = False
+        return self._tray_icon
+
+    def _tray_subclass(self) -> bool:
+        if self._old_wndproc:
+            return True
+        hwnd = self._tk_hwnd()
+        if not hwnd:
+            return False
+        self._tray_hwnd = hwnd
+        self._tray_wndproc = _WNDPROC(self._tray_wndproc_impl)
+        _user32.SetWindowLongPtrW.argtypes = [wintypes.HWND, ctypes.c_int, ctypes.c_void_p]
+        _user32.SetWindowLongPtrW.restype = ctypes.c_void_p
+        _user32.CallWindowProcW.argtypes = [
+            ctypes.c_void_p, wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM
+        ]
+        _user32.CallWindowProcW.restype = _LRESULT
+        prev = _user32.SetWindowLongPtrW(hwnd, _GWLP_WNDPROC, ctypes.cast(self._tray_wndproc, ctypes.c_void_p))
+        if not prev:
+            self._tray_wndproc = None
+            return False
+        self._old_wndproc = prev
+        return True
+
+    def _tray_wndproc_impl(self, hwnd, msg, wparam, lparam):
+        try:
+            if msg == _WM_TRAY and int(hwnd) == int(self._tray_hwnd):
+                ev = int(lparam) & 0xFFFF
+                if ev in (_WM_LBUTTONUP, _WM_LBUTTONDBLCLK):
+                    self.root.after(0, self._restore_from_tray)
+                    return 0
+                if ev == _WM_RBUTTONUP:
+                    self.root.after(0, self._show_tray_menu)
+                    return 0
+        except Exception:
+            pass
+        return _user32.CallWindowProcW(self._old_wndproc, hwnd, msg, wparam, lparam)
+
+    def _tray_nid(self) -> _NOTIFYICONDATAW:
+        nid = _NOTIFYICONDATAW()
+        nid.cbSize = ctypes.sizeof(_NOTIFYICONDATAW)
+        nid.hWnd = self._tray_hwnd
+        nid.uID = 1
+        nid.uFlags = _NIF_MESSAGE | _NIF_ICON | _NIF_TIP
+        nid.uCallbackMessage = _WM_TRAY
+        nid.hIcon = self._tray_load_icon()
+        nid.szTip = "LX04 上位机"
+        return nid
+
+    def _tray_add(self) -> bool:
+        if self._tray_shown:
+            return True
+        if not self._tray_subclass():
+            return False
+        ok = bool(_shell32.Shell_NotifyIconW(_NIM_ADD, ctypes.byref(self._tray_nid())))
+        self._tray_shown = ok
+        if not ok:
+            self._tray_remove()
+        return ok
+
+    def _tray_remove(self) -> None:
+        if self._tray_shown and self._tray_hwnd:
+            try:
+                _shell32.Shell_NotifyIconW(_NIM_DELETE, ctypes.byref(self._tray_nid()))
+            except Exception:
+                pass
+        self._tray_shown = False
+        if self._old_wndproc and self._tray_hwnd:
+            try:
+                _user32.SetWindowLongPtrW(self._tray_hwnd, _GWLP_WNDPROC, self._old_wndproc)
+            except Exception:
+                pass
+            self._old_wndproc = 0
+            self._tray_wndproc = None
+        if self._tray_icon and self._tray_icon_owned:
+            try:
+                _user32.DestroyIcon(self._tray_icon)
+            except Exception:
+                pass
+        self._tray_icon = 0
+        self._tray_icon_owned = False
+
+    def _hide_to_tray(self) -> None:
+        if not self._tray_add():
+            self._log("无法创建托盘图标，将正常退出")
+            self._on_close(force=True)
+            return
+        try:
+            self.root.withdraw()
+        except Exception:
+            pass
+        self._log("已最小化到托盘。左键图标恢复，右键可退出。")
+
+    def _restore_from_tray(self) -> None:
+        if self._closing:
+            return
+        self._tray_remove()
+        try:
+            self.root.deiconify()
+            self.root.lift()
+            self.root.focus_force()
+        except Exception:
+            pass
+
+    def _show_tray_menu(self) -> None:
+        if self._closing or not self._tray_hwnd:
+            return
+        menu = _user32.CreatePopupMenu()
+        if not menu:
+            return
+        _user32.AppendMenuW(menu, _MF_STRING, _TRAY_OPEN, "打开")
+        _user32.AppendMenuW(menu, _MF_STRING, _TRAY_QUIT, "退出")
+        pt = _POINT()
+        _user32.GetCursorPos(ctypes.byref(pt))
+        _user32.SetForegroundWindow(self._tray_hwnd)
+        cmd = _user32.TrackPopupMenu(
+            menu, _TPM_RIGHTBUTTON | _TPM_RETURNCMD, pt.x, pt.y, 0, self._tray_hwnd, None
+        )
+        _user32.DestroyMenu(menu)
+        if cmd == _TRAY_OPEN:
+            self._restore_from_tray()
+        elif cmd == _TRAY_QUIT:
+            self._on_close(force=True)
 
     def _begin_revive(self) -> None:
         if self._reviving or not self._session:
@@ -2211,6 +2422,10 @@ def _set_autostart(on: bool) -> None:
                 pass
     finally:
         key.Close()
+
+
+def _close_goes_to_tray(closing: bool, force: bool, enabled: bool) -> bool:
+    return (not force) and (not closing) and enabled
 
 
 def _pick_label(labels: list[str], saved: str, fallback: str | None) -> str:
