@@ -215,8 +215,50 @@ _open_root: tk.Toplevel | None = None
 _open_win: PreviewWindow | None = None
 
 
+_DP_SCALE = 1.0
+
+
 def dp(value: float) -> float:
-    return value * DENSITY
+    return value * DENSITY * _DP_SCALE
+
+
+def _hud_fit(cw: float, ch: float) -> tuple[float, float, float, float, float]:
+    """Scale 800x480 into cw x ch, letterboxed. Returns scale, w, h, ox, oy."""
+    cw = max(1.0, float(cw))
+    ch = max(1.0, float(ch))
+    scale = min(cw / SCREEN_W, ch / SCREEN_H)
+    w, h = SCREEN_W * scale, SCREEN_H * scale
+    return scale, w, h, (cw - w) / 2.0, (ch - h) / 2.0
+
+
+class _OffsetCanvas:
+    """Draw in scaled 800x480 space, then shift into the letterbox."""
+
+    def __init__(self, canvas: tk.Canvas, ox: float, oy: float) -> None:
+        self._c = canvas
+        self._ox = ox
+        self._oy = oy
+
+    def create_rectangle(self, x1, y1, x2, y2, **kw):
+        return self._c.create_rectangle(x1 + self._ox, y1 + self._oy, x2 + self._ox, y2 + self._oy, **kw)
+
+    def create_oval(self, x1, y1, x2, y2, **kw):
+        return self._c.create_oval(x1 + self._ox, y1 + self._oy, x2 + self._ox, y2 + self._oy, **kw)
+
+    def create_text(self, x, y, **kw):
+        return self._c.create_text(x + self._ox, y + self._oy, **kw)
+
+    def _shift_pts(self, pts):
+        out: list[float] = []
+        for i, p in enumerate(pts):
+            out.append(p + (self._ox if i % 2 == 0 else self._oy))
+        return out
+
+    def create_line(self, *pts, **kw):
+        return self._c.create_line(*self._shift_pts(pts), **kw)
+
+    def create_polygon(self, *pts, **kw):
+        return self._c.create_polygon(*self._shift_pts(pts), **kw)
 
 
 def palette(light: bool) -> dict[str, str]:
@@ -515,14 +557,37 @@ def _bar_fill(value: str) -> float:
     return max(0.04, min(1.0, number / 100.0))
 
 
+def _canvas_wh(canvas: tk.Canvas) -> tuple[int, int]:
+    w = int(canvas.winfo_width() or 0)
+    h = int(canvas.winfo_height() or 0)
+    if w < 4:
+        w = int(canvas.cget("width") or SCREEN_W)
+    if h < 4:
+        h = int(canvas.cget("height") or SCREEN_H)
+    return max(4, w), max(4, h)
+
+
 def draw_hud(canvas: tk.Canvas, state: dict) -> None:
+    global _DP_SCALE
     canvas.delete("all")
-    w, h = SCREEN_W, SCREEN_H
+    cw, ch = _canvas_wh(canvas)
     light = bool(state.get("light"))
     colors = palette(light)
     cards = list(state.get("cards") or default_state(light)["cards"])
+    canvas.create_rectangle(0, 0, cw, ch, fill=colors["bg"], outline="")
+    scale, w, h, ox, oy = _hud_fit(cw, ch)
+    if scale <= 0:
+        return
+    old = _DP_SCALE
+    _DP_SCALE = scale
+    canvas = _OffsetCanvas(canvas, ox, oy)
+    try:
+        _draw_hud_body(canvas, colors, cards, w, h)
+    finally:
+        _DP_SCALE = old
 
-    canvas.create_rectangle(0, 0, w, h, fill=colors["bg"], outline="")
+
+def _draw_hud_body(canvas, colors: dict[str, str], cards: list, w: float, h: float) -> None:
     _round_rect(canvas, dp(12), dp(12), w - dp(12), h - dp(12), dp(18), colors["panel"])
 
     canvas.create_oval(dp(15), dp(15), dp(29), dp(29), fill=OK, outline="")
@@ -671,7 +736,9 @@ def _draw_spark(
         canvas.create_polygon(*fill, fill=fill_color, outline="")
     except tk.TclError:
         pass
-    canvas.create_line(*pts, fill=color, width=2, smooth=True, capstyle="round", joinstyle="round")
+    canvas.create_line(
+        *pts, fill=color, width=max(1, round(2 * _DP_SCALE)), smooth=True, capstyle="round", joinstyle="round"
+    )
 
 
 def _draw_mute(canvas: tk.Canvas, rect: tuple[float, float, float, float], label: str, colors: dict[str, str]) -> None:
@@ -717,8 +784,9 @@ class PreviewWindow:
         self.root = tk.Toplevel(parent)
         self.root.title("音箱屏幕预览")
         self.root.configure(bg="#0B1220")
-        self.root.resizable(False, False)
+        self.root.minsize(560, 420)
         self.state = load_state(light)
+        self._canvas_size: tuple[int, int] | None = None
         self._saving = False
         self._remote = False
         self.light_var = tk.BooleanVar(value=bool(self.state["light"]))
@@ -748,7 +816,8 @@ class PreviewWindow:
             highlightthickness=0,
             bg=palette(self.light_var.get())["bg"],
         )
-        self.canvas.pack(padx=16, pady=(0, 8))
+        self.canvas.pack(fill="both", expand=True, padx=16, pady=(0, 8))
+        self.canvas.bind("<Configure>", self._on_canvas)
 
         tools = tk.Frame(self.root, bg="#141C2E")
         tools.pack(fill="x", padx=16, pady=(0, 8))
@@ -769,7 +838,7 @@ class PreviewWindow:
         ttk.Button(tools, text="恢复默认", command=self._reset).pack(side="right", padx=8, pady=6)
 
         editors = tk.Frame(self.root, bg="#141C2E")
-        editors.pack(fill="x", padx=16, pady=(0, 16))
+        editors.pack(fill="both", expand=True, padx=16, pady=(0, 16))
         header = tk.Frame(editors, bg="#141C2E")
         header.pack(fill="x", padx=8, pady=(8, 0))
         ttk.Label(header, text="板块", style="CardDim.TLabel", width=6).pack(side="left")
@@ -784,18 +853,18 @@ class PreviewWindow:
         ttk.Label(header, text="折线内容", style="CardDim.TLabel").pack(side="left")
 
         rows_wrap = tk.Frame(editors, bg="#141C2E")
-        rows_wrap.pack(fill="x", padx=8, pady=(4, 8))
+        rows_wrap.pack(fill="both", expand=True, padx=8, pady=(4, 8))
         scroll = ttk.Scrollbar(rows_wrap, orient="vertical")
         self._rows_canvas = tk.Canvas(
             rows_wrap,
             bg="#141C2E",
             highlightthickness=0,
-            height=240,
+            height=180,
             yscrollcommand=scroll.set,
         )
         scroll.configure(command=self._rows_canvas.yview)
         scroll.pack(side="right", fill="y")
-        self._rows_canvas.pack(side="left", fill="x", expand=True)
+        self._rows_canvas.pack(side="left", fill="both", expand=True)
         self._rows_inner = tk.Frame(self._rows_canvas, bg="#141C2E")
         self._rows_win = self._rows_canvas.create_window((0, 0), window=self._rows_inner, anchor="nw")
         self._rows_inner.bind("<Configure>", lambda _e: self._sync_rows_scroll())
@@ -1097,6 +1166,13 @@ class PreviewWindow:
             card = self.state["cards"][index]
             title_btn.configure(bg=card["title_color"], activebackground=card["title_color"])
             value_btn.configure(bg=card["value_color"], activebackground=card["value_color"])
+
+    def _on_canvas(self, event) -> None:
+        size = (int(event.width), int(event.height))
+        if size[0] < 4 or size[1] < 4 or size == self._canvas_size:
+            return
+        self._canvas_size = size
+        self._redraw()
 
     def _redraw(self) -> None:
         self._cards_from_vars()
