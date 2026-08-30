@@ -35,6 +35,9 @@ def main() -> None:
     assert pc_host._close_goes_to_tray(False, False, True)
     assert not pc_host._close_goes_to_tray(False, True, True)
     assert not pc_host._close_goes_to_tray(True, False, True)
+    restore = inspect.getsource(pc_host.HostApp._restore_from_tray)
+    assert "_tray_remove" not in restore
+    assert "deiconify" in restore
     menu_src = inspect.getsource(pc_host.HostApp._show_tray_menu)
     assert '"打开"' in menu_src
     on_msg = inspect.getsource(pc_host.HostApp._tray_on_msg)
