@@ -58,24 +58,45 @@ COMBO_BG = "#F3F6FB"
 
 _user32 = ctypes.windll.user32
 _shell32 = ctypes.windll.shell32
+_kernel32 = ctypes.windll.kernel32
 _LRESULT = ctypes.c_ssize_t
 _WNDPROC = ctypes.WINFUNCTYPE(_LRESULT, wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM)
+_WM_NULL = 0x0000
 _WM_TRAY = 0x8001
 _WM_LBUTTONUP = 0x0202
 _WM_LBUTTONDBLCLK = 0x0203
 _WM_RBUTTONUP = 0x0205
+_WM_CONTEXTMENU = 0x007B
 _NIM_ADD, _NIM_DELETE = 0, 2
 _NIF_MESSAGE, _NIF_ICON, _NIF_TIP = 1, 2, 4
-_GWLP_WNDPROC = -4
 _IDI_APPLICATION = 32512
 _TPM_RIGHTBUTTON = 0x0002
 _TPM_RETURNCMD = 0x0100
 _MF_STRING = 0x0000
+_WS_POPUP = 0x80000000
+_WS_EX_TOOLWINDOW = 0x00000080
+_ERROR_CLASS_ALREADY_EXISTS = 1410
 _TRAY_OPEN, _TRAY_QUIT = 1, 2
+_TRAY_CLASS = "LX04BridgeTray"
 
 
 class _POINT(ctypes.Structure):
     _fields_ = [("x", wintypes.LONG), ("y", wintypes.LONG)]
+
+
+class _WNDCLASSW(ctypes.Structure):
+    _fields_ = [
+        ("style", wintypes.UINT),
+        ("lpfnWndProc", _WNDPROC),
+        ("cbClsExtra", ctypes.c_int),
+        ("cbWndExtra", ctypes.c_int),
+        ("hInstance", wintypes.HINSTANCE),
+        ("hIcon", wintypes.HICON),
+        ("hCursor", wintypes.HANDLE),
+        ("hbrBackground", wintypes.HBRUSH),
+        ("lpszMenuName", wintypes.LPCWSTR),
+        ("lpszClassName", wintypes.LPCWSTR),
+    ]
 
 
 class _NOTIFYICONDATAW(ctypes.Structure):
@@ -96,6 +117,64 @@ class _NOTIFYICONDATAW(ctypes.Structure):
         ("guidItem", ctypes.c_byte * 16),
         ("hBalloonIcon", wintypes.HICON),
     ]
+
+
+_kernel32.GetModuleHandleW.restype = wintypes.HINSTANCE
+_kernel32.GetModuleHandleW.argtypes = [wintypes.LPCWSTR]
+_user32.DefWindowProcW.restype = _LRESULT
+_user32.DefWindowProcW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
+_user32.RegisterClassW.restype = wintypes.ATOM
+_user32.RegisterClassW.argtypes = [ctypes.POINTER(_WNDCLASSW)]
+_user32.CreateWindowExW.restype = wintypes.HWND
+_user32.CreateWindowExW.argtypes = [
+    wintypes.DWORD, wintypes.LPCWSTR, wintypes.LPCWSTR, wintypes.DWORD,
+    ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int,
+    wintypes.HWND, wintypes.HMENU, wintypes.HINSTANCE, ctypes.c_void_p,
+]
+_user32.DestroyWindow.restype = wintypes.BOOL
+_user32.DestroyWindow.argtypes = [wintypes.HWND]
+_user32.CreatePopupMenu.restype = wintypes.HMENU
+_user32.CreatePopupMenu.argtypes = []
+_user32.AppendMenuW.restype = wintypes.BOOL
+_user32.AppendMenuW.argtypes = [wintypes.HMENU, wintypes.UINT, ctypes.c_size_t, wintypes.LPCWSTR]
+_user32.TrackPopupMenu.restype = wintypes.UINT
+_user32.TrackPopupMenu.argtypes = [
+    wintypes.HMENU, wintypes.UINT, ctypes.c_int, ctypes.c_int, ctypes.c_int,
+    wintypes.HWND, ctypes.c_void_p,
+]
+_user32.DestroyMenu.restype = wintypes.BOOL
+_user32.DestroyMenu.argtypes = [wintypes.HMENU]
+_user32.GetCursorPos.restype = wintypes.BOOL
+_user32.GetCursorPos.argtypes = [ctypes.POINTER(_POINT)]
+_user32.SetForegroundWindow.restype = wintypes.BOOL
+_user32.SetForegroundWindow.argtypes = [wintypes.HWND]
+_user32.PostMessageW.restype = wintypes.BOOL
+_user32.PostMessageW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
+_shell32.ExtractIconExW.restype = wintypes.UINT
+_shell32.ExtractIconExW.argtypes = [
+    wintypes.LPCWSTR, ctypes.c_int, ctypes.POINTER(wintypes.HICON),
+    ctypes.POINTER(wintypes.HICON), wintypes.UINT,
+]
+_shell32.Shell_NotifyIconW.restype = wintypes.BOOL
+_shell32.Shell_NotifyIconW.argtypes = [wintypes.DWORD, ctypes.POINTER(_NOTIFYICONDATAW)]
+_user32.LoadIconW.restype = wintypes.HICON
+_user32.LoadIconW.argtypes = [wintypes.HINSTANCE, ctypes.c_void_p]
+_user32.DestroyIcon.restype = wintypes.BOOL
+_user32.DestroyIcon.argtypes = [wintypes.HICON]
+
+_TRAY_APP = None
+
+
+def _tray_class_proc(hwnd, msg, wparam, lparam):
+    app = _TRAY_APP
+    if app is not None:
+        handled = app._tray_on_msg(hwnd, msg, wparam, lparam)
+        if handled is not None:
+            return handled
+    return _user32.DefWindowProcW(hwnd, msg, wparam, lparam)
+
+
+_TRAY_CLASS_PROC = _WNDPROC(_tray_class_proc)
 
 
 def _enable_dpi() -> None:
@@ -558,8 +637,6 @@ class HostApp:
         self._tray_icon = 0
         self._tray_icon_owned = False
         self._tray_shown = False
-        self._old_wndproc = 0
-        self._tray_wndproc = None
         self._build()
         threading.Thread(target=pc_stats.snapshot, daemon=True).start()
         self._load_route_vars()
@@ -1964,16 +2041,6 @@ class HostApp:
         threading.Thread(target=self._shutdown_work, daemon=False, name="lx04-quit").start()
         self.root.destroy()
 
-    def _tk_hwnd(self) -> int:
-        try:
-            self.root.update_idletasks()
-            frame = self.root.wm_frame()
-            if frame:
-                return int(str(frame), 16)
-        except Exception:
-            pass
-        return int(self.root.winfo_id())
-
     def _tray_load_icon(self) -> int:
         if self._tray_icon:
             return self._tray_icon
@@ -1983,46 +2050,44 @@ class HostApp:
             self._tray_icon = int(small[0] or 0)
             self._tray_icon_owned = bool(self._tray_icon)
         if not self._tray_icon:
-            _user32.LoadIconW.argtypes = [wintypes.HINSTANCE, ctypes.c_void_p]
-            _user32.LoadIconW.restype = wintypes.HICON
             self._tray_icon = int(_user32.LoadIconW(None, _IDI_APPLICATION) or 0)
             self._tray_icon_owned = False
         return self._tray_icon
 
-    def _tray_subclass(self) -> bool:
-        if self._old_wndproc:
+    def _tray_ensure_hwnd(self) -> bool:
+        if self._tray_hwnd:
             return True
-        hwnd = self._tk_hwnd()
+        hinst = _kernel32.GetModuleHandleW(None)
+        wc = _WNDCLASSW()
+        wc.lpfnWndProc = _TRAY_CLASS_PROC
+        wc.hInstance = hinst
+        wc.lpszClassName = _TRAY_CLASS
+        if not _user32.RegisterClassW(ctypes.byref(wc)):
+            if ctypes.GetLastError() != _ERROR_CLASS_ALREADY_EXISTS:
+                return False
+        global _TRAY_APP
+        _TRAY_APP = self
+        hwnd = _user32.CreateWindowExW(
+            _WS_EX_TOOLWINDOW, _TRAY_CLASS, "LX04 Tray", _WS_POPUP,
+            0, 0, 1, 1, None, None, hinst, None,
+        )
         if not hwnd:
+            _TRAY_APP = None
             return False
-        self._tray_hwnd = hwnd
-        self._tray_wndproc = _WNDPROC(self._tray_wndproc_impl)
-        _user32.SetWindowLongPtrW.argtypes = [wintypes.HWND, ctypes.c_int, ctypes.c_void_p]
-        _user32.SetWindowLongPtrW.restype = ctypes.c_void_p
-        _user32.CallWindowProcW.argtypes = [
-            ctypes.c_void_p, wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM
-        ]
-        _user32.CallWindowProcW.restype = _LRESULT
-        prev = _user32.SetWindowLongPtrW(hwnd, _GWLP_WNDPROC, ctypes.cast(self._tray_wndproc, ctypes.c_void_p))
-        if not prev:
-            self._tray_wndproc = None
-            return False
-        self._old_wndproc = prev
+        self._tray_hwnd = int(hwnd)
         return True
 
-    def _tray_wndproc_impl(self, hwnd, msg, wparam, lparam):
-        try:
-            if msg == _WM_TRAY and int(hwnd) == int(self._tray_hwnd):
-                ev = int(lparam) & 0xFFFF
-                if ev in (_WM_LBUTTONUP, _WM_LBUTTONDBLCLK):
-                    self.root.after(0, self._restore_from_tray)
-                    return 0
-                if ev == _WM_RBUTTONUP:
-                    self.root.after(0, self._show_tray_menu)
-                    return 0
-        except Exception:
-            pass
-        return _user32.CallWindowProcW(self._old_wndproc, hwnd, msg, wparam, lparam)
+    def _tray_on_msg(self, hwnd, msg, wparam, lparam):
+        if msg != _WM_TRAY or int(hwnd) != int(self._tray_hwnd):
+            return None
+        ev = int(lparam) & 0xFFFF
+        if ev in (_WM_LBUTTONUP, _WM_LBUTTONDBLCLK):
+            self.root.after(0, self._restore_from_tray)
+            return 0
+        if ev in (_WM_RBUTTONUP, _WM_CONTEXTMENU):
+            self.root.after(0, self._show_tray_menu)
+            return 0
+        return 0
 
     def _tray_nid(self) -> _NOTIFYICONDATAW:
         nid = _NOTIFYICONDATAW()
@@ -2038,7 +2103,7 @@ class HostApp:
     def _tray_add(self) -> bool:
         if self._tray_shown:
             return True
-        if not self._tray_subclass():
+        if not self._tray_ensure_hwnd():
             return False
         ok = bool(_shell32.Shell_NotifyIconW(_NIM_ADD, ctypes.byref(self._tray_nid())))
         self._tray_shown = ok
@@ -2047,19 +2112,21 @@ class HostApp:
         return ok
 
     def _tray_remove(self) -> None:
+        global _TRAY_APP
         if self._tray_shown and self._tray_hwnd:
             try:
                 _shell32.Shell_NotifyIconW(_NIM_DELETE, ctypes.byref(self._tray_nid()))
             except Exception:
                 pass
         self._tray_shown = False
-        if self._old_wndproc and self._tray_hwnd:
+        if self._tray_hwnd:
             try:
-                _user32.SetWindowLongPtrW(self._tray_hwnd, _GWLP_WNDPROC, self._old_wndproc)
+                _user32.DestroyWindow(self._tray_hwnd)
             except Exception:
                 pass
-            self._old_wndproc = 0
-            self._tray_wndproc = None
+            self._tray_hwnd = 0
+        if _TRAY_APP is self:
+            _TRAY_APP = None
         if self._tray_icon and self._tray_icon_owned:
             try:
                 _user32.DestroyIcon(self._tray_icon)
@@ -2077,7 +2144,7 @@ class HostApp:
             self.root.withdraw()
         except Exception:
             pass
-        self._log("已最小化到托盘。左键图标恢复，右键可退出。")
+        self._log("已最小化到托盘。右键图标选“打开”可恢复窗口。")
 
     def _restore_from_tray(self) -> None:
         if self._closing:
@@ -2096,15 +2163,19 @@ class HostApp:
         menu = _user32.CreatePopupMenu()
         if not menu:
             return
-        _user32.AppendMenuW(menu, _MF_STRING, _TRAY_OPEN, "打开")
-        _user32.AppendMenuW(menu, _MF_STRING, _TRAY_QUIT, "退出")
-        pt = _POINT()
-        _user32.GetCursorPos(ctypes.byref(pt))
-        _user32.SetForegroundWindow(self._tray_hwnd)
-        cmd = _user32.TrackPopupMenu(
-            menu, _TPM_RIGHTBUTTON | _TPM_RETURNCMD, pt.x, pt.y, 0, self._tray_hwnd, None
-        )
-        _user32.DestroyMenu(menu)
+        cmd = 0
+        try:
+            _user32.AppendMenuW(menu, _MF_STRING, _TRAY_OPEN, "打开")
+            _user32.AppendMenuW(menu, _MF_STRING, _TRAY_QUIT, "退出")
+            pt = _POINT()
+            _user32.GetCursorPos(ctypes.byref(pt))
+            _user32.SetForegroundWindow(self._tray_hwnd)
+            cmd = int(_user32.TrackPopupMenu(
+                menu, _TPM_RIGHTBUTTON | _TPM_RETURNCMD, pt.x, pt.y, 0, self._tray_hwnd, None
+            ) or 0)
+            _user32.PostMessageW(self._tray_hwnd, _WM_NULL, 0, 0)
+        finally:
+            _user32.DestroyMenu(menu)
         if cmd == _TRAY_OPEN:
             self._restore_from_tray()
         elif cmd == _TRAY_QUIT:

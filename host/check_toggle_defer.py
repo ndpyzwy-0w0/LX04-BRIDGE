@@ -35,6 +35,13 @@ def main() -> None:
     assert pc_host._close_goes_to_tray(False, False, True)
     assert not pc_host._close_goes_to_tray(False, True, True)
     assert not pc_host._close_goes_to_tray(True, False, True)
+    menu_src = inspect.getsource(pc_host.HostApp._show_tray_menu)
+    assert '"打开"' in menu_src
+    menu = pc_host._user32.CreatePopupMenu()
+    assert menu, "CreatePopupMenu must return a 64-bit HMENU"
+    ok = pc_host._user32.AppendMenuW(menu, pc_host._MF_STRING, pc_host._TRAY_OPEN, "打开")
+    pc_host._user32.DestroyMenu(menu)
+    assert ok
     print("ok")
 
 
