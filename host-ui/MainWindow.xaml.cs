@@ -28,6 +28,13 @@ public sealed partial class MainWindow : Window
     {
         InitializeComponent();
         Title = "LX04 PC Bridge";
+        try
+        {
+            SystemBackdrop = new MicaBackdrop();
+        }
+        catch
+        {
+        }
         BuildUi();
         TryResize(800, 600);
         ApplySavedTheme();
@@ -243,22 +250,28 @@ public sealed partial class MainWindow : Window
             DeviceSub.Text = connected ? "ADB 已连接 · USB 数据通道正常" : snap.Devices.Count > 0 ? "ADB · USB" : "插入数据线后点刷新";
             ConnectBtn.Visibility = connected ? Visibility.Collapsed : Visibility.Visible;
             DisconnectBtn.Visibility = connected ? Visibility.Visible : Visibility.Collapsed;
-            FillBox(InjectBox, snap.InjectLabels, snap.Inject);
-            FillBox(SpeakerBox, snap.SpeakerLabels, snap.Speaker);
-            FillBox(MonitorBox, snap.MonitorLabels, snap.Monitor);
-            FillBox(QualityBox, snap.QualityLabels, snap.Quality);
-            FillBox(DiskBox, snap.DiskLabels, snap.Disk);
-            MicSwitch.IsOn = snap.MicEnabled;
-            SpkSwitch.IsOn = snap.SpkEnabled;
-            DefaultSpkSwitch.IsOn = snap.SetDefaultSpk;
-            VolSyncSwitch.IsOn = snap.VolumeSync;
-            ToastSwitch.IsOn = snap.ToastMirror;
-            PcStatsSwitch.IsOn = snap.PcStats;
-            LightSwitch.IsOn = snap.LightTheme;
-            UpsideSwitch.IsOn = snap.UpsideDown;
-            AutoStartSwitch.IsOn = snap.Autostart;
-            TraySwitch.IsOn = snap.MinimizeToTray;
-            GainSlider.Value = snap.Gain;
+            if (!AnyDropDownOpen())
+            {
+                FillBox(InjectBox, snap.InjectLabels, snap.Inject);
+                FillBox(SpeakerBox, snap.SpeakerLabels, snap.Speaker);
+                FillBox(MonitorBox, snap.MonitorLabels, snap.Monitor);
+                FillBox(QualityBox, snap.QualityLabels, snap.Quality);
+                FillBox(DiskBox, snap.DiskLabels, snap.Disk);
+            }
+            SetOn(MicSwitch, snap.MicEnabled);
+            SetOn(SpkSwitch, snap.SpkEnabled);
+            SetOn(DefaultSpkSwitch, snap.SetDefaultSpk);
+            SetOn(VolSyncSwitch, snap.VolumeSync);
+            SetOn(ToastSwitch, snap.ToastMirror);
+            SetOn(PcStatsSwitch, snap.PcStats);
+            SetOn(LightSwitch, snap.LightTheme);
+            SetOn(UpsideSwitch, snap.UpsideDown);
+            SetOn(AutoStartSwitch, snap.Autostart);
+            SetOn(TraySwitch, snap.MinimizeToTray);
+            if (Math.Abs(GainSlider.Value - snap.Gain) > 0.5)
+            {
+                GainSlider.Value = snap.Gain;
+            }
             GainLabel.Text = snap.GainLabel;
             MicHint.Text = snap.MicHint;
             PcLine.Text = snap.PcLine;
@@ -271,8 +284,11 @@ public sealed partial class MainWindow : Window
             BarAudio.Text = (snap.AudioOk ? "●" : "○") + " 音频：" + (snap.AudioOk ? "正常" : "—");
             BarScreen.Text = "● 屏幕：" + snap.ScreenMode;
             BarToast.Text = (snap.ToastMirror ? "●" : "○") + " 弹窗同步：" + (snap.ToastMirror ? "已开启" : "关");
-            RenderDiag(snap);
-            RenderHud(snap);
+            if (!AnyDropDownOpen())
+            {
+                RenderDiag(snap);
+                RenderHud(snap);
+            }
         }
         finally
         {
@@ -280,20 +296,47 @@ public sealed partial class MainWindow : Window
         }
     }
 
+    private bool AnyDropDownOpen() =>
+        InjectBox.IsDropDownOpen || SpeakerBox.IsDropDownOpen || MonitorBox.IsDropDownOpen
+        || QualityBox.IsDropDownOpen || DiskBox.IsDropDownOpen || ThemeBox.IsDropDownOpen
+        || LogFilter.IsDropDownOpen;
+
+    private static void SetOn(ToggleSwitch box, bool on)
+    {
+        if (box.IsOn != on)
+        {
+            box.IsOn = on;
+        }
+    }
+
     private static void FillBox(ComboBox box, List<string> labels, string selected)
     {
-        box.Items.Clear();
-        foreach (var label in labels)
+        var same = box.Items.Count == labels.Count;
+        if (same)
         {
-            box.Items.Add(label);
+            for (var i = 0; i < labels.Count; i++)
+            {
+                if (box.Items[i] as string != labels[i])
+                {
+                    same = false;
+                    break;
+                }
+            }
         }
-        if (selected.Length > 0 && labels.Contains(selected))
+        if (!same)
         {
-            box.SelectedItem = selected;
+            box.Items.Clear();
+            foreach (var label in labels)
+            {
+                box.Items.Add(label);
+            }
         }
-        else if (box.Items.Count > 0)
+        var want = selected.Length > 0 && labels.Contains(selected)
+            ? selected
+            : labels.Count > 0 ? labels[0] : null;
+        if (want != null && (box.SelectedItem as string) != want)
         {
-            box.SelectedIndex = 0;
+            box.SelectedItem = want;
         }
     }
 
@@ -533,32 +576,46 @@ public sealed partial class MainWindow : Window
         {
             return;
         }
-        var tag = item.Tag as string ?? "default";
+        ApplyTheme(item.Tag as string ?? "default");
+    }
+
+    internal static string ThemeFilePath() =>
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "LX04-PC-Bridge", "shell-theme.txt");
+
+    internal static string ReadShellTheme()
+    {
         try
         {
-            Windows.Storage.ApplicationData.Current.LocalSettings.Values["shellTheme"] = tag;
+            var tag = File.ReadAllText(ThemeFilePath()).Trim();
+            return tag is "light" or "dark" or "default" ? tag : "default";
         }
         catch
         {
+            return "default";
         }
+    }
+
+    private void ApplyTheme(string tag)
+    {
         Root.RequestedTheme = tag switch
         {
             "light" => ElementTheme.Light,
             "dark" => ElementTheme.Dark,
             _ => ElementTheme.Default,
         };
-    }
-
-    private void ApplySavedTheme()
-    {
-        var tag = "default";
         try
         {
-            tag = Windows.Storage.ApplicationData.Current.LocalSettings.Values["shellTheme"] as string ?? "default";
+            Directory.CreateDirectory(Path.GetDirectoryName(ThemeFilePath())!);
+            File.WriteAllText(ThemeFilePath(), tag);
         }
         catch
         {
         }
+    }
+
+    private void ApplySavedTheme()
+    {
+        var tag = ReadShellTheme();
         _applying = true;
         foreach (var item in ThemeBox.Items)
         {
@@ -568,12 +625,7 @@ public sealed partial class MainWindow : Window
                 break;
             }
         }
-        Root.RequestedTheme = tag switch
-        {
-            "light" => ElementTheme.Light,
-            "dark" => ElementTheme.Dark,
-            _ => ElementTheme.Default,
-        };
+        ApplyTheme(tag);
         _applying = false;
     }
 

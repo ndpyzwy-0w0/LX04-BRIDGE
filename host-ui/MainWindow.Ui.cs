@@ -334,13 +334,17 @@ public sealed partial class MainWindow
         return grid;
     }
 
-    private static ScrollViewer Scroll(UIElement child) => new() { Content = child };
+    private static ScrollViewer Scroll(UIElement child) =>
+        new() { Content = child, BringIntoViewOnFocusChange = false };
     private static TextBlock Label(string t) => new() { Text = t, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold };
     private static TextBlock Dim(string t) => new() { Text = t, Opacity = 0.7 };
     private static Border Card(UIElement child) => new()
     {
         Padding = new Thickness(12),
         CornerRadius = new CornerRadius(6),
+        Background = Application.Current.Resources.TryGetValue("CardBackgroundFillColorDefaultBrush", out var brush)
+            ? brush as Brush
+            : null,
         Child = child,
     };
     private static StackPanel Col(params UIElement[] items)

@@ -12,6 +12,21 @@ public partial class App : Application
 
     public App()
     {
+        try
+        {
+            var tag = MainWindow.ReadShellTheme();
+            if (tag == "dark")
+            {
+                RequestedTheme = ApplicationTheme.Dark;
+            }
+            else if (tag == "light")
+            {
+                RequestedTheme = ApplicationTheme.Light;
+            }
+        }
+        catch
+        {
+        }
         InitializeComponent();
     }
 
