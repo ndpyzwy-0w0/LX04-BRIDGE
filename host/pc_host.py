@@ -69,8 +69,7 @@ _WM_RBUTTONUP = 0x0205
 _WM_CONTEXTMENU = 0x007B
 _NIN_SELECT = 0x0400
 _NIN_KEYSELECT = 0x0401
-_NIM_ADD, _NIM_DELETE, _NIM_SETVERSION = 0, 2, 4
-_NOTIFYICON_VERSION_4 = 4
+_NIM_ADD, _NIM_DELETE = 0, 2
 _NIF_MESSAGE, _NIF_ICON, _NIF_TIP = 1, 2, 4
 _IDI_APPLICATION = 32512
 _TPM_RIGHTBUTTON = 0x0002
@@ -80,10 +79,10 @@ _MF_STRING = 0x0000
 _WS_POPUP = 0x80000000
 _WS_EX_TOOLWINDOW = 0x00000080
 _WS_EX_TOPMOST = 0x00000008
-_SW_HIDE = 0
+_SW_SHOW = 5
 _SW_RESTORE = 9
-_SWP_SHOWWINDOW = 0x0040
-_HWND_TOPMOST = -1
+_GA_ROOT = 2
+_HWND_MESSAGE = wintypes.HWND(-3)
 _ERROR_CLASS_ALREADY_EXISTS = 1410
 _TRAY_OPEN, _TRAY_QUIT = 1, 2
 _TRAY_CLASS = "LX04BridgeTray"
@@ -157,21 +156,10 @@ _user32.GetCursorPos.restype = wintypes.BOOL
 _user32.GetCursorPos.argtypes = [ctypes.POINTER(_POINT)]
 _user32.SetForegroundWindow.restype = wintypes.BOOL
 _user32.SetForegroundWindow.argtypes = [wintypes.HWND]
-_user32.GetForegroundWindow.restype = wintypes.HWND
-_user32.GetForegroundWindow.argtypes = []
-_user32.GetWindowThreadProcessId.restype = wintypes.DWORD
-_user32.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]
-_user32.AttachThreadInput.restype = wintypes.BOOL
-_user32.AttachThreadInput.argtypes = [wintypes.DWORD, wintypes.DWORD, wintypes.BOOL]
-_user32.SetWindowPos.restype = wintypes.BOOL
-_user32.SetWindowPos.argtypes = [
-    wintypes.HWND, wintypes.HWND, ctypes.c_int, ctypes.c_int,
-    ctypes.c_int, ctypes.c_int, wintypes.UINT,
-]
 _user32.ShowWindow.restype = wintypes.BOOL
 _user32.ShowWindow.argtypes = [wintypes.HWND, ctypes.c_int]
-_kernel32.GetCurrentThreadId.restype = wintypes.DWORD
-_kernel32.GetCurrentThreadId.argtypes = []
+_user32.GetAncestor.restype = wintypes.HWND
+_user32.GetAncestor.argtypes = [wintypes.HWND, wintypes.UINT]
 _user32.PostMessageW.restype = wintypes.BOOL
 _user32.PostMessageW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
 _shell32.ExtractIconExW.restype = wintypes.UINT
@@ -197,18 +185,27 @@ def _tray_kind(ev: int) -> str:
     return ""
 
 
-def _tray_take_focus(hwnd: int) -> None:
-    fg = _user32.GetForegroundWindow()
-    if fg and int(fg) != int(hwnd):
-        pid = wintypes.DWORD(0)
-        fg_tid = _user32.GetWindowThreadProcessId(fg, ctypes.byref(pid))
-        ours = _kernel32.GetCurrentThreadId()
-        if fg_tid and fg_tid != ours:
-            _user32.AttachThreadInput(ours, fg_tid, True)
-            _user32.SetForegroundWindow(hwnd)
-            _user32.AttachThreadInput(ours, fg_tid, False)
-            return
-    _user32.SetForegroundWindow(hwnd)
+def _toplevel_hwnd(widget: tk.Misc) -> int:
+    widget.update_idletasks()
+    inner = int(widget.winfo_id())
+    top = _user32.GetAncestor(inner, _GA_ROOT)
+    return int(top or inner)
+
+
+def _show_tk_window(widget: tk.Misc) -> None:
+    widget.deiconify()
+    widget.update_idletasks()
+    try:
+        widget.wm_state("normal")
+    except tk.TclError:
+        pass
+    widget.update()
+    hwnd = _toplevel_hwnd(widget)
+    if hwnd:
+        _user32.ShowWindow(hwnd, _SW_RESTORE)
+        _user32.SetForegroundWindow(hwnd)
+    widget.lift()
+    widget.focus_force()
 
 
 def _tray_class_proc(hwnd, msg, wparam, lparam):
@@ -2118,9 +2115,14 @@ class HostApp:
         global _TRAY_APP
         _TRAY_APP = self
         hwnd = _user32.CreateWindowExW(
-            _WS_EX_TOOLWINDOW | _WS_EX_TOPMOST, _TRAY_CLASS, "LX04 Tray", _WS_POPUP,
-            0, 0, 1, 1, None, None, hinst, None,
+            0, _TRAY_CLASS, "LX04 Tray", 0,
+            0, 0, 0, 0, _HWND_MESSAGE, None, hinst, None,
         )
+        if not hwnd:
+            hwnd = _user32.CreateWindowExW(
+                _WS_EX_TOOLWINDOW, _TRAY_CLASS, "LX04 Tray", _WS_POPUP,
+                -32000, -32000, 1, 1, None, None, hinst, None,
+            )
         if not hwnd:
             _TRAY_APP = None
             return False
@@ -2168,11 +2170,7 @@ class HostApp:
             return True
         if not self._tray_ensure_hwnd():
             return False
-        nid = self._tray_nid()
-        ok = bool(_shell32.Shell_NotifyIconW(_NIM_ADD, ctypes.byref(nid)))
-        if ok:
-            nid.uVersion = _NOTIFYICON_VERSION_4
-            _shell32.Shell_NotifyIconW(_NIM_SETVERSION, ctypes.byref(nid))
+        ok = bool(_shell32.Shell_NotifyIconW(_NIM_ADD, ctypes.byref(self._tray_nid())))
         self._tray_shown = ok
         if not ok:
             self._tray_remove()
@@ -2212,28 +2210,7 @@ class HostApp:
             self.root.withdraw()
         except Exception:
             pass
-        self._log("已最小化到托盘。右键图标选“打开”可恢复窗口，图标会保留。")
-
-    def _tk_hwnd(self) -> int:
-        try:
-            self.root.update_idletasks()
-            frame = self.root.wm_frame()
-            if frame:
-                return int(str(frame), 16)
-        except Exception:
-            pass
-        try:
-            return int(self.root.winfo_id())
-        except Exception:
-            return 0
-
-    def _clear_restore_topmost(self) -> None:
-        if self._closing:
-            return
-        try:
-            self.root.attributes("-topmost", False)
-        except Exception:
-            pass
+        self._log("已最小化到托盘。右键选“打开”或左键可恢复窗口。")
 
     def _restore_from_tray(self) -> None:
         self._tray_restore_after = None
@@ -2242,56 +2219,56 @@ class HostApp:
         if time.monotonic() < self._tray_ignore_open_until:
             return
         try:
-            self.root.deiconify()
-            self.root.wm_state("normal")
-            hwnd = self._tk_hwnd()
-            if hwnd:
-                _user32.ShowWindow(hwnd, _SW_RESTORE)
-                _tray_take_focus(hwnd)
-            self.root.lift()
-            self.root.attributes("-topmost", True)
-            self.root.focus_force()
-            self.root.after(250, self._clear_restore_topmost)
+            _show_tk_window(self.root)
+            self._log("已打开窗口")
         except Exception as exc:
             self._log("恢复窗口失败: " + str(exc))
 
     def _show_tray_menu(self) -> None:
-        if self._closing or not self._tray_hwnd or self._tray_menu_open:
+        if self._closing or self._tray_menu_open:
             return
         self._cancel_tray_restore()
         menu = _user32.CreatePopupMenu()
         if not menu:
             return
         cmd = 0
-        hwnd = self._tray_hwnd
+        owner = 0
         self._tray_menu_open = True
         try:
             _user32.AppendMenuW(menu, _MF_STRING, _TRAY_OPEN, "打开")
             _user32.AppendMenuW(menu, _MF_STRING, _TRAY_QUIT, "退出")
             pt = _POINT()
             _user32.GetCursorPos(ctypes.byref(pt))
-            _user32.SetWindowPos(hwnd, _HWND_TOPMOST, pt.x, pt.y, 1, 1, _SWP_SHOWWINDOW)
-            _tray_take_focus(hwnd)
+            owner = _user32.CreateWindowExW(
+                _WS_EX_TOOLWINDOW | _WS_EX_TOPMOST, _TRAY_CLASS, "", _WS_POPUP,
+                pt.x, pt.y, 1, 1, None, None, _kernel32.GetModuleHandleW(None), None,
+            )
+            if owner:
+                _user32.ShowWindow(owner, _SW_SHOW)
+                _user32.SetForegroundWindow(owner)
+            owner_hwnd = owner or self._tray_hwnd
             cmd = int(_user32.TrackPopupMenu(
                 menu,
                 _TPM_RIGHTBUTTON | _TPM_BOTTOMALIGN | _TPM_RETURNCMD,
-                pt.x, pt.y, 0, hwnd, None,
+                pt.x, pt.y, 0, owner_hwnd, None,
             ) or 0)
-            _user32.PostMessageW(hwnd, _WM_NULL, 0, 0)
+            if owner:
+                _user32.PostMessageW(owner, _WM_NULL, 0, 0)
         finally:
-            try:
-                _user32.ShowWindow(hwnd, _SW_HIDE)
-            except Exception:
-                pass
+            if owner:
+                try:
+                    _user32.DestroyWindow(owner)
+                except Exception:
+                    pass
             _user32.DestroyMenu(menu)
             self._tray_menu_open = False
             self._cancel_tray_restore()
             self._tray_ignore_open_until = time.monotonic() + 0.3
         if cmd == _TRAY_OPEN:
             self._tray_ignore_open_until = 0.0
-            self.root.after(0, self._restore_from_tray)
+            self._restore_from_tray()
         elif cmd == _TRAY_QUIT:
-            self.root.after(0, lambda: self._on_close(force=True))
+            self._on_close(force=True)
 
     def _begin_revive(self) -> None:
         if self._reviving or not self._session:
