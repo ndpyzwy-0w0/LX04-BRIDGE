@@ -28,17 +28,10 @@ public sealed partial class MainWindow : Window
     {
         InitializeComponent();
         Title = "LX04 PC Bridge";
+        BuildUi();
         TryResize(800, 600);
         ApplySavedTheme();
-        Nav.SelectedItem = Nav.MenuItems[0];
-        try
-        {
-            _bridge = new HostBridge();
-        }
-        catch (Exception ex)
-        {
-            throw new InvalidOperationException("无法启动后端：" + ex.Message, ex);
-        }
+        _bridge = new HostBridge();
         _bridge.Event += OnBridgeEvent;
         _activateTimer.Tick += (_, _) =>
         {
@@ -536,11 +529,11 @@ public sealed partial class MainWindow : Window
 
     private void Theme_Changed(object sender, SelectionChangedEventArgs e)
     {
-        if (_applying || ThemeBox.SelectedItem is not RadioButton rb)
+        if (_applying || ThemeBox.SelectedItem is not ComboBoxItem item)
         {
             return;
         }
-        var tag = rb.Tag as string ?? "default";
+        var tag = item.Tag as string ?? "default";
         try
         {
             Windows.Storage.ApplicationData.Current.LocalSettings.Values["shellTheme"] = tag;
@@ -569,9 +562,9 @@ public sealed partial class MainWindow : Window
         _applying = true;
         foreach (var item in ThemeBox.Items)
         {
-            if (item is RadioButton rb && (rb.Tag as string) == tag)
+            if (item is ComboBoxItem box && (box.Tag as string) == tag)
             {
-                ThemeBox.SelectedItem = rb;
+                ThemeBox.SelectedItem = box;
                 break;
             }
         }

@@ -1,9 +1,13 @@
+using System.Runtime.InteropServices;
 using Microsoft.UI.Xaml;
 
 namespace LX04.HostUi;
 
 public partial class App : Application
 {
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern int MessageBoxW(IntPtr hWnd, string text, string caption, uint type);
+
     private Window? _window;
 
     public App()
@@ -13,7 +17,18 @@ public partial class App : Application
 
     protected override void OnLaunched(LaunchActivatedEventArgs args)
     {
-        _window = new MainWindow();
-        _window.Activate();
+        try
+        {
+            _window = new MainWindow();
+            _window.Activate();
+        }
+        catch (Exception ex)
+        {
+            var logDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "LX04-PC-Bridge");
+            Directory.CreateDirectory(logDir);
+            File.AppendAllText(Path.Combine(logDir, "boot.log"), ex + "\n");
+            MessageBoxW(IntPtr.Zero, ex.ToString(), "LX04 PC Bridge", 0);
+            throw;
+        }
     }
 }
