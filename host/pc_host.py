@@ -81,6 +81,7 @@ _WS_POPUP = 0x80000000
 _WS_EX_TOOLWINDOW = 0x00000080
 _WS_EX_TOPMOST = 0x00000008
 _SW_HIDE = 0
+_SW_RESTORE = 9
 _SWP_SHOWWINDOW = 0x0040
 _HWND_TOPMOST = -1
 _ERROR_CLASS_ALREADY_EXISTS = 1410
@@ -1359,6 +1360,7 @@ class HostApp:
         self._log("关闭后最小化到托盘: " + ("已开启" if on else "已关闭"))
         if not on and self._tray_shown:
             self._restore_from_tray()
+            self._tray_remove()
 
     def _on_toast_mirror_change(self) -> None:
         if not self._routes_ready:
@@ -2210,7 +2212,28 @@ class HostApp:
             self.root.withdraw()
         except Exception:
             pass
-        self._log("已最小化到托盘。右键图标选“打开”可恢复窗口。")
+        self._log("已最小化到托盘。右键图标选“打开”可恢复窗口，图标会保留。")
+
+    def _tk_hwnd(self) -> int:
+        try:
+            self.root.update_idletasks()
+            frame = self.root.wm_frame()
+            if frame:
+                return int(str(frame), 16)
+        except Exception:
+            pass
+        try:
+            return int(self.root.winfo_id())
+        except Exception:
+            return 0
+
+    def _clear_restore_topmost(self) -> None:
+        if self._closing:
+            return
+        try:
+            self.root.attributes("-topmost", False)
+        except Exception:
+            pass
 
     def _restore_from_tray(self) -> None:
         self._tray_restore_after = None
@@ -2218,13 +2241,19 @@ class HostApp:
             return
         if time.monotonic() < self._tray_ignore_open_until:
             return
-        self._tray_remove()
         try:
             self.root.deiconify()
+            self.root.wm_state("normal")
+            hwnd = self._tk_hwnd()
+            if hwnd:
+                _user32.ShowWindow(hwnd, _SW_RESTORE)
+                _tray_take_focus(hwnd)
             self.root.lift()
+            self.root.attributes("-topmost", True)
             self.root.focus_force()
-        except Exception:
-            pass
+            self.root.after(250, self._clear_restore_topmost)
+        except Exception as exc:
+            self._log("恢复窗口失败: " + str(exc))
 
     def _show_tray_menu(self) -> None:
         if self._closing or not self._tray_hwnd or self._tray_menu_open:
