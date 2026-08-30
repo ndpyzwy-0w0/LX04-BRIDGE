@@ -96,7 +96,7 @@ adb forward tcp:17892 tcp:17892
 {"cmd": "hud_style", "reset": true, "rev": 1710000000001}
 {"cmd": "ping"}
 {"cmd": "volume", "level": 0.55}
-{"cmd": "pc_stats", "cpu": 34, "cpuT": 59, "gpu": 12, "gpuT": 49, "gpuN": "RTX 4070 SUPER", "vram": 28, "gpuW": 32, "ram": 35, "ramU": 22.2, "ramT": 63.8, "disk": 42, "diskN": "D:", "diskU": 400, "diskT": 931, "netD": 1500, "netU": 120, "up": 3600, "cores": 24}
+{"cmd": "pc_stats", "cpu": 34, "cpuT": 59, "gpu": 12, "gpuT": 49, "gpuN": "RTX 4070 SUPER", "vram": 28, "gpuW": 32, "ram": 35, "ramU": 22.2, "ramT": 63.8, "disk": 42, "diskN": "D:", "diskU": 400, "diskT": 931, "netD": 1500, "netU": 120, "up": 3600, "cores": 24, "now": 1710000000000, "tz": 480}
 {"cmd": "mirror_info", "title": "1  1920×1080  主屏"}
 {"cmd": "toast_overlay", "on": true, "app": "Cursor", "title": "申请权限", "body": "想要使用麦克风", "buttons": [{"id": "0", "label": "拒绝"}, {"id": "1", "label": "允许"}]}
 {"cmd": "hud_bg", "op": "select", "slot": 0}
@@ -104,7 +104,7 @@ adb forward tcp:17892 tcp:17892
 {"cmd": "hud_opacity", "alpha": 85}
 ```
 
-`pc_stats` 由电脑每秒推一次，音箱屏幕画 CPU / GPU / 内存 / 磁盘。占用用打包进 EXE 的采集器 + 系统 API / 显卡驱动，不要求接收方再装 Python 或监控软件。`diskN` / `diskU` / `diskT` 是上位机所选盘符和已用/总量 GB。温度字段在读不到时省略（不要发假的 ACPI 27°C）。GPU 温度优先用本机 NVIDIA NVML；CPU 封装温度仅在本机已开 MSI Afterburner 时补充。上位机可打开 MSI 官网下载页或启动本机已安装的 Afterburner，但不随包分发。
+`pc_stats` 由电脑每秒推一次，音箱屏幕画 CPU / GPU / 内存 / 磁盘。`now` 是电脑 Unix 毫秒时间，`tz` 是电脑本地相对 UTC 的分钟偏移（含夏令时）；音箱 HUD 时钟用这两项跟电脑走，未连接时才用音箱自己的时间。占用用打包进 EXE 的采集器 + 系统 API / 显卡驱动，不要求接收方再装 Python 或监控软件。`diskN` / `diskU` / `diskT` 是上位机所选盘符和已用/总量 GB。温度字段在读不到时省略（不要发假的 ACPI 27°C）。GPU 温度优先用本机 NVIDIA NVML；CPU 封装温度仅在本机已开 MSI Afterburner 时补充。上位机可打开 MSI 官网下载页或启动本机已安装的 Afterburner，但不随包分发。
 
 `mute` / `unmute` / `toggle_mute` 只切麦克风。扬声器用 `mute_spk` / `unmute_spk` / `toggle_spk_mute`。STATUS 里 `micMuted` / `spkMuted` 分开报；`muted` 仍表示麦克风静音（兼容旧上位机）。`upside_down` 由上位机切换吊装倒转屏幕。`light_theme` 切换浅色/深色底；音箱从右侧滑出菜单进入「系统设置」也可改，两边通过 STATUS `lightTheme` 与 CONTROL `light_theme` 实时同步。`hud_style` 同步各板块标题、大字颜色、大字号（`valueSize`，默认 28）和小字号（`subSize`，默认 11），以及大字（`metric`）和小字。小字默认一条（`subMetric`）；也可发 `subMetrics` 数组，每个板块最多 4 条，从上往下排。可选数据：cpu / cpuT / gpu / gpuT / gpuW / gpuFan / vram / ram / ramGB / disk / diskGB / diskIo / netD / netU / cores / gpuN；小字还可 `none` 不显示。每个板块下半空位可画折线：`chart` 默认开启，`chart: false` 关闭；`chartMetric` 选折线数据，省略则跟随大字。字号超出板块宽高时会自动缩小并裁切，不会画出格子。`rev` 为双方的样式版本，较大的覆盖较小的。音箱长按某一栏目可编辑，改动经 STATUS `hudStyle` 回传电脑；电脑预览的改动经 CONTROL 下发。两边实时同一套样式。音箱显示真实读数，预览只用示意数字。`reset: true` 恢复默认。未连接上位机时，音箱等待页有「重置样式」。
 

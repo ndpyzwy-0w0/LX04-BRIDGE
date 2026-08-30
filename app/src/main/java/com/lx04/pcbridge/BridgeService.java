@@ -519,6 +519,16 @@ public class BridgeService extends Service {
     }
 
     private static void applyPcStats(JSONObject json) {
+        if (json.has("now")) {
+            STATE.pcNowMs = json.optLong("now", 0);
+            STATE.pcNowAt = SystemClock.elapsedRealtime();
+        }
+        if (json.has("tz")) {
+            STATE.pcTzMin = json.optInt("tz", 0);
+        }
+        if (!json.has("cpu")) {
+            return;
+        }
         STATE.pcStatsValid = true;
         STATE.pcStatsAt = SystemClock.elapsedRealtime();
         STATE.pcCpu = (float) json.optDouble("cpu", 0);

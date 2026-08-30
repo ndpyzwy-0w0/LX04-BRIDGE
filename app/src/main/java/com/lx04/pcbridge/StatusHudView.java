@@ -1252,7 +1252,7 @@ public class StatusHudView extends View {
         if (!s.clockDate && !s.clockHour && !s.clockMinute && !s.clockSecond) {
             return "";
         }
-        java.util.Calendar c = java.util.Calendar.getInstance();
+        java.util.Calendar c = clockCalendar(s);
         StringBuilder out = new StringBuilder();
         if (s.clockDate) {
             out.append(c.get(java.util.Calendar.MONTH) + 1)
@@ -1284,6 +1284,17 @@ public class StatusHudView extends View {
             }
         }
         return out.toString();
+    }
+
+    private static java.util.Calendar clockCalendar(BridgeState s) {
+        if (s.clientConnected && s.pcNowMs > 0 && s.pcNowAt != 0) {
+            long ms = s.pcNowMs + (android.os.SystemClock.elapsedRealtime() - s.pcNowAt);
+            java.util.Calendar c = java.util.Calendar.getInstance(
+                    new java.util.SimpleTimeZone(s.pcTzMin * 60_000, "PC"));
+            c.setTimeInMillis(ms);
+            return c;
+        }
+        return java.util.Calendar.getInstance();
     }
 
     private static String pad2(int value) {

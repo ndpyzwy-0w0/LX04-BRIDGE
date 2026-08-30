@@ -12,6 +12,7 @@ import os
 import threading
 import time
 from ctypes import wintypes
+from datetime import datetime
 from typing import Any
 
 try:
@@ -211,12 +212,23 @@ _lock = threading.Lock()
 _sampler: "_Sampler | None" = None
 
 
+def clock_fields() -> dict[str, int]:
+    """PC wall clock for the speaker HUD. tz is minutes east of UTC, DST included."""
+    offset = datetime.now().astimezone().utcoffset()
+    return {
+        "now": int(time.time() * 1000),
+        "tz": int(offset.total_seconds() // 60) if offset else 0,
+    }
+
+
 def snapshot(drive: str | None = None) -> dict[str, Any]:
     global _sampler
     with _lock:
         if _sampler is None:
             _sampler = _Sampler()
-        return _sampler.sample(drive)
+        data = _sampler.sample(drive)
+    data.update(clock_fields())
+    return data
 
 
 def list_disks() -> list[dict[str, Any]]:
