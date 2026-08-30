@@ -209,6 +209,28 @@ def _host_dir() -> Path:
     return Path(__file__).resolve().parent
 
 
+_EDITOR_HEADERS = (
+    "板块",
+    "标题字母",
+    "字母色",
+    "大字内容",
+    "大字色",
+    "小字内容",
+    "大字号",
+    "小字号",
+    "折线",
+    "折线内容",
+)
+_EDITOR_MIN = (56, 88, 44, 120, 44, 168, 56, 56, 40, 120)
+
+
+def _setup_editor_grid(frame: tk.Misc) -> None:
+    for col, minw in enumerate(_EDITOR_MIN):
+        frame.grid_columnconfigure(col, minsize=minw, weight=0, pad=0)
+    frame.grid_columnconfigure(5, weight=1)
+    frame.grid_columnconfigure(9, weight=1)
+
+
 PREVIEW_FILE = _host_dir() / "hud_preview.json"
 
 _open_root: tk.Toplevel | None = None
@@ -839,21 +861,8 @@ class PreviewWindow:
 
         editors = tk.Frame(self.root, bg="#141C2E")
         editors.pack(fill="both", expand=True, padx=16, pady=(0, 16))
-        header = tk.Frame(editors, bg="#141C2E")
-        header.pack(fill="x", padx=8, pady=(8, 0))
-        ttk.Label(header, text="板块", style="CardDim.TLabel", width=6).pack(side="left")
-        ttk.Label(header, text="标题字母", style="CardDim.TLabel", width=10).pack(side="left")
-        ttk.Label(header, text="字母色", style="CardDim.TLabel", width=8).pack(side="left")
-        ttk.Label(header, text="大字内容", style="CardDim.TLabel", width=14).pack(side="left")
-        ttk.Label(header, text="大字色", style="CardDim.TLabel", width=8).pack(side="left")
-        ttk.Label(header, text="小字内容", style="CardDim.TLabel", width=18).pack(side="left")
-        ttk.Label(header, text="大字号", style="CardDim.TLabel", width=7).pack(side="left")
-        ttk.Label(header, text="小字号", style="CardDim.TLabel", width=7).pack(side="left")
-        ttk.Label(header, text="折线", style="CardDim.TLabel", width=6).pack(side="left")
-        ttk.Label(header, text="折线内容", style="CardDim.TLabel").pack(side="left")
-
         rows_wrap = tk.Frame(editors, bg="#141C2E")
-        rows_wrap.pack(fill="both", expand=True, padx=8, pady=(4, 8))
+        rows_wrap.pack(fill="both", expand=True, padx=8, pady=(8, 8))
         scroll = ttk.Scrollbar(rows_wrap, orient="vertical")
         self._rows_canvas = tk.Canvas(
             rows_wrap,
@@ -870,14 +879,17 @@ class PreviewWindow:
         self._rows_inner.bind("<Configure>", lambda _e: self._sync_rows_scroll())
         self._rows_canvas.bind("<Configure>", self._on_rows_canvas)
         self.root.bind("<MouseWheel>", self._on_rows_wheel)
+        _setup_editor_grid(self._rows_inner)
+        for col, title in enumerate(_EDITOR_HEADERS):
+            ttk.Label(self._rows_inner, text=title, style="CardDim.TLabel").grid(
+                row=0, column=col, sticky="nw", padx=4, pady=(0, 4)
+            )
 
         combo_bg = self._combo_bg
         combo_fg = self._combo_fg
         for index, (_key, label, _metric, _sub) in enumerate(DEFAULT_SLOTS):
             card = self.state["cards"][index]
-            row = tk.Frame(self._rows_inner, bg="#141C2E")
-            row.pack(fill="x", padx=8, pady=4)
-            ttk.Label(row, text=label, style="Card.TLabel", width=6).pack(side="left", anchor="n", pady=4)
+            row = index + 1
             title_var = tk.StringVar(value=str(card["title"]))
             metric_var = tk.StringVar(value=metric_label(str(card.get("metric") or _metric)))
             value_size_var = tk.IntVar(value=card_value_size(card))
@@ -891,39 +903,49 @@ class PreviewWindow:
             self.sub_size_vars.append(sub_size_var)
             self.chart_vars.append(chart_var)
             self.chart_metric_vars.append(chart_metric_var)
-            ttk.Entry(row, textvariable=title_var, width=10).pack(side="left", padx=(0, 6), anchor="n", pady=4)
-            title_swatch = tk.Button(row, width=3, relief="groove", bd=1, command=lambda i=index: self._pick(i, "title"))
-            title_swatch.pack(side="left", padx=(0, 12), anchor="n", pady=4)
-            drop = ttk.Menubutton(row, textvariable=metric_var, style="Drop.TMenubutton", width=12, direction="below")
-            menu = self._metric_menu(drop, metric_var, combo_bg, combo_fg, lambda i=index: self._on_metric(i))
-            drop["menu"] = menu
-            drop.pack(side="left", padx=(0, 12), anchor="n", pady=4)
-            value_swatch = tk.Button(row, width=3, relief="groove", bd=1, command=lambda i=index: self._pick(i, "value"))
-            value_swatch.pack(side="left", padx=(0, 12), anchor="n", pady=4)
-            sub_col = tk.Frame(row, bg="#141C2E")
-            sub_col.pack(side="left", padx=(0, 8))
+            ttk.Label(self._rows_inner, text=label, style="Card.TLabel").grid(
+                row=row, column=0, sticky="nw", padx=4, pady=4
+            )
+            ttk.Entry(self._rows_inner, textvariable=title_var, width=10).grid(
+                row=row, column=1, sticky="nw", padx=4, pady=4
+            )
+            title_swatch = tk.Button(
+                self._rows_inner, width=3, relief="groove", bd=1, command=lambda i=index: self._pick(i, "title")
+            )
+            title_swatch.grid(row=row, column=2, sticky="nw", padx=4, pady=4)
+            drop = ttk.Menubutton(
+                self._rows_inner, textvariable=metric_var, style="Drop.TMenubutton", width=12, direction="below"
+            )
+            drop["menu"] = self._metric_menu(drop, metric_var, combo_bg, combo_fg, lambda i=index: self._on_metric(i))
+            drop.grid(row=row, column=3, sticky="nw", padx=4, pady=4)
+            value_swatch = tk.Button(
+                self._rows_inner, width=3, relief="groove", bd=1, command=lambda i=index: self._pick(i, "value")
+            )
+            value_swatch.grid(row=row, column=4, sticky="nw", padx=4, pady=4)
+            sub_col = tk.Frame(self._rows_inner, bg="#141C2E")
+            sub_col.grid(row=row, column=5, sticky="nw", padx=4, pady=4)
             self.sub_frames.append(sub_col)
             self._rebuild_sub_col(index)
             ttk.Spinbox(
-                row,
+                self._rows_inner,
                 from_=VALUE_SIZE_MIN,
                 to=VALUE_SIZE_MAX,
                 increment=1,
                 textvariable=value_size_var,
                 width=4,
                 command=lambda i=index: self._on_text(i),
-            ).pack(side="left", padx=(0, 8), anchor="n", pady=4)
+            ).grid(row=row, column=6, sticky="nw", padx=4, pady=4)
             ttk.Spinbox(
-                row,
+                self._rows_inner,
                 from_=SUB_SIZE_MIN,
                 to=SUB_SIZE_MAX,
                 increment=1,
                 textvariable=sub_size_var,
                 width=4,
                 command=lambda i=index: self._on_text(i),
-            ).pack(side="left", padx=(0, 8), anchor="n", pady=4)
+            ).grid(row=row, column=7, sticky="nw", padx=4, pady=4)
             tk.Checkbutton(
-                row,
+                self._rows_inner,
                 text="开",
                 variable=chart_var,
                 command=lambda i=index: self._on_text(i),
@@ -934,11 +956,11 @@ class PreviewWindow:
                 activeforeground="#E8EEF8",
                 highlightthickness=0,
                 font=("Segoe UI", 10),
-            ).pack(side="left", padx=(0, 8), anchor="n", pady=4)
+            ).grid(row=row, column=8, sticky="nw", padx=4, pady=4)
             chart_drop = ttk.Menubutton(
-                row, textvariable=chart_metric_var, style="Drop.TMenubutton", width=12, direction="below"
+                self._rows_inner, textvariable=chart_metric_var, style="Drop.TMenubutton", width=12, direction="below"
             )
-            chart_menu = self._metric_menu(
+            chart_drop["menu"] = self._metric_menu(
                 chart_drop,
                 chart_metric_var,
                 combo_bg,
@@ -946,8 +968,7 @@ class PreviewWindow:
                 lambda i=index: self._on_chart_metric(i),
                 include_follow=True,
             )
-            chart_drop["menu"] = chart_menu
-            chart_drop.pack(side="left", anchor="n", pady=4)
+            chart_drop.grid(row=row, column=9, sticky="nw", padx=4, pady=4)
             self._swatches.append((title_swatch, value_swatch))
             title_var.trace_add("write", lambda *_a, i=index: self._on_text(i))
             value_size_var.trace_add("write", lambda *_a, i=index: self._on_text(i))

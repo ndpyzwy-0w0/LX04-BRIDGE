@@ -23,6 +23,22 @@ def main() -> None:
     assert abs(scale - 1.0) < 1e-9 and ox == 0 and abs(oy - 240) < 1e-9
     src = Path(hud_preview.__file__).read_text(encoding="utf-8")
     assert "resizable(False, False)" not in src
+    assert len(hud_preview._EDITOR_HEADERS) == len(hud_preview._EDITOR_MIN) == 10
+    import tkinter as tk
+
+    root = tk.Tk()
+    root.withdraw()
+    win = hud_preview.PreviewWindow(root, False)
+    win.root.update_idletasks()
+    win.root.update()
+    inner = win._rows_inner
+    for col in range(10):
+        head = inner.grid_bbox(col, 0)
+        cell = inner.grid_bbox(col, 1)
+        assert head and cell, col
+        assert abs(head[0] - cell[0]) <= 2, (col, head, cell)
+    win.root.destroy()
+    root.destroy()
     print("ok")
 
 
