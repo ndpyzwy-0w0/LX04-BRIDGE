@@ -31,7 +31,14 @@ public sealed partial class MainWindow : Window
         TryResize(800, 600);
         ApplySavedTheme();
         Nav.SelectedItem = Nav.MenuItems[0];
-        _bridge = new HostBridge();
+        try
+        {
+            _bridge = new HostBridge();
+        }
+        catch (Exception ex)
+        {
+            throw new InvalidOperationException("无法启动后端：" + ex.Message, ex);
+        }
         _bridge.Event += OnBridgeEvent;
         _activateTimer.Tick += (_, _) =>
         {

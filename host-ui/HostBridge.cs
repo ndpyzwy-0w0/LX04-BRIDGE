@@ -35,18 +35,20 @@ internal sealed class HostBridge : IDisposable
     private static void ResolveWorker(ProcessStartInfo start)
     {
         var baseDir = AppContext.BaseDirectory;
-        foreach (var worker in new[]
+        foreach (var bundled in new[]
                  {
                      Path.Combine(baseDir, "LX04-PC-Bridge-Worker.exe"),
                      Path.Combine(baseDir, "worker", "LX04-PC-Bridge-Worker.exe"),
                  })
         {
-            if (File.Exists(worker))
+            if (!File.Exists(bundled))
             {
-                start.FileName = worker;
-                start.WorkingDirectory = Path.GetDirectoryName(worker) ?? baseDir;
-                return;
+                continue;
             }
+            var worker = PersistWorker(bundled);
+            start.FileName = worker;
+            start.WorkingDirectory = Path.GetDirectoryName(worker) ?? baseDir;
+            return;
         }
         var here = new DirectoryInfo(baseDir);
         for (var i = 0; i < 8 && here != null; i++, here = here.Parent)
@@ -61,6 +63,20 @@ internal sealed class HostBridge : IDisposable
             }
         }
         throw new FileNotFoundException("找不到 host_svc.py 或 LX04-PC-Bridge-Worker.exe");
+    }
+
+    private static string PersistWorker(string bundled)
+    {
+        var destDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "LX04-PC-Bridge");
+        Directory.CreateDirectory(destDir);
+        var dest = Path.Combine(destDir, "LX04-PC-Bridge-Worker.exe");
+        var srcInfo = new FileInfo(bundled);
+        var destInfo = new FileInfo(dest);
+        if (!destInfo.Exists || destInfo.Length != srcInfo.Length || destInfo.LastWriteTimeUtc < srcInfo.LastWriteTimeUtc)
+        {
+            File.Copy(bundled, dest, true);
+        }
+        return dest;
     }
 
     private async Task ReadLoop()
