@@ -45,6 +45,9 @@ def main() -> None:
     assert pc_host._tray_kind(pc_host._WM_RBUTTONUP) == "menu"
     assert pc_host._tray_kind(pc_host._WM_CONTEXTMENU) == "menu"
     assert pc_host._tray_kind(pc_host._WM_LBUTTONUP) == "open"
+    assert pc_host._tray_kind(pc_host._WM_LBUTTONDOWN) == "open"
+    assert "_HWND_MESSAGE" not in inspect.getsource(pc_host.HostApp._tray_ensure_hwnd)
+    assert "_TASKBAR_CREATED" in on_msg
     menu = pc_host._user32.CreatePopupMenu()
     assert menu, "CreatePopupMenu must return a 64-bit HMENU"
     ok = pc_host._user32.AppendMenuW(menu, pc_host._MF_STRING, pc_host._TRAY_OPEN, "打开")

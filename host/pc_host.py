@@ -63,13 +63,15 @@ _LRESULT = ctypes.c_ssize_t
 _WNDPROC = ctypes.WINFUNCTYPE(_LRESULT, wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM)
 _WM_NULL = 0x0000
 _WM_TRAY = 0x8001
+_WM_LBUTTONDOWN = 0x0201
 _WM_LBUTTONUP = 0x0202
 _WM_LBUTTONDBLCLK = 0x0203
+_WM_RBUTTONDOWN = 0x0204
 _WM_RBUTTONUP = 0x0205
 _WM_CONTEXTMENU = 0x007B
 _NIN_SELECT = 0x0400
 _NIN_KEYSELECT = 0x0401
-_NIM_ADD, _NIM_DELETE = 0, 2
+_NIM_ADD, _NIM_MODIFY, _NIM_DELETE = 0, 1, 2
 _NIF_MESSAGE, _NIF_ICON, _NIF_TIP = 1, 2, 4
 _IDI_APPLICATION = 32512
 _TPM_RIGHTBUTTON = 0x0002
@@ -82,7 +84,6 @@ _WS_EX_TOPMOST = 0x00000008
 _SW_SHOW = 5
 _SW_RESTORE = 9
 _GA_ROOT = 2
-_HWND_MESSAGE = wintypes.HWND(-3)
 _ERROR_CLASS_ALREADY_EXISTS = 1410
 _TRAY_OPEN, _TRAY_QUIT = 1, 2
 _TRAY_CLASS = "LX04BridgeTray"
@@ -173,14 +174,17 @@ _user32.LoadIconW.restype = wintypes.HICON
 _user32.LoadIconW.argtypes = [wintypes.HINSTANCE, ctypes.c_void_p]
 _user32.DestroyIcon.restype = wintypes.BOOL
 _user32.DestroyIcon.argtypes = [wintypes.HICON]
+_user32.RegisterWindowMessageW.restype = wintypes.UINT
+_user32.RegisterWindowMessageW.argtypes = [wintypes.LPCWSTR]
 
 _TRAY_APP = None
+_TASKBAR_CREATED = _user32.RegisterWindowMessageW("TaskbarCreated")
 
 
 def _tray_kind(ev: int) -> str:
-    if ev in (_WM_CONTEXTMENU, _WM_RBUTTONUP):
+    if ev in (_WM_CONTEXTMENU, _WM_RBUTTONUP, _WM_RBUTTONDOWN):
         return "menu"
-    if ev in (_NIN_SELECT, _NIN_KEYSELECT, _WM_LBUTTONUP, _WM_LBUTTONDBLCLK):
+    if ev in (_NIN_SELECT, _NIN_KEYSELECT, _WM_LBUTTONDOWN, _WM_LBUTTONUP, _WM_LBUTTONDBLCLK):
         return "open"
     return ""
 
@@ -683,6 +687,10 @@ class HostApp:
         self._tray_restore_after = None
         self._tray_menu_open = False
         self._tray_ignore_open_until = 0.0
+        self._tray_last_kind = ""
+        self._tray_last_at = 0.0
+        self._tray_ping_at = 0.0
+        self._host_hwnd = 0
         self._build()
         threading.Thread(target=pc_stats.snapshot, daemon=True).start()
         self._load_route_vars()
@@ -2115,14 +2123,9 @@ class HostApp:
         global _TRAY_APP
         _TRAY_APP = self
         hwnd = _user32.CreateWindowExW(
-            0, _TRAY_CLASS, "LX04 Tray", 0,
-            0, 0, 0, 0, _HWND_MESSAGE, None, hinst, None,
+            _WS_EX_TOOLWINDOW, _TRAY_CLASS, "LX04 Tray", _WS_POPUP,
+            -32000, -32000, 1, 1, None, None, hinst, None,
         )
-        if not hwnd:
-            hwnd = _user32.CreateWindowExW(
-                _WS_EX_TOOLWINDOW, _TRAY_CLASS, "LX04 Tray", _WS_POPUP,
-                -32000, -32000, 1, 1, None, None, hinst, None,
-            )
         if not hwnd:
             _TRAY_APP = None
             return False
@@ -2130,13 +2133,27 @@ class HostApp:
         return True
 
     def _tray_on_msg(self, hwnd, msg, wparam, lparam):
+        if msg == _TASKBAR_CREATED:
+            self._tray_shown = False
+            self._tray_add()
+            return 0
         if msg != _WM_TRAY or int(hwnd) != int(self._tray_hwnd):
             return None
         kind = _tray_kind(int(lparam) & 0xFFFF)
+        if not kind:
+            return 0
+        now = time.monotonic()
+        if kind == self._tray_last_kind and now - self._tray_last_at < 0.4:
+            return 0
+        self._tray_last_kind = kind
+        self._tray_last_at = now
         if kind == "menu":
             self._show_tray_menu()
         elif kind == "open":
-            self._schedule_tray_restore()
+            if self._host_hwnd:
+                _user32.ShowWindow(self._host_hwnd, _SW_RESTORE)
+                _user32.SetForegroundWindow(self._host_hwnd)
+            self.root.after(0, self._restore_from_tray)
         return 0
 
     def _cancel_tray_restore(self) -> None:
@@ -2148,11 +2165,15 @@ class HostApp:
             except Exception:
                 pass
 
-    def _schedule_tray_restore(self) -> None:
-        if self._tray_menu_open or time.monotonic() < self._tray_ignore_open_until:
+    def _tray_ping(self) -> None:
+        if self._closing or not self._tray_hwnd:
             return
-        self._cancel_tray_restore()
-        self._tray_restore_after = self.root.after(200, self._restore_from_tray)
+        nid = self._tray_nid()
+        if _shell32.Shell_NotifyIconW(_NIM_MODIFY, ctypes.byref(nid)):
+            self._tray_shown = True
+            return
+        self._tray_shown = False
+        self._tray_add()
 
     def _tray_nid(self) -> _NOTIFYICONDATAW:
         nid = _NOTIFYICONDATAW()
@@ -2170,7 +2191,10 @@ class HostApp:
             return True
         if not self._tray_ensure_hwnd():
             return False
-        ok = bool(_shell32.Shell_NotifyIconW(_NIM_ADD, ctypes.byref(self._tray_nid())))
+        nid = self._tray_nid()
+        ok = bool(_shell32.Shell_NotifyIconW(_NIM_ADD, ctypes.byref(nid)))
+        if not ok:
+            ok = bool(_shell32.Shell_NotifyIconW(_NIM_MODIFY, ctypes.byref(nid)))
         self._tray_shown = ok
         if not ok:
             self._tray_remove()
@@ -2202,6 +2226,10 @@ class HostApp:
         self._tray_icon_owned = False
 
     def _hide_to_tray(self) -> None:
+        try:
+            self._host_hwnd = _toplevel_hwnd(self.root)
+        except Exception:
+            self._host_hwnd = 0
         if not self._tray_add():
             self._log("无法创建托盘图标，将正常退出")
             self._on_close(force=True)
@@ -2219,6 +2247,9 @@ class HostApp:
         if time.monotonic() < self._tray_ignore_open_until:
             return
         try:
+            if self._host_hwnd:
+                _user32.ShowWindow(self._host_hwnd, _SW_RESTORE)
+                _user32.SetForegroundWindow(self._host_hwnd)
             _show_tk_window(self.root)
             self._log("已打开窗口")
         except Exception as exc:
@@ -2531,6 +2562,9 @@ class HostApp:
         if self.toast.error:
             self._log("系统弹窗: " + self.toast.error)
             self.toast.error = ""
+        if self._tray_hwnd and time.monotonic() - self._tray_ping_at > 3:
+            self._tray_ping_at = time.monotonic()
+            self._tray_ping()
         try:
             self.root.after(80, self._tick)
         except Exception:
