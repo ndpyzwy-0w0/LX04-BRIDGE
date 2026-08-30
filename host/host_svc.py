@@ -155,6 +155,9 @@ def _dispatch(app: HostController, method: str, params: dict):
     if method == "hud":
         app.apply_hud(params.get("state") if isinstance(params.get("state"), dict) else None, reset=bool(params.get("reset")))
         return app.snapshot()
+    if method == "hud_preview":
+        app._open_hud_preview()
+        return {"ok": True}
     if method == "diagnose":
         app.refresh_devices()
         return app.snapshot()

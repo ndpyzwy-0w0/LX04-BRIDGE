@@ -281,11 +281,8 @@ public sealed partial class MainWindow : Window
             BarAudio.Text = (snap.AudioOk ? "●" : "○") + " 音频：" + (snap.AudioOk ? "正常" : "—");
             BarScreen.Text = "● 屏幕：" + snap.ScreenMode;
             BarToast.Text = (snap.ToastMirror ? "●" : "○") + " 弹窗同步：" + (snap.ToastMirror ? "已开启" : "关");
-            if (!MonitorBox.IsDropDownOpen && !QualityBox.IsDropDownOpen && !DiskBox.IsDropDownOpen)
-            {
-                RenderDiag(snap);
-                RenderHud(snap);
-            }
+            RenderDiag(snap);
+            RenderHud(snap);
         }
         finally
         {
@@ -515,6 +512,7 @@ public sealed partial class MainWindow : Window
     private async void Afterburner_Click(object sender, RoutedEventArgs e) => await Call("afterburner");
     private async void UploadBg_Click(object sender, RoutedEventArgs e) => await Call("upload_bg");
     private async void HudReset_Click(object sender, RoutedEventArgs e) => await Call("hud", new { reset = true });
+    private async void HudPreview_Click(object sender, RoutedEventArgs e) => await Call("hud_preview");
     private async void Watch_Click(object sender, RoutedEventArgs e) => await Call("mirror", new { on = false });
     private async void Mirror_Click(object sender, RoutedEventArgs e) => await Call("mirror", new { on = true });
     private async void MicSwitch_Toggled(object sender, RoutedEventArgs e) => await Set("micEnabled", MicSwitch.IsOn);

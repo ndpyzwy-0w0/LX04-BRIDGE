@@ -1969,11 +1969,35 @@ class HostApp:
         self._log(afterburner.open_download())
 
     def _open_hud_preview(self) -> None:
-        hud_preview.open_window(
-            self.root,
-            light=bool(self.light_theme.get()),
-            on_change=self._on_hud_style_change,
-        )
+        light = bool(self.light_theme.get())
+        if not self._headless and self.root is not None:
+            hud_preview.open_window(self.root, light=light, on_change=self._on_hud_style_change)
+            return
+        existing = getattr(self, "_hud_tk", None)
+        if existing is not None:
+            try:
+                existing.after(0, lambda: hud_preview.open_window(existing, light=light, on_change=self._on_hud_style_change))
+                return
+            except Exception:
+                pass
+        def run() -> None:
+            root = tk.Tk()
+            root.withdraw()
+            self._hud_tk = root
+            def on_change(state, reset=False):
+                self.ui_post(lambda s=state, r=reset: self._on_hud_style_change(s, reset=r))
+            top = hud_preview.open_window(root, light=light, on_change=on_change)
+            def shutdown(_=None):
+                self._hud_tk = None
+                try:
+                    root.quit()
+                    root.destroy()
+                except tk.TclError:
+                    pass
+            top.bind("<Destroy>", lambda e: shutdown() if e.widget is top else None)
+            root.mainloop()
+        # ponytail: tk preview on its own thread; own process if apartment fights
+        threading.Thread(target=run, daemon=True, name="lx04-hud-preview").start()
 
     def _on_hud_bg_status(self, data: dict) -> None:
         payload = data.get("hudBg")

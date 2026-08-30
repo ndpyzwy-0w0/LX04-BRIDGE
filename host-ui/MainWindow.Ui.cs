@@ -245,9 +245,19 @@ public sealed partial class MainWindow
             Height = 480,
             CornerRadius = new CornerRadius(6),
             BorderThickness = new Thickness(1),
+            BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(80, 128, 128, 128)),
+            Background = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 11, 18, 32)),
             Child = HudGrid,
         };
-        var box = new Viewbox { Stretch = Stretch.Uniform, HorizontalAlignment = HorizontalAlignment.Left, MaxWidth = 720, Child = HudFrame };
+        HudGrid.Children.Add(new TextBlock
+        {
+            Text = "点击预览音箱屏幕",
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
+            Opacity = 0.7,
+        });
+        HudFrame.Tapped += (_, _) => _ = Call("hud_preview");
+        var box = new Viewbox { Stretch = Stretch.Uniform, HorizontalAlignment = HorizontalAlignment.Stretch, MaxWidth = 720, Child = HudFrame };
         MonitorBox = new ComboBox { Header = "显示器", HorizontalAlignment = HorizontalAlignment.Stretch };
         MonitorBox.SelectionChanged += Monitor_Changed;
         QualityBox = new ComboBox { Header = "镜像质量", HorizontalAlignment = HorizontalAlignment.Stretch };
@@ -259,6 +269,8 @@ public sealed partial class MainWindow
         LightSwitch = Switch("音箱浅色", Light_Toggled);
         UpsideSwitch = Switch("吊装倒转屏幕", Upside_Toggled);
         PcLine = new TextBlock { Opacity = 0.7, TextWrapping = TextWrapping.Wrap };
+        var preview = new Button { Content = "预览屏幕" };
+        preview.Click += HudPreview_Click;
         var watch = new Button { Content = "状态监视" };
         watch.Click += Watch_Click;
         var mirror = new Button { Content = "屏幕镜像" };
@@ -272,7 +284,7 @@ public sealed partial class MainWindow
         return Scroll(new StackPanel
         {
             Spacing = 12,
-            Children = { box, Row(watch, mirror, ToastSwitch), MonitorBox, QualityBox, PcStatsSwitch, DiskBox, LightSwitch, UpsideSwitch, PcLine, Row(reset, bg, ab) },
+            Children = { box, Row(preview, watch, mirror, ToastSwitch), MonitorBox, QualityBox, PcStatsSwitch, DiskBox, LightSwitch, UpsideSwitch, PcLine, Row(reset, bg, ab) },
         });
     }
 
