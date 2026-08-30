@@ -27,6 +27,7 @@ def main() -> None:
     assert "refresh_devices" not in init
     assert "tidy_cable" not in init
     main_src = inspect.getsource(pc_host.main)
+    assert "_claim_single_instance" in main_src
     assert "_on_close" in main_src
     close = inspect.getsource(pc_host.HostApp._on_close)
     assert "withdraw" in close
@@ -53,6 +54,10 @@ def main() -> None:
     ok = pc_host._user32.AppendMenuW(menu, pc_host._MF_STRING, pc_host._TRAY_OPEN, "打开")
     pc_host._user32.DestroyMenu(menu)
     assert ok
+    name = "Local\\LX04PCBridgeHostSelfCheck"
+    assert pc_host._claim_single_instance(name, name + "Ev")
+    assert not pc_host._claim_single_instance(name, name + "Ev")
+    pc_host._release_single_instance()
     print("ok")
 
 

@@ -87,6 +87,11 @@ _GA_ROOT = 2
 _ERROR_CLASS_ALREADY_EXISTS = 1410
 _TRAY_OPEN, _TRAY_QUIT = 1, 2
 _TRAY_CLASS = "LX04BridgeTray"
+_HOST_TITLE = "LX04 上位机"
+_MUTEX_NAME = "Local\\LX04PCBridgeHost"
+_EVENT_NAME = "Local\\LX04PCBridgeActivate"
+_ERROR_ALREADY_EXISTS = 183
+_WAIT_OBJECT_0 = 0
 
 
 class _POINT(ctypes.Structure):
@@ -176,9 +181,67 @@ _user32.DestroyIcon.restype = wintypes.BOOL
 _user32.DestroyIcon.argtypes = [wintypes.HICON]
 _user32.RegisterWindowMessageW.restype = wintypes.UINT
 _user32.RegisterWindowMessageW.argtypes = [wintypes.LPCWSTR]
+_user32.FindWindowW.restype = wintypes.HWND
+_user32.FindWindowW.argtypes = [wintypes.LPCWSTR, wintypes.LPCWSTR]
+_k32err = ctypes.WinDLL("kernel32", use_last_error=True)
+_k32err.CreateMutexW.restype = wintypes.HANDLE
+_k32err.CreateMutexW.argtypes = [ctypes.c_void_p, wintypes.BOOL, wintypes.LPCWSTR]
+_k32err.CreateEventW.restype = wintypes.HANDLE
+_k32err.CreateEventW.argtypes = [ctypes.c_void_p, wintypes.BOOL, wintypes.BOOL, wintypes.LPCWSTR]
+_k32err.SetEvent.restype = wintypes.BOOL
+_k32err.SetEvent.argtypes = [wintypes.HANDLE]
+_k32err.ResetEvent.restype = wintypes.BOOL
+_k32err.ResetEvent.argtypes = [wintypes.HANDLE]
+_k32err.WaitForSingleObject.restype = wintypes.DWORD
+_k32err.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+_k32err.CloseHandle.restype = wintypes.BOOL
+_k32err.CloseHandle.argtypes = [wintypes.HANDLE]
 
 _TRAY_APP = None
 _TASKBAR_CREATED = _user32.RegisterWindowMessageW("TaskbarCreated")
+_SINGLE_MUTEX = 0
+_ACTIVATE_EVENT = 0
+
+
+def _claim_single_instance(mutex_name: str = _MUTEX_NAME, event_name: str = _EVENT_NAME) -> bool:
+    global _SINGLE_MUTEX, _ACTIVATE_EVENT
+    mutex = _k32err.CreateMutexW(None, False, mutex_name)
+    already = ctypes.get_last_error() == _ERROR_ALREADY_EXISTS
+    event = _k32err.CreateEventW(None, True, False, event_name)
+    if already:
+        if event:
+            _k32err.SetEvent(event)
+            _k32err.CloseHandle(event)
+        if mutex:
+            _k32err.CloseHandle(mutex)
+        return False
+    _SINGLE_MUTEX = int(mutex or 0)
+    _ACTIVATE_EVENT = int(event or 0)
+    return True
+
+
+def _release_single_instance() -> None:
+    global _SINGLE_MUTEX, _ACTIVATE_EVENT
+    for handle in (_SINGLE_MUTEX, _ACTIVATE_EVENT):
+        if handle:
+            _k32err.CloseHandle(handle)
+    _SINGLE_MUTEX = 0
+    _ACTIVATE_EVENT = 0
+
+
+def _activate_running_host() -> None:
+    hwnd = _user32.FindWindowW(None, _HOST_TITLE)
+    if hwnd:
+        _user32.ShowWindow(hwnd, _SW_RESTORE)
+        _user32.SetForegroundWindow(hwnd)
+
+
+def _poll_activate_event() -> bool:
+    ev = _ACTIVATE_EVENT
+    if ev and _k32err.WaitForSingleObject(ev, 0) == _WAIT_OBJECT_0:
+        _k32err.ResetEvent(ev)
+        return True
+    return False
 
 
 def _tray_kind(ev: int) -> str:
@@ -698,7 +761,7 @@ class HostApp:
         self.root.after(400, self._tick)
 
     def _build(self) -> None:
-        self.root.title("LX04 上位机")
+        self.root.title(_HOST_TITLE)
         self.root.configure(bg=BG)
         self.root.update_idletasks()
         m = _ui_metrics(self.root.winfo_screenwidth(), self.root.winfo_screenheight(), self.root.winfo_fpixels("1i"))
@@ -2183,7 +2246,7 @@ class HostApp:
         nid.uFlags = _NIF_MESSAGE | _NIF_ICON | _NIF_TIP
         nid.uCallbackMessage = _WM_TRAY
         nid.hIcon = self._tray_load_icon()
-        nid.szTip = "LX04 上位机"
+        nid.szTip = _HOST_TITLE
         return nid
 
     def _tray_add(self) -> bool:
@@ -2543,6 +2606,12 @@ class HostApp:
     def _tick(self) -> None:
         if self._closing:
             return
+        if _poll_activate_event():
+            try:
+                _show_tk_window(self.root)
+                self._log("已切换到正在运行的上位机")
+            except Exception:
+                pass
         spk = self.loopback.peak if self.loopback.running() else self.play_peak
         self._draw_meter(self.meter, self.sink.peak if self.connected else 0)
         self._draw_meter(self.spk_meter, spk if self.connected else 0)
@@ -2638,6 +2707,9 @@ def _pick_label(labels: list[str], saved: str, fallback: str | None) -> str:
 
 
 def main() -> None:
+    if not _claim_single_instance():
+        _activate_running_host()
+        return
     _enable_dpi()
     root = tk.Tk()
     app = HostApp(root)
