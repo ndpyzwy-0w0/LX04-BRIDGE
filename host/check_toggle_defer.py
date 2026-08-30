@@ -30,6 +30,11 @@ def main() -> None:
     assert "_on_close" in main_src
     close = inspect.getsource(pc_host.HostApp._on_close)
     assert "withdraw" in close
+    assert "_close_goes_to_tray" in close
+    assert "minimize_to_tray" in inspect.getsource(pc_host.HostApp._save_routes)
+    assert pc_host._close_goes_to_tray(False, False, True)
+    assert not pc_host._close_goes_to_tray(False, True, True)
+    assert not pc_host._close_goes_to_tray(True, False, True)
     print("ok")
 
 
