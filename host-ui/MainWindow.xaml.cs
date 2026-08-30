@@ -250,14 +250,11 @@ public sealed partial class MainWindow : Window
             DeviceSub.Text = connected ? "ADB 已连接 · USB 数据通道正常" : snap.Devices.Count > 0 ? "ADB · USB" : "插入数据线后点刷新";
             ConnectBtn.Visibility = connected ? Visibility.Collapsed : Visibility.Visible;
             DisconnectBtn.Visibility = connected ? Visibility.Visible : Visibility.Collapsed;
-            if (!AnyDropDownOpen())
-            {
-                FillBox(InjectBox, snap.InjectLabels, snap.Inject);
-                FillBox(SpeakerBox, snap.SpeakerLabels, snap.Speaker);
-                FillBox(MonitorBox, snap.MonitorLabels, snap.Monitor);
-                FillBox(QualityBox, snap.QualityLabels, snap.Quality);
-                FillBox(DiskBox, snap.DiskLabels, snap.Disk);
-            }
+            FillBox(InjectBox, snap.InjectLabels, snap.Inject);
+            FillBox(SpeakerBox, snap.SpeakerLabels, snap.Speaker);
+            FillBox(MonitorBox, snap.MonitorLabels, snap.Monitor);
+            FillBox(QualityBox, snap.QualityLabels, snap.Quality);
+            FillBox(DiskBox, snap.DiskLabels, snap.Disk);
             SetOn(MicSwitch, snap.MicEnabled);
             SetOn(SpkSwitch, snap.SpkEnabled);
             SetOn(DefaultSpkSwitch, snap.SetDefaultSpk);
@@ -284,7 +281,7 @@ public sealed partial class MainWindow : Window
             BarAudio.Text = (snap.AudioOk ? "●" : "○") + " 音频：" + (snap.AudioOk ? "正常" : "—");
             BarScreen.Text = "● 屏幕：" + snap.ScreenMode;
             BarToast.Text = (snap.ToastMirror ? "●" : "○") + " 弹窗同步：" + (snap.ToastMirror ? "已开启" : "关");
-            if (!AnyDropDownOpen())
+            if (!MonitorBox.IsDropDownOpen && !QualityBox.IsDropDownOpen && !DiskBox.IsDropDownOpen)
             {
                 RenderDiag(snap);
                 RenderHud(snap);
@@ -296,11 +293,6 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private bool AnyDropDownOpen() =>
-        InjectBox.IsDropDownOpen || SpeakerBox.IsDropDownOpen || MonitorBox.IsDropDownOpen
-        || QualityBox.IsDropDownOpen || DiskBox.IsDropDownOpen || ThemeBox.IsDropDownOpen
-        || LogFilter.IsDropDownOpen;
-
     private static void SetOn(ToggleSwitch box, bool on)
     {
         if (box.IsOn != on)
@@ -309,14 +301,25 @@ public sealed partial class MainWindow : Window
         }
     }
 
+    private static string? BoxText(object? item) =>
+        item as string ?? (item as ComboBoxItem)?.Content?.ToString();
+
     private static void FillBox(ComboBox box, List<string> labels, string selected)
     {
+        if (labels.Count == 0)
+        {
+            return;
+        }
+        if (box.IsDropDownOpen && box.Items.Count > 0)
+        {
+            return;
+        }
         var same = box.Items.Count == labels.Count;
         if (same)
         {
             for (var i = 0; i < labels.Count; i++)
             {
-                if (box.Items[i] as string != labels[i])
+                if (BoxText(box.Items[i]) != labels[i])
                 {
                     same = false;
                     break;
@@ -331,10 +334,8 @@ public sealed partial class MainWindow : Window
                 box.Items.Add(label);
             }
         }
-        var want = selected.Length > 0 && labels.Contains(selected)
-            ? selected
-            : labels.Count > 0 ? labels[0] : null;
-        if (want != null && (box.SelectedItem as string) != want)
+        var want = labels.Contains(selected) ? selected : labels[0];
+        if (BoxText(box.SelectedItem) != want)
         {
             box.SelectedItem = want;
         }
