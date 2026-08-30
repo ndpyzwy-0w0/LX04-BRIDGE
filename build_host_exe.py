@@ -138,6 +138,7 @@ def _pyinstaller_worker(staging: Path) -> Path:
 
 def _publish_winui() -> Path:
     out = HOST_UI / "bin" / "Release" / "net8.0-windows10.0.19041.0" / "win-x64" / "publish" / "LX04-PC-Bridge-Host.exe"
+    subprocess.check_call([_dotnet(), "clean", str(HOST_UI / "LX04.HostUi.csproj"), "-c", "Release"], cwd=ROOT)
     subprocess.check_call(
         [
             _dotnet(),
@@ -149,6 +150,7 @@ def _publish_winui() -> Path:
             "win-x64",
             "--self-contained",
             "true",
+            "--force",
         ],
         cwd=ROOT,
     )

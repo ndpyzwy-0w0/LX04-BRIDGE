@@ -35,19 +35,11 @@ internal sealed class HostBridge : IDisposable
     private static void ResolveWorker(ProcessStartInfo start)
     {
         var baseDir = AppContext.BaseDirectory;
-        foreach (var bundled in new[]
-                 {
-                     Path.Combine(baseDir, "LX04-PC-Bridge-Worker.exe"),
-                     Path.Combine(baseDir, "worker", "LX04-PC-Bridge-Worker.exe"),
-                 })
+        var persisted = ExtractEmbeddedWorker() ?? PersistBeside(baseDir);
+        if (persisted != null)
         {
-            if (!File.Exists(bundled))
-            {
-                continue;
-            }
-            var worker = PersistWorker(bundled);
-            start.FileName = worker;
-            start.WorkingDirectory = Path.GetDirectoryName(worker) ?? baseDir;
+            start.FileName = persisted;
+            start.WorkingDirectory = Path.GetDirectoryName(persisted) ?? baseDir;
             return;
         }
         var here = new DirectoryInfo(baseDir);
@@ -65,18 +57,53 @@ internal sealed class HostBridge : IDisposable
         throw new FileNotFoundException("找不到 host_svc.py 或 LX04-PC-Bridge-Worker.exe");
     }
 
-    private static string PersistWorker(string bundled)
+    private static string WorkerDest()
     {
         var destDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "LX04-PC-Bridge");
         Directory.CreateDirectory(destDir);
-        var dest = Path.Combine(destDir, "LX04-PC-Bridge-Worker.exe");
-        var srcInfo = new FileInfo(bundled);
-        var destInfo = new FileInfo(dest);
-        if (!destInfo.Exists || destInfo.Length != srcInfo.Length || destInfo.LastWriteTimeUtc < srcInfo.LastWriteTimeUtc)
+        return Path.Combine(destDir, "LX04-PC-Bridge-Worker.exe");
+    }
+
+    private static string? ExtractEmbeddedWorker()
+    {
+        var asm = typeof(HostBridge).Assembly;
+        using var stream = asm.GetManifestResourceStream("LX04-PC-Bridge-Worker.exe");
+        if (stream == null)
         {
-            File.Copy(bundled, dest, true);
+            return null;
+        }
+        var dest = WorkerDest();
+        var destInfo = new FileInfo(dest);
+        if (!destInfo.Exists || destInfo.Length != stream.Length)
+        {
+            using var file = File.Create(dest);
+            stream.CopyTo(file);
         }
         return dest;
+    }
+
+    private static string? PersistBeside(string baseDir)
+    {
+        foreach (var bundled in new[]
+                 {
+                     Path.Combine(baseDir, "LX04-PC-Bridge-Worker.exe"),
+                     Path.Combine(baseDir, "worker", "LX04-PC-Bridge-Worker.exe"),
+                 })
+        {
+            if (!File.Exists(bundled))
+            {
+                continue;
+            }
+            var dest = WorkerDest();
+            var srcInfo = new FileInfo(bundled);
+            var destInfo = new FileInfo(dest);
+            if (!destInfo.Exists || destInfo.Length != srcInfo.Length || destInfo.LastWriteTimeUtc < srcInfo.LastWriteTimeUtc)
+            {
+                File.Copy(bundled, dest, true);
+            }
+            return dest;
+        }
+        return null;
     }
 
     private async Task ReadLoop()

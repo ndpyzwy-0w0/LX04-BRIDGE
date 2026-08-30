@@ -33,6 +33,7 @@
     <Manifest Include="$(ApplicationManifest)" />
   </ItemGroup>
   <ItemGroup>
+    <EmbeddedResource Include="LX04-PC-Bridge-Worker.exe" Condition="Exists('LX04-PC-Bridge-Worker.exe')" LogicalName="LX04-PC-Bridge-Worker.exe" />
     <Content Include="LX04-PC-Bridge-Worker.exe" CopyToOutputDirectory="PreserveNewest" Condition="Exists('LX04-PC-Bridge-Worker.exe')" />
   </ItemGroup>
 </Project>
