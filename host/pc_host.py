@@ -67,14 +67,22 @@ _WM_LBUTTONUP = 0x0202
 _WM_LBUTTONDBLCLK = 0x0203
 _WM_RBUTTONUP = 0x0205
 _WM_CONTEXTMENU = 0x007B
-_NIM_ADD, _NIM_DELETE = 0, 2
+_NIN_SELECT = 0x0400
+_NIN_KEYSELECT = 0x0401
+_NIM_ADD, _NIM_DELETE, _NIM_SETVERSION = 0, 2, 4
+_NOTIFYICON_VERSION_4 = 4
 _NIF_MESSAGE, _NIF_ICON, _NIF_TIP = 1, 2, 4
 _IDI_APPLICATION = 32512
 _TPM_RIGHTBUTTON = 0x0002
+_TPM_BOTTOMALIGN = 0x0020
 _TPM_RETURNCMD = 0x0100
 _MF_STRING = 0x0000
 _WS_POPUP = 0x80000000
 _WS_EX_TOOLWINDOW = 0x00000080
+_WS_EX_TOPMOST = 0x00000008
+_SW_HIDE = 0
+_SWP_SHOWWINDOW = 0x0040
+_HWND_TOPMOST = -1
 _ERROR_CLASS_ALREADY_EXISTS = 1410
 _TRAY_OPEN, _TRAY_QUIT = 1, 2
 _TRAY_CLASS = "LX04BridgeTray"
@@ -148,6 +156,21 @@ _user32.GetCursorPos.restype = wintypes.BOOL
 _user32.GetCursorPos.argtypes = [ctypes.POINTER(_POINT)]
 _user32.SetForegroundWindow.restype = wintypes.BOOL
 _user32.SetForegroundWindow.argtypes = [wintypes.HWND]
+_user32.GetForegroundWindow.restype = wintypes.HWND
+_user32.GetForegroundWindow.argtypes = []
+_user32.GetWindowThreadProcessId.restype = wintypes.DWORD
+_user32.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]
+_user32.AttachThreadInput.restype = wintypes.BOOL
+_user32.AttachThreadInput.argtypes = [wintypes.DWORD, wintypes.DWORD, wintypes.BOOL]
+_user32.SetWindowPos.restype = wintypes.BOOL
+_user32.SetWindowPos.argtypes = [
+    wintypes.HWND, wintypes.HWND, ctypes.c_int, ctypes.c_int,
+    ctypes.c_int, ctypes.c_int, wintypes.UINT,
+]
+_user32.ShowWindow.restype = wintypes.BOOL
+_user32.ShowWindow.argtypes = [wintypes.HWND, ctypes.c_int]
+_kernel32.GetCurrentThreadId.restype = wintypes.DWORD
+_kernel32.GetCurrentThreadId.argtypes = []
 _user32.PostMessageW.restype = wintypes.BOOL
 _user32.PostMessageW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
 _shell32.ExtractIconExW.restype = wintypes.UINT
@@ -163,6 +186,28 @@ _user32.DestroyIcon.restype = wintypes.BOOL
 _user32.DestroyIcon.argtypes = [wintypes.HICON]
 
 _TRAY_APP = None
+
+
+def _tray_kind(ev: int) -> str:
+    if ev in (_WM_CONTEXTMENU, _WM_RBUTTONUP):
+        return "menu"
+    if ev in (_NIN_SELECT, _NIN_KEYSELECT, _WM_LBUTTONUP, _WM_LBUTTONDBLCLK):
+        return "open"
+    return ""
+
+
+def _tray_take_focus(hwnd: int) -> None:
+    fg = _user32.GetForegroundWindow()
+    if fg and int(fg) != int(hwnd):
+        pid = wintypes.DWORD(0)
+        fg_tid = _user32.GetWindowThreadProcessId(fg, ctypes.byref(pid))
+        ours = _kernel32.GetCurrentThreadId()
+        if fg_tid and fg_tid != ours:
+            _user32.AttachThreadInput(ours, fg_tid, True)
+            _user32.SetForegroundWindow(hwnd)
+            _user32.AttachThreadInput(ours, fg_tid, False)
+            return
+    _user32.SetForegroundWindow(hwnd)
 
 
 def _tray_class_proc(hwnd, msg, wparam, lparam):
@@ -637,6 +682,9 @@ class HostApp:
         self._tray_icon = 0
         self._tray_icon_owned = False
         self._tray_shown = False
+        self._tray_restore_after = None
+        self._tray_menu_open = False
+        self._tray_ignore_open_until = 0.0
         self._build()
         threading.Thread(target=pc_stats.snapshot, daemon=True).start()
         self._load_route_vars()
@@ -2068,7 +2116,7 @@ class HostApp:
         global _TRAY_APP
         _TRAY_APP = self
         hwnd = _user32.CreateWindowExW(
-            _WS_EX_TOOLWINDOW, _TRAY_CLASS, "LX04 Tray", _WS_POPUP,
+            _WS_EX_TOOLWINDOW | _WS_EX_TOPMOST, _TRAY_CLASS, "LX04 Tray", _WS_POPUP,
             0, 0, 1, 1, None, None, hinst, None,
         )
         if not hwnd:
@@ -2080,14 +2128,27 @@ class HostApp:
     def _tray_on_msg(self, hwnd, msg, wparam, lparam):
         if msg != _WM_TRAY or int(hwnd) != int(self._tray_hwnd):
             return None
-        ev = int(lparam) & 0xFFFF
-        if ev in (_WM_LBUTTONUP, _WM_LBUTTONDBLCLK):
-            self.root.after(0, self._restore_from_tray)
-            return 0
-        if ev in (_WM_RBUTTONUP, _WM_CONTEXTMENU):
-            self.root.after(0, self._show_tray_menu)
-            return 0
+        kind = _tray_kind(int(lparam) & 0xFFFF)
+        if kind == "menu":
+            self._show_tray_menu()
+        elif kind == "open":
+            self._schedule_tray_restore()
         return 0
+
+    def _cancel_tray_restore(self) -> None:
+        after_id = self._tray_restore_after
+        self._tray_restore_after = None
+        if after_id is not None:
+            try:
+                self.root.after_cancel(after_id)
+            except Exception:
+                pass
+
+    def _schedule_tray_restore(self) -> None:
+        if self._tray_menu_open or time.monotonic() < self._tray_ignore_open_until:
+            return
+        self._cancel_tray_restore()
+        self._tray_restore_after = self.root.after(200, self._restore_from_tray)
 
     def _tray_nid(self) -> _NOTIFYICONDATAW:
         nid = _NOTIFYICONDATAW()
@@ -2105,7 +2166,11 @@ class HostApp:
             return True
         if not self._tray_ensure_hwnd():
             return False
-        ok = bool(_shell32.Shell_NotifyIconW(_NIM_ADD, ctypes.byref(self._tray_nid())))
+        nid = self._tray_nid()
+        ok = bool(_shell32.Shell_NotifyIconW(_NIM_ADD, ctypes.byref(nid)))
+        if ok:
+            nid.uVersion = _NOTIFYICON_VERSION_4
+            _shell32.Shell_NotifyIconW(_NIM_SETVERSION, ctypes.byref(nid))
         self._tray_shown = ok
         if not ok:
             self._tray_remove()
@@ -2113,6 +2178,7 @@ class HostApp:
 
     def _tray_remove(self) -> None:
         global _TRAY_APP
+        self._cancel_tray_restore()
         if self._tray_shown and self._tray_hwnd:
             try:
                 _shell32.Shell_NotifyIconW(_NIM_DELETE, ctypes.byref(self._tray_nid()))
@@ -2147,7 +2213,10 @@ class HostApp:
         self._log("已最小化到托盘。右键图标选“打开”可恢复窗口。")
 
     def _restore_from_tray(self) -> None:
-        if self._closing:
+        self._tray_restore_after = None
+        if self._closing or self._tray_menu_open:
+            return
+        if time.monotonic() < self._tray_ignore_open_until:
             return
         self._tray_remove()
         try:
@@ -2158,28 +2227,42 @@ class HostApp:
             pass
 
     def _show_tray_menu(self) -> None:
-        if self._closing or not self._tray_hwnd:
+        if self._closing or not self._tray_hwnd or self._tray_menu_open:
             return
+        self._cancel_tray_restore()
         menu = _user32.CreatePopupMenu()
         if not menu:
             return
         cmd = 0
+        hwnd = self._tray_hwnd
+        self._tray_menu_open = True
         try:
             _user32.AppendMenuW(menu, _MF_STRING, _TRAY_OPEN, "打开")
             _user32.AppendMenuW(menu, _MF_STRING, _TRAY_QUIT, "退出")
             pt = _POINT()
             _user32.GetCursorPos(ctypes.byref(pt))
-            _user32.SetForegroundWindow(self._tray_hwnd)
+            _user32.SetWindowPos(hwnd, _HWND_TOPMOST, pt.x, pt.y, 1, 1, _SWP_SHOWWINDOW)
+            _tray_take_focus(hwnd)
             cmd = int(_user32.TrackPopupMenu(
-                menu, _TPM_RIGHTBUTTON | _TPM_RETURNCMD, pt.x, pt.y, 0, self._tray_hwnd, None
+                menu,
+                _TPM_RIGHTBUTTON | _TPM_BOTTOMALIGN | _TPM_RETURNCMD,
+                pt.x, pt.y, 0, hwnd, None,
             ) or 0)
-            _user32.PostMessageW(self._tray_hwnd, _WM_NULL, 0, 0)
+            _user32.PostMessageW(hwnd, _WM_NULL, 0, 0)
         finally:
+            try:
+                _user32.ShowWindow(hwnd, _SW_HIDE)
+            except Exception:
+                pass
             _user32.DestroyMenu(menu)
+            self._tray_menu_open = False
+            self._cancel_tray_restore()
+            self._tray_ignore_open_until = time.monotonic() + 0.3
         if cmd == _TRAY_OPEN:
-            self._restore_from_tray()
+            self._tray_ignore_open_until = 0.0
+            self.root.after(0, self._restore_from_tray)
         elif cmd == _TRAY_QUIT:
-            self._on_close(force=True)
+            self.root.after(0, lambda: self._on_close(force=True))
 
     def _begin_revive(self) -> None:
         if self._reviving or not self._session:
