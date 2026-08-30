@@ -20,6 +20,7 @@ COMMIT_PATHS = [
     ".cursor/rules",
     "app",
     "host",
+    "host-ui",
     "protocol.md",
     "local.properties.example",
     "dist/LX04-PC-Bridge-Host.exe",

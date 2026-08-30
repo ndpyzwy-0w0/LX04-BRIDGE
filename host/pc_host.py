@@ -685,9 +685,84 @@ class ChoiceDrop:
         return "break"
 
 
+def _log_level(line: str) -> str:
+    low = line.lower()
+    if any(token in line for token in ("失败", "无法", "错误")) or "error" in low:
+        return "ERROR"
+    if any(token in line for token in ("警告", "未安装", "未接通", "未找到")) or "warn" in low:
+        return "WARN"
+    return "INFO"
+
+
+class _PlainVar:
+    def __init__(self, value=None) -> None:
+        self._v = value
+
+    def get(self):
+        return self._v
+
+    def set(self, value) -> None:
+        self._v = value
+
+
+class _PlainDrop:
+    def __init__(self) -> None:
+        self.labels: list[str] = []
+
+    def set_labels(self, labels) -> None:
+        self.labels = list(labels or [])
+
+
+class _PlainLabel:
+    def __init__(self, text: str = "") -> None:
+        self.text = text
+
+    def configure(self, **kw) -> None:
+        if "text" in kw:
+            self.text = str(kw["text"])
+
+
+class _PlainLog:
+    def __init__(self, app: "HostApp") -> None:
+        self.app = app
+        self.lines: list[str] = []
+
+    def insert(self, _index, line) -> None:
+        text = str(line).rstrip("\n")
+        self.lines.append(text)
+        if len(self.lines) > 800:
+            del self.lines[:-500]
+        emit = getattr(self.app, "emit", None)
+        if emit:
+            emit({"event": "log", "line": text, "level": _log_level(text)})
+
+    def see(self, _where) -> None:
+        return
+
+
 class HostApp:
-    def __init__(self, root: tk.Tk) -> None:
+    def __init__(
+        self,
+        root: tk.Tk | None = None,
+        *,
+        emit=None,
+        ui_post=None,
+        confirm=None,
+        ask_file=None,
+        ask_slot=None,
+    ) -> None:
         self.root = root
+        self._headless = root is None
+        self.emit = emit or (lambda _payload: None)
+        self.ui_post = ui_post or (lambda fn: fn())
+        self._confirm_fn = confirm
+        self._ask_file_fn = ask_file
+        self._ask_slot_fn = ask_slot
+        self._connecting = False
+        self._connect_t0 = 0.0
+        self._mic_muted = False
+        self._spk_muted = False
+        self._snap_ticks = 0
         self.client = BridgeClient(self._on_bridge_event)
         self.sink = AudioSink()
         self.hw = HardwareMic()
@@ -701,19 +776,23 @@ class HostApp:
         self._gain_sent_at = 0.0
         self._prev_render: tuple[str, str] | None = None
         self.play_peak = 0.0
-        self.mic_enabled = tk.BooleanVar(value=True)
-        self.spk_enabled = tk.BooleanVar(value=False)
-        self.set_default_spk = tk.BooleanVar(value=True)
-        self.volume_sync = tk.BooleanVar(value=False)
-        self.pc_stats_enabled = tk.BooleanVar(value=True)
-        self.upside_down = tk.BooleanVar(value=False)
-        self.light_theme = tk.BooleanVar(value=False)
-        self.toast_mirror = tk.BooleanVar(value=False)
-        self.autostart = tk.BooleanVar(value=False)
-        self.minimize_to_tray = tk.BooleanVar(value=False)
-        self.disk_var = tk.StringVar()
-        self.monitor_var = tk.StringVar()
-        self.quality_var = tk.StringVar(value=screen_mirror.DEFAULT_QUALITY)
+        def _bool(value: bool):
+            return _PlainVar(value) if self._headless else tk.BooleanVar(value=value)
+        def _str(value: str = ""):
+            return _PlainVar(value) if self._headless else tk.StringVar(value=value)
+        self.mic_enabled = _bool(True)
+        self.spk_enabled = _bool(False)
+        self.set_default_spk = _bool(True)
+        self.volume_sync = _bool(False)
+        self.pc_stats_enabled = _bool(True)
+        self.upside_down = _bool(False)
+        self.light_theme = _bool(False)
+        self.toast_mirror = _bool(False)
+        self.autostart = _bool(False)
+        self.minimize_to_tray = _bool(False)
+        self.disk_var = _str()
+        self.monitor_var = _str()
+        self.quality_var = _str(screen_mirror.DEFAULT_QUALITY)
         self._saved_disk = ""
         self._saved_monitor = ""
         self._monitors: list[screen_mirror.Monitor] = []
@@ -722,8 +801,8 @@ class HostApp:
         self.toast = toast_mirror.ToastSender(self._on_toast_change, self._on_toast_log)
         self._toast_logged = False
         self._toast_sync_after = None
-        self.inject_var = tk.StringVar()
-        self.spk_dev_var = tk.StringVar()
+        self.inject_var = _str()
+        self.spk_dev_var = _str()
         self._inject_devices: list[tuple[str, str | int, str]] = []
         self._spk_devices: list[tuple[str, str]] = []
         self._routes_ready = False
@@ -754,11 +833,32 @@ class HostApp:
         self._tray_last_at = 0.0
         self._tray_ping_at = 0.0
         self._host_hwnd = 0
-        self._build()
+        if self._headless:
+            self.device_var = _PlainVar("正在扫描…")
+            self.mic_var = _PlainVar("尚未识别")
+            self.gain_var = _PlainVar(100.0)
+            self.gain_label_var = _PlainVar("100%  ·  0.0 dB")
+            self.device_drop = _PlainDrop()
+            self.inject_drop = _PlainDrop()
+            self.spk_drop = _PlainDrop()
+            self.disk_drop = _PlainDrop()
+            self.monitor_drop = _PlainDrop()
+            self.quality_drop = _PlainDrop()
+            self.quality_drop.set_labels(list(screen_mirror.QUALITY_KEYS))
+            self.headline = _PlainLabel("未连接")
+            self.detail = _PlainLabel("插入数据线后点刷新，再点连接。")
+            self.pc_line = _PlainLabel("电脑状态：连接音箱后显示在音箱屏幕上。")
+            self.log = _PlainLog(self)
+            self.meter = None
+            self.spk_meter = None
+            self._font = 10
+            self._pad = 16
+        else:
+            self._build()
         threading.Thread(target=pc_stats.snapshot, daemon=True).start()
         self._load_route_vars()
-        self.root.after(0, self._boot)
-        self.root.after(400, self._tick)
+        self._after(0, self._boot)
+        self._after(400, self._tick)
 
     def _build(self) -> None:
         self.root.title(_HOST_TITLE)
@@ -1036,15 +1136,186 @@ class HostApp:
 
     def _ui(self, fn) -> None:
         try:
+            if self._headless:
+                self._safe_post(fn)
+                return
             if threading.current_thread() is threading.main_thread():
                 fn()
                 return
-            self.root.after(0, fn)
+            self._after(0, fn)
         except Exception:
             pass
 
     def _after_paint(self, fn) -> None:
-        self.root.after_idle(fn)
+        self._after_idle(fn)
+
+    def _safe_post(self, fn) -> None:
+        if self._closing:
+            return
+        try:
+            self.ui_post(fn)
+        except Exception:
+            pass
+
+    def _after(self, ms, fn):
+        if self._headless:
+            timer = threading.Timer(max(0, int(ms)) / 1000.0, lambda: self._safe_post(fn))
+            timer.daemon = True
+            timer.start()
+            return timer
+        return self.root.after(ms, fn)
+
+    def _after_idle(self, fn):
+        if self._headless:
+            self._safe_post(fn)
+            return None
+        return self.root.after_idle(fn)
+
+    def _after_cancel(self, handle) -> None:
+        if handle is None:
+            return
+        if self._headless:
+            try:
+                handle.cancel()
+            except Exception:
+                pass
+            return
+        try:
+            self.root.after_cancel(handle)
+        except Exception:
+            pass
+
+    def _alert(self, kind: str, text: str) -> None:
+        if self._headless:
+            self.emit({"event": "alert", "kind": kind, "text": str(text)})
+            return
+        if kind == "error":
+            messagebox.showerror("LX04", text)
+        else:
+            messagebox.showinfo("LX04", text)
+
+    def _confirm(self, text: str) -> bool:
+        if self._headless:
+            if self._confirm_fn is None:
+                return True
+            return bool(self._confirm_fn(text))
+        return bool(messagebox.askokcancel("LX04", text))
+
+    def snapshot(self) -> dict:
+        hello = self.client.hello if isinstance(self.client.hello, dict) else {}
+        elapsed = 0
+        if self.connected and self._connect_t0:
+            elapsed = int(time.monotonic() - self._connect_t0)
+        screen = "系统弹窗" if self.toast.showing() else "屏幕镜像" if self.mirror.running() else "状态监视"
+        audio_ok = self.connected and (self.sink.running() or self.hw.running() or self.loopback.running())
+        hud = hud_preview.live_state(bool(self.light_theme.get()))
+        cards = []
+        for card in hud.get("cards") or []:
+            cards.append(
+                {
+                    "key": card.get("key"),
+                    "title": card.get("title"),
+                    "metric": card.get("metric"),
+                    "value": hud_preview.metric_sample(str(card.get("metric") or "cpu")),
+                    "subs": [hud_preview.sub_metric_sample(k) for k in hud_preview.display_sub_metrics(card)],
+                    "titleColor": card.get("title_color"),
+                    "valueColor": card.get("value_color"),
+                    "chart": bool(card.get("chart", True)),
+                }
+            )
+        return {
+            "connected": self.connected,
+            "connecting": self._connecting,
+            "reviving": self._reviving,
+            "session": self._session,
+            "serial": self._serial,
+            "headline": getattr(self.headline, "text", "未连接"),
+            "detail": getattr(self.detail, "text", ""),
+            "pcLine": getattr(self.pc_line, "text", ""),
+            "devices": list(self.devices),
+            "device": self.device_var.get() if hasattr(self, "device_var") else "",
+            "deviceLabels": list(getattr(self.device_drop, "labels", []) or []),
+            "adb": bool(self.adb),
+            "model": hello.get("model") or "LX04",
+            "android": hello.get("android") or "",
+            "apk": str(hello.get("apkVersion") or ""),
+            "elapsed": elapsed,
+            "micEnabled": bool(self.mic_enabled.get()),
+            "spkEnabled": bool(self.spk_enabled.get()),
+            "setDefaultSpk": bool(self.set_default_spk.get()),
+            "volumeSync": bool(self.volume_sync.get()),
+            "pcStats": bool(self.pc_stats_enabled.get()),
+            "upsideDown": bool(self.upside_down.get()),
+            "lightTheme": bool(self.light_theme.get()),
+            "toastMirror": bool(self.toast_mirror.get()),
+            "autostart": bool(self.autostart.get()),
+            "minimizeToTray": bool(self.minimize_to_tray.get()),
+            "inject": self.inject_var.get(),
+            "injectLabels": list(getattr(self.inject_drop, "labels", []) or []),
+            "speaker": self.spk_dev_var.get(),
+            "speakerLabels": list(getattr(self.spk_drop, "labels", []) or []),
+            "disk": self.disk_var.get(),
+            "diskLabels": list(getattr(self.disk_drop, "labels", []) or []),
+            "monitor": self.monitor_var.get(),
+            "monitorLabels": list(getattr(self.monitor_drop, "labels", []) or []),
+            "quality": self.quality_var.get(),
+            "qualityLabels": list(screen_mirror.QUALITY_KEYS),
+            "micHint": self.mic_var.get() if hasattr(self, "mic_var") else "",
+            "gain": float(self.gain_var.get()) if hasattr(self, "gain_var") else 100.0,
+            "gainLabel": self.gain_label_var.get() if hasattr(self, "gain_label_var") else "",
+            "micMuted": self._mic_muted,
+            "spkMuted": self._spk_muted,
+            "micPeak": float(self.sink.peak) if self.connected else 0.0,
+            "spkPeak": float(self.loopback.peak if self.loopback.running() else self.play_peak) if self.connected else 0.0,
+            "vbCable": vb_cable.present(),
+            "hifiCable": hifi_cable.present(),
+            "audioOk": audio_ok,
+            "videoOk": self.client.video_sock is not None,
+            "toastOk": self.client.toast_sock is not None,
+            "mirrorOn": self.mirror.running(),
+            "toastOn": self.toast.showing(),
+            "screenMode": screen,
+            "hudBg": dict(self._hud_bg),
+            "hud": {"light": bool(hud.get("light")), "rev": int(hud.get("rev") or 0), "cards": cards},
+            "diagnostics": self.diagnostics(),
+        }
+
+    def diagnostics(self) -> list[dict]:
+        def row(key: str, label: str, ok: bool, warn: bool = False, hint: str = "") -> dict:
+            status = "ok" if ok else ("warn" if warn else "error")
+            if key == "adb" and not self.devices and not self.connected:
+                status = "idle" if self.adb else "error"
+            if key in {"usb", "audio", "mirror", "toast"} and not self.connected:
+                status = "idle"
+            return {"id": key, "label": label, "status": status, "hint": hint}
+
+        hifi_ok = hifi_cable.present()
+        vb_ok = vb_cable.present()
+        return [
+            row("adb", "LX04 ADB", bool(self.devices), hint="" if self.devices else "请连接 LX04 并打开 USB 调试"),
+            row("usb", "USB 数据通道", self.connected),
+            row("audio", "音频通道", self.connected and (self.sink.running() or self.hw.running() or self.loopback.running())),
+            row("vb", "VB-CABLE", vb_ok, warn=not vb_ok, hint="" if vb_ok else "未安装时无法把麦克风送给语音软件"),
+            row("hifi", "Hi-Fi Cable", hifi_ok, warn=not hifi_ok, hint="" if hifi_ok else "电脑声音无法发送到 LX04。"),
+            row("mirror", "镜像通道", self.client.video_sock is not None),
+            row("toast", "系统弹窗通道", self.client.toast_sock is not None),
+        ]
+
+    def _emit_snapshot(self) -> None:
+        if self._headless:
+            self.emit({"event": "snapshot", "data": self.snapshot()})
+
+    def _emit_meter(self) -> None:
+        if not self._headless:
+            return
+        spk = self.loopback.peak if self.loopback.running() else self.play_peak
+        self.emit(
+            {
+                "event": "meter",
+                "mic": float(self.sink.peak) if self.connected else 0.0,
+                "spk": float(spk) if self.connected else 0.0,
+            }
+        )
 
     def _spawn_route(self, fn) -> None:
         self._route_gen += 1
@@ -1124,7 +1395,7 @@ class HostApp:
             except Exception as exc:
                 err = (err + " " + str(exc)).strip()
         try:
-            self.root.after(0, lambda: self._boot_apply(hidden, devices, err))
+            self._after(0, lambda: self._boot_apply(hidden, devices, err))
         except Exception:
             pass
 
@@ -1147,6 +1418,7 @@ class HostApp:
         self._refresh_disks()
         self._refresh_monitors()
         self._routes_ready = True
+        self._emit_snapshot()
 
     def _save_routes(self) -> None:
         payload = {
@@ -1367,7 +1639,7 @@ class HostApp:
 
     def _on_toast_log(self, line: str) -> None:
         try:
-            self.root.after(0, lambda l=line: self._log(l))
+            self._after(0, lambda l=line: self._log(l))
         except Exception:
             pass
 
@@ -1382,7 +1654,7 @@ class HostApp:
             except Exception:
                 pass
         try:
-            self.root.after(0, lambda s=showing, c=content: self._apply_toast_ui(s, c))
+            self._after(0, lambda s=showing, c=content: self._apply_toast_ui(s, c))
         except Exception:
             pass
 
@@ -1439,10 +1711,10 @@ class HostApp:
         self._save_routes()
         if self._toast_sync_after is not None:
             try:
-                self.root.after_cancel(self._toast_sync_after)
+                self._after_cancel(self._toast_sync_after)
             except Exception:
                 pass
-        self._toast_sync_after = self.root.after(250, self._apply_toast_mirror_toggle)
+        self._toast_sync_after = self._after(250, self._apply_toast_mirror_toggle)
 
     def _apply_toast_mirror_toggle(self) -> None:
         self._toast_sync_after = None
@@ -1667,29 +1939,29 @@ class HostApp:
         self._start_speaker(speaker=speaker, set_default=set_default, inject=inject, mic_on=mic_on)
 
     def _install_vb(self) -> None:
-        if not messagebox.askokcancel("LX04", vb_cable.DONATE_TEXT):
+        if not self._confirm(vb_cable.DONATE_TEXT):
             return
         self._log(vb_cable.run_official_setup())
         self.refresh_audio_devices()
 
     def _install_hifi(self) -> None:
-        if not messagebox.askokcancel("LX04", hifi_cable.DONATE_TEXT):
+        if not self._confirm(hifi_cable.DONATE_TEXT):
             return
         self._log(hifi_cable.run_official_setup())
         self.refresh_audio_devices()
 
     def _on_afterburner(self) -> None:
         if afterburner.sensors_live():
-            messagebox.showinfo("LX04", afterburner.RUNNING_TEXT)
+            self._alert("info", afterburner.RUNNING_TEXT)
             return
         exe = afterburner.find_exe()
         if exe is not None:
-            if not messagebox.askokcancel("LX04", afterburner.LAUNCH_TEXT):
+            if not self._confirm(afterburner.LAUNCH_TEXT):
                 return
             self._log(afterburner.launch(exe))
-            self.root.after(2000, lambda: self._spawn_stats(force=True))
+            self._after(2000, lambda: self._spawn_stats(force=True))
             return
-        if not messagebox.askokcancel("LX04", afterburner.DOWNLOAD_TEXT):
+        if not self._confirm(afterburner.DOWNLOAD_TEXT):
             return
         self._log(afterburner.open_download())
 
@@ -1718,23 +1990,29 @@ class HostApp:
             alpha = 100
         self._hud_bg = {"sel": sel, "used": flags, "alpha": alpha}
 
-    def _upload_hud_bg(self) -> None:
+    def _upload_hud_bg(self, path: str | None = None) -> None:
         if not self.connected:
-            messagebox.showinfo("LX04", "请先连接音箱，再上传监视页背景。")
+            self._alert("info", "请先连接音箱，再上传监视页背景。")
             return
-        path = filedialog.askopenfilename(
-            title="选择监视页背景",
-            filetypes=[
-                ("图片", "*.jpg;*.jpeg;*.png;*.bmp;*.gif;*.webp"),
-                ("所有文件", "*.*"),
-            ],
-        )
+        if not path:
+            if self._headless:
+                if self._ask_file_fn is None:
+                    return
+                path = self._ask_file_fn()
+            else:
+                path = filedialog.askopenfilename(
+                    title="选择监视页背景",
+                    filetypes=[
+                        ("图片", "*.jpg;*.jpeg;*.png;*.bmp;*.gif;*.webp"),
+                        ("所有文件", "*.*"),
+                    ],
+                )
         if not path:
             return
         try:
             jpeg = screen_mirror.encode_still(path)
         except Exception as exc:
-            messagebox.showerror("LX04", "无法处理这张图片：\n" + str(exc))
+            self._alert("error", "无法处理这张图片：\n" + str(exc))
             return
         slot = self._pick_hud_bg_slot()
         if slot is None:
@@ -1749,6 +2027,11 @@ class HostApp:
         for i, taken in enumerate(used):
             if not taken:
                 return i
+        if self._headless:
+            if self._ask_slot_fn is None:
+                return None
+            slot = self._ask_slot_fn()
+            return int(slot) if slot is not None else None
         win = tk.Toplevel(self.root)
         win.title("背景库已满")
         win.configure(bg=BG)
@@ -1803,7 +2086,7 @@ class HostApp:
 
     def _begin_hud_reconcile(self) -> None:
         self._hud_need_reconcile = True
-        self.root.after(900, self._hud_reconcile_timeout)
+        self._after(900, self._hud_reconcile_timeout)
 
     def _hud_reconcile_timeout(self) -> None:
         if not self.connected or not self._hud_need_reconcile:
@@ -1953,7 +2236,7 @@ class HostApp:
 
     def _on_speaker_test_tone(self) -> None:
         if not self.connected:
-            messagebox.showerror("LX04", "请先连接音箱。")
+            self._alert("error", "请先连接音箱。")
             return
         rate = 48000
         frames = int(rate * 0.7)
@@ -1979,7 +2262,7 @@ class HostApp:
 
     def _on_test_tone(self) -> None:
         if not self.mic_enabled.get():
-            messagebox.showerror("LX04", "请先勾选「麦克风 → 电脑」，并选好 CABLE Input。")
+            self._alert("error", "请先勾选「麦克风 → 电脑」，并选好 CABLE Input。")
             return
         try:
             if not self.sink.running():
@@ -1988,7 +2271,7 @@ class HostApp:
             self.sink.play_test_tone()
             self._log("已送出试音。请看语音软件里「CABLE Output」的音量条是否跳动。")
         except Exception as exc:
-            messagebox.showerror("LX04", str(exc))
+            self._alert("error", str(exc))
             self._log("试音失败: " + str(exc))
 
     def _on_gain(self, _value=None) -> None:
@@ -2023,15 +2306,89 @@ class HostApp:
         self.refresh_audio_devices(log=False)
         self._refresh_disks()
         self._refresh_monitors()
+        self._emit_snapshot()
 
-    def connect(self) -> None:
-        if not self.adb:
-            messagebox.showerror("LX04", "没有找到内置 adb。请重新打包上位机。")
+    def apply_setting(self, key: str, value) -> None:
+        table = {
+            "micEnabled": (self.mic_enabled, self._on_mic_route_change),
+            "spkEnabled": (self.spk_enabled, self._on_spk_route_change),
+            "setDefaultSpk": (self.set_default_spk, self._on_spk_route_change),
+            "volumeSync": (self.volume_sync, self._on_volume_sync_change),
+            "pcStats": (self.pc_stats_enabled, self._on_pc_stats_change),
+            "upsideDown": (self.upside_down, self._on_upside_down_change),
+            "lightTheme": (self.light_theme, self._on_light_theme_change),
+            "toastMirror": (self.toast_mirror, self._on_toast_mirror_change),
+            "autostart": (self.autostart, self._on_autostart_change),
+            "minimizeToTray": (self.minimize_to_tray, self._on_tray_pref_change),
+            "inject": (self.inject_var, self._on_mic_route_change),
+            "speaker": (self.spk_dev_var, self._on_spk_route_change),
+            "disk": (self.disk_var, self._on_disk_change),
+            "monitor": (self.monitor_var, self._on_monitor_change),
+            "quality": (self.quality_var, self._on_quality_change),
+            "device": (self.device_var, None),
+        }
+        item = table.get(key)
+        if item is None:
             return
+        var, command = item
+        var.set(value)
+        if command:
+            command()
+        self._emit_snapshot()
+
+    def apply_hud(self, state: dict | None = None, reset: bool = False) -> None:
+        if reset:
+            fresh = hud_preview.default_state(bool(self.light_theme.get()))
+            hud_preview.bump_rev(fresh)
+            hud_preview.replace_state(fresh)
+            hud_preview.save_state(fresh)
+            self._on_hud_style_change(fresh, reset=True)
+            self._emit_snapshot()
+            return
+        if state:
+            current = hud_preview.live_state(bool(state.get("light", self.light_theme.get())))
+            if "cards" in state:
+                current["cards"] = state["cards"]
+            if "light" in state:
+                current["light"] = bool(state["light"])
+            hud_preview.bump_rev(current)
+            hud_preview.replace_state(current)
+            hud_preview.save_state(current)
+            self._on_hud_style_change(current, reset=False)
+        self._emit_snapshot()
+
+    def set_gain(self, percent: float) -> None:
+        if not hasattr(self, "gain_var"):
+            return
+        self.gain_var.set(max(0.0, min(300.0, float(percent))))
+        self._on_gain()
+        self._emit_snapshot()
+
+    def toggle_mic_mute(self) -> None:
+        if self.connected:
+            self.client.send_control("toggle_mute")
+
+    def toggle_spk_mute(self) -> None:
+        if self.connected:
+            self.client.send_control("toggle_spk_mute")
+
+    def start_or_stop_mirror(self, on: bool) -> None:
+        self._apply_mirror_request(on)
+        self._emit_snapshot()
+
+    def connect(self, serial: str | None = None) -> None:
+        if not self.adb:
+            self._alert("error", "没有找到内置 adb。请重新打包上位机。")
+            return
+        if serial:
+            self.device_var.set(serial)
         serial = self.device_var.get()
         if not self.devices or serial.startswith("没有") or serial.startswith("未找到"):
-            messagebox.showerror("LX04", "没有可用的 USB 设备。请拔掉数据线再插上，并打开 USB 调试。")
+            self._alert("error", "没有可用的 USB 设备。请拔掉数据线再插上，并打开 USB 调试。")
             return
+        self._connecting = True
+        self.headline.configure(text="正在连接...")
+        self._emit_snapshot()
         try:
             gadget = adb_usb.enable_usb_microphone(self.adb, serial)
             if gadget:
@@ -2043,6 +2400,8 @@ class HostApp:
             self._connect_tcp(serial)
             self._session = True
             self.connected = True
+            self._connecting = False
+            self._connect_t0 = time.monotonic()
             self._serial = serial
             if self.mic_enabled.get():
                 self._apply_mic_route()
@@ -2061,9 +2420,12 @@ class HostApp:
                 self._log("扬声器通路已关闭。可用「音箱试音」检查喇叭。")
             self._sync_toast_mirror()
             self.headline.configure(text="USB 已连接")
+            self._emit_snapshot()
         except Exception as exc:
             self._session = False
             self.connected = False
+            self._connecting = False
+            self._connect_t0 = 0.0
             self._restore_render()
             try:
                 self.client.close()
@@ -2081,8 +2443,10 @@ class HostApp:
                 adb_usb.release_speaker_mic(self.adb, serial)
             except Exception:
                 pass
-            messagebox.showerror("LX04", str(exc))
+            self.headline.configure(text="连接失败")
+            self._alert("error", str(exc))
             self._log("连接失败: " + str(exc))
+            self._emit_snapshot()
 
     def _connect_tcp(self, serial: str) -> None:
         last_err: Exception | None = None
@@ -2118,11 +2482,16 @@ class HostApp:
         self._mirror_logged = False
         self._toast_logged = False
         self._stats_logged = False
+        self._connecting = False
+        self._connect_t0 = 0.0
         if not self._closing:
             self.headline.configure(text="已断开")
             self.detail.configure(text="可以重新点连接。")
-            self._draw_meter(self.meter, 0)
-            self._draw_meter(self.spk_meter, 0)
+            if self.meter is not None:
+                self._draw_meter(self.meter, 0)
+            if self.spk_meter is not None:
+                self._draw_meter(self.spk_meter, 0)
+            self._emit_snapshot()
         threading.Thread(target=self._shutdown_work, daemon=True, name="lx04-disc").start()
 
     def _shutdown_work(self) -> None:
@@ -2149,20 +2518,28 @@ class HostApp:
                 pass
 
     def _on_close(self, force: bool = False) -> None:
-        if _close_goes_to_tray(self._closing, force, bool(self.minimize_to_tray.get())):
+        if not self._headless and _close_goes_to_tray(self._closing, force, bool(self.minimize_to_tray.get())):
             self._hide_to_tray()
             return
+        self.shutdown()
+        if not self._headless:
+            try:
+                self.root.destroy()
+            except Exception:
+                pass
+
+    def shutdown(self) -> None:
         self._closing = True
         self._session = False
         self.connected = False
-        self._tray_remove()
-        try:
-            self.root.withdraw()
-            self.root.update_idletasks()
-        except Exception:
-            pass
-        threading.Thread(target=self._shutdown_work, daemon=False, name="lx04-quit").start()
-        self.root.destroy()
+        if not self._headless:
+            self._tray_remove()
+            try:
+                self.root.withdraw()
+                self.root.update_idletasks()
+            except Exception:
+                pass
+        self._shutdown_work()
 
     def _tray_load_icon(self) -> int:
         if self._tray_icon:
@@ -2221,7 +2598,7 @@ class HostApp:
             if self._host_hwnd:
                 _user32.ShowWindow(self._host_hwnd, _SW_RESTORE)
                 _user32.SetForegroundWindow(self._host_hwnd)
-            self.root.after(0, self._restore_from_tray)
+            self._after(0, self._restore_from_tray)
         return 0
 
     def _cancel_tray_restore(self) -> None:
@@ -2229,7 +2606,7 @@ class HostApp:
         self._tray_restore_after = None
         if after_id is not None:
             try:
-                self.root.after_cancel(after_id)
+                self._after_cancel(after_id)
             except Exception:
                 pass
 
@@ -2385,7 +2762,7 @@ class HostApp:
                 try:
                     serial = self._serial
                     status = adb_usb.ensure_bridge_running(self.adb, serial)
-                    self.root.after(0, lambda s=status: self._log(s))
+                    self._after(0, lambda s=status: self._log(s))
                     try:
                         adb_usb.take_speaker_mic(self.adb, serial)
                     except Exception:
@@ -2408,16 +2785,16 @@ class HostApp:
                         self.client.close()
                         self._reviving = False
                         return
-                    self.root.after(0, self._on_revived)
+                    self._after(0, self._on_revived)
                     return
                 except Exception as exc:
                     last_err = str(exc)
                     n = attempt + 1
-                    self.root.after(0, lambda e=last_err, n=n: self._log(f"拉起失败 ({n}/8): {e}"))
+                    self._after(0, lambda e=last_err, n=n: self._log(f"拉起失败 ({n}/8): {e}"))
                     time.sleep(min(6.0, 0.45 * (2 ** attempt)))
-            self.root.after(0, lambda: self._revive_gave_up(last_err))
+            self._after(0, lambda: self._revive_gave_up(last_err))
         except Exception as exc:
-            self.root.after(0, lambda e=str(exc): self._revive_gave_up(e))
+            self._after(0, lambda e=str(exc): self._revive_gave_up(e))
 
     def _on_revived(self) -> None:
         self._reviving = False
@@ -2465,10 +2842,15 @@ class HostApp:
         self.headline.configure(text="USB 已断开")
         self.detail.configure(text="多次拉起失败。请检查 USB，或在音箱上打开一次应用。")
         self._log("无法拉起后台服务: " + err)
-        self._draw_meter(self.meter, 0)
-        self._draw_meter(self.spk_meter, 0)
+        if self.meter is not None:
+            self._draw_meter(self.meter, 0)
+        if self.spk_meter is not None:
+            self._draw_meter(self.spk_meter, 0)
+        self._emit_snapshot()
 
     def _apply_mute_headline(self, mic_muted: bool, spk_muted: bool) -> None:
+        self._mic_muted = bool(mic_muted)
+        self._spk_muted = bool(spk_muted)
         if mic_muted and spk_muted:
             self.headline.configure(text="音箱麦克风和扬声器已静音")
         elif mic_muted:
@@ -2504,7 +2886,7 @@ class HostApp:
                 self.mirror.resume()
             self.toast.handle_event(data)
             return
-        self.root.after(0, lambda: self._handle_event(kind, data))
+        self._after(0, lambda: self._handle_event(kind, data))
 
     def _handle_event(self, kind: str, data) -> None:
         if kind == "hello":
@@ -2597,8 +2979,10 @@ class HostApp:
             self._mirror_logged = False
             self.toast.stop()
             self._toast_logged = False
-            self._draw_meter(self.meter, 0)
-            self._draw_meter(self.spk_meter, 0)
+            if self.meter is not None:
+                self._draw_meter(self.meter, 0)
+            if self.spk_meter is not None:
+                self._draw_meter(self.spk_meter, 0)
             if not self._session:
                 return
             if self._reviving:
@@ -2611,15 +2995,23 @@ class HostApp:
     def _tick(self) -> None:
         if self._closing:
             return
-        if _poll_activate_event():
+        if not self._headless and _poll_activate_event():
             try:
                 _show_tk_window(self.root)
                 self._log("已切换到正在运行的上位机")
             except Exception:
                 pass
         spk = self.loopback.peak if self.loopback.running() else self.play_peak
-        self._draw_meter(self.meter, self.sink.peak if self.connected else 0)
-        self._draw_meter(self.spk_meter, spk if self.connected else 0)
+        if self.meter is not None:
+            self._draw_meter(self.meter, self.sink.peak if self.connected else 0)
+        if self.spk_meter is not None:
+            self._draw_meter(self.spk_meter, spk if self.connected else 0)
+        if self._headless:
+            self._emit_meter()
+            self._snap_ticks += 1
+            if self._snap_ticks >= 5:
+                self._snap_ticks = 0
+                self._emit_snapshot()
         if not self.loopback.running():
             self.play_peak *= 0.82
         self._push_pc_volume()
@@ -2640,11 +3032,13 @@ class HostApp:
             self._tray_ping_at = time.monotonic()
             self._tray_ping()
         try:
-            self.root.after(80, self._tick)
+            self._after(80, self._tick)
         except Exception:
             return
 
-    def _draw_meter(self, canvas: tk.Canvas, level: float) -> None:
+    def _draw_meter(self, canvas, level: float) -> None:
+        if canvas is None:
+            return
         canvas.delete("all")
         width = max(canvas.winfo_width(), 10)
         height = max(canvas.winfo_height(), 8)

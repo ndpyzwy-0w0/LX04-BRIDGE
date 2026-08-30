@@ -46,3 +46,8 @@ host/audio_routes.json
 host/hud_preview.json
 dist/audio_routes.json
 dist/hud_preview.json
+
+host-ui/bin/
+host-ui/obj/
+host-ui/LX04-PC-Bridge-Worker.exe
+host-ui/worker/

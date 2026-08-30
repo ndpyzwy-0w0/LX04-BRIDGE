@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
-"""Package the Windows host into a onefile EXE. Rollback is git, not extra copies."""
+"""Package WinUI host + Python worker into one EXE. Rollback is git, not extra copies."""
 from __future__ import annotations
 
 import argparse
+import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -11,6 +13,7 @@ ROOT = Path(__file__).resolve().parent
 VERSION_FILE = ROOT / "VERSION.txt"
 DIST = ROOT / "dist"
 HOST = ROOT / "host"
+HOST_UI = ROOT / "host-ui"
 
 from release_git import commit_usable_version, read_version
 
@@ -22,45 +25,34 @@ def bump_version() -> int:
     return version
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser(description="Pack host EXE and commit a local release snapshot.")
-    parser.add_argument(
-        "-m",
-        "--message",
-        default="",
-        help="Release note for the git commit (Release vN: ...).",
-    )
-    parser.add_argument(
-        "--bump",
-        action="store_true",
-        help="Increment VERSION.txt before packing.",
-    )
-    parser.add_argument(
-        "--no-commit",
-        action="store_true",
-        help="Pack only; skip the local git snapshot.",
-    )
-    args = parser.parse_args()
+def _dotnet() -> str:
+    found = shutil.which("dotnet")
+    if found:
+        return found
+    for candidate in (
+        Path(os.environ.get("ProgramFiles", r"C:\Program Files")) / "dotnet" / "dotnet.exe",
+        Path(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")) / "dotnet" / "dotnet.exe",
+    ):
+        if candidate.is_file():
+            return str(candidate)
+    raise FileNotFoundError("dotnet not found")
 
-    DIST.mkdir(parents=True, exist_ok=True)
-    version = bump_version() if args.bump else read_version()
-    name = "LX04-PC-Bridge-Host"
-    staging = ROOT / "build" / "pyinstaller" / "dist"
-    staging.mkdir(parents=True, exist_ok=True)
-    built = staging / f"{name}.exe"
-    latest = DIST / f"{name}.exe"
 
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "-q", "pyinstaller", "sounddevice", "pycaw", "comtypes", "psutil"])
+def _pyinstaller_worker(staging: Path) -> Path:
+    subprocess.check_call(
+        [sys.executable, "-m", "pip", "install", "-q", "pyinstaller", "sounddevice", "pycaw", "comtypes", "psutil"]
+    )
     subprocess.check_call(
         [sys.executable, "-c", "import comtypes.client; comtypes.client.GetModule('UIAutomationCore.dll')"]
     )
+    name = "LX04-PC-Bridge-Worker"
     cmd = [
         sys.executable,
         "-m",
         "PyInstaller",
         "--noconfirm",
         "--clean",
-        "--windowed",
+        "--console",
         "--onefile",
         "--name",
         name,
@@ -72,104 +64,57 @@ def main() -> int:
         str(ROOT / "build" / "pyinstaller"),
         "--paths",
         str(HOST),
-        "--hidden-import",
-        "adb_usb",
-        "--hidden-import",
-        "protocol",
-        "--hidden-import",
-        "audio_out",
-        "--hidden-import",
-        "vb_cable",
-        "--hidden-import",
-        "win_mic",
-        "--hidden-import",
-        "win_endpoint",
-        "--hidden-import",
-        "hw_capture",
-        "--hidden-import",
-        "hifi_cable",
-        "--hidden-import",
-        "afterburner",
-        "--hidden-import",
-        "hud_preview",
-        "--hidden-import",
-        "speaker_loopback",
-        "--hidden-import",
-        "win_volume",
-        "--hidden-import",
-        "virtual_mic",
-        "--hidden-import",
-        "driver_setup",
-        "--hidden-import",
-        "pycaw",
-        "--hidden-import",
-        "comtypes",
-        "--hidden-import",
-        "sounddevice",
-        "--hidden-import",
-        "_sounddevice",
-        "--hidden-import",
-        "cffi",
-        "--hidden-import",
-        "_cffi_backend",
-        "--hidden-import",
-        "psutil",
-        "--hidden-import",
-        "pc_stats",
-        "--hidden-import",
-        "screen_mirror",
-        "--hidden-import",
-        "dxgi_grab",
-        "--hidden-import",
-        "toast_mirror",
-        "--hidden-import",
-        "comtypes.gen.UIAutomationClient",
-        "--collect-all",
-        "psutil",
-        "--collect-all",
-        "sounddevice",
-        "--collect-all",
-        "cffi",
-        "--collect-all",
-        "pycaw",
-        "--collect-all",
-        "comtypes",
     ]
+    for hidden in (
+        "host_controller",
+        "host_svc",
+        "pc_host",
+        "adb_usb",
+        "protocol",
+        "audio_out",
+        "vb_cable",
+        "win_mic",
+        "win_endpoint",
+        "hw_capture",
+        "hifi_cable",
+        "afterburner",
+        "hud_preview",
+        "speaker_loopback",
+        "win_volume",
+        "virtual_mic",
+        "driver_setup",
+        "pycaw",
+        "comtypes",
+        "sounddevice",
+        "_sounddevice",
+        "cffi",
+        "_cffi_backend",
+        "psutil",
+        "pc_stats",
+        "screen_mirror",
+        "dxgi_grab",
+        "toast_mirror",
+        "comtypes.gen.UIAutomationClient",
+    ):
+        cmd.extend(["--hidden-import", hidden])
+    for pkg in ("psutil", "sounddevice", "cffi", "pycaw", "comtypes"):
+        cmd.extend(["--collect-all", pkg])
     vbcable_pack = HOST / "vbcable" / "pack"
     if vbcable_pack.is_dir():
         for item in sorted(vbcable_pack.iterdir()):
             if item.is_file():
                 cmd.extend(["--add-data", f"{item};vbcable"])
-        dest_cable = DIST / "vbcable"
-        dest_pack = dest_cable / "pack"
-        dest_pack.mkdir(parents=True, exist_ok=True)
-        for item in sorted(vbcable_pack.iterdir()):
-            if item.is_file():
-                (dest_pack / item.name).write_bytes(item.read_bytes())
-        notice = HOST / "vbcable" / "NOTICE.txt"
-        zip_pack = HOST / "vbcable" / "VBCABLE_Driver_Pack45.zip"
-        if notice.is_file():
-            (dest_cable / "NOTICE.txt").write_bytes(notice.read_bytes())
-        if zip_pack.is_file():
-            (dest_cable / zip_pack.name).write_bytes(zip_pack.read_bytes())
     hifi_pack = HOST / "hificable" / "pack"
     hifi_zip = HOST / "hificable" / "HiFiCableAsioBridgeSetup_v1007.zip"
-    if hifi_pack.is_dir() or hifi_zip.is_file():
-        dest_hifi = DIST / "hificable"
-        dest_hifi_pack = dest_hifi / "pack"
-        dest_hifi_pack.mkdir(parents=True, exist_ok=True)
-        if hifi_pack.is_dir():
-            for item in sorted(hifi_pack.iterdir()):
-                if item.is_file():
-                    cmd.extend(["--add-data", f"{item};hificable"])
-                    (dest_hifi_pack / item.name).write_bytes(item.read_bytes())
-        if hifi_zip.is_file():
-            cmd.extend(["--add-data", f"{hifi_zip};hificable"])
-            (dest_hifi / hifi_zip.name).write_bytes(hifi_zip.read_bytes())
-        hifi_notice = HOST / "hificable" / "NOTICE.txt"
-        if hifi_notice.is_file():
-            cmd.extend(["--add-data", f"{hifi_notice};hificable"])
-            (dest_hifi / "NOTICE.txt").write_bytes(hifi_notice.read_bytes())
+    if hifi_pack.is_dir():
+        for item in sorted(hifi_pack.iterdir()):
+            if item.is_file():
+                cmd.extend(["--add-data", f"{item};hificable"])
+    if hifi_zip.is_file():
+        cmd.extend(["--add-data", f"{hifi_zip};hificable"])
+    hifi_notice = HOST / "hificable" / "NOTICE.txt"
+    if hifi_notice.is_file():
+        cmd.extend(["--add-data", f"{hifi_notice};hificable"])
     driver_pkg = ROOT / "driver" / "lx04-mic" / "x64" / "Release" / "package"
     if driver_pkg.is_dir():
         for item in sorted(driver_pkg.iterdir()):
@@ -182,13 +127,57 @@ def main() -> int:
                 cmd.extend(["--add-binary", f"{item};adb"])
             elif item.suffix.lower() in {".txt", ".md"}:
                 cmd.extend(["--add-data", f"{item};adb"])
-    cmd.append(str(HOST / "pc_host.py"))
-    print("Building", latest)
+    cmd.append(str(HOST / "host_svc.py"))
     subprocess.check_call(cmd)
+    built = staging / f"{name}.exe"
+    dest = HOST_UI / f"{name}.exe"
+    dest.write_bytes(built.read_bytes())
+    print("Worker", dest)
+    return dest
+
+
+def _publish_winui() -> Path:
+    out = HOST_UI / "bin" / "Release" / "net8.0-windows10.0.19041.0" / "win-x64" / "publish" / "LX04-PC-Bridge-Host.exe"
+    subprocess.check_call(
+        [
+            _dotnet(),
+            "publish",
+            str(HOST_UI / "LX04.HostUi.csproj"),
+            "-c",
+            "Release",
+            "-r",
+            "win-x64",
+            "--self-contained",
+            "true",
+        ],
+        cwd=ROOT,
+    )
+    if not out.is_file():
+        raise FileNotFoundError(out)
+    return out
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Pack host EXE and commit a local release snapshot.")
+    parser.add_argument("-m", "--message", default="", help="Release note for the git commit (Release vN: ...).")
+    parser.add_argument("--bump", action="store_true", help="Increment VERSION.txt before packing.")
+    parser.add_argument("--no-commit", action="store_true", help="Pack only; skip the local git snapshot.")
+    args = parser.parse_args()
+
+    DIST.mkdir(parents=True, exist_ok=True)
+    version = bump_version() if args.bump else read_version()
+    staging = ROOT / "build" / "pyinstaller" / "dist"
+    staging.mkdir(parents=True, exist_ok=True)
+    latest = DIST / "LX04-PC-Bridge-Host.exe"
+
+    print("Building worker")
+    _pyinstaller_worker(staging)
+    print("Building WinUI shell")
+    built = _publish_winui()
     payload = built.read_bytes()
     try:
         latest.write_bytes(payload)
-        print("Wrote", latest)
+        print("Wrote", latest, "bytes", len(payload))
     except OSError as exc:
         print("Current EXE is in use, left", built, ":", exc)
         print("请先退出上位机，再把该文件复制到", latest)

@@ -1,0 +1,207 @@
+<Window
+    x:Class="LX04.HostUi.MainWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    mc:Ignorable="d"
+    Title="LX04 PC Bridge">
+    <Grid x:Name="Root">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+        <NavigationView x:Name="Nav"
+                        IsBackButtonVisible="Collapsed"
+                        IsSettingsVisible="False"
+                        PaneDisplayMode="Left"
+                        OpenPaneLength="200"
+                        IsPaneToggleButtonVisible="False"
+                        SelectionChanged="Nav_SelectionChanged">
+            <NavigationView.MenuItems>
+                <NavigationViewItem Content="总览" Tag="overview">
+                    <NavigationViewItem.Icon>
+                        <FontIcon Glyph="&#xE80F;"/>
+                    </NavigationViewItem.Icon>
+                </NavigationViewItem>
+                <NavigationViewItem Content="音频" Tag="audio">
+                    <NavigationViewItem.Icon>
+                        <FontIcon Glyph="&#xE8D6;"/>
+                    </NavigationViewItem.Icon>
+                </NavigationViewItem>
+                <NavigationViewItem Content="屏幕" Tag="screen">
+                    <NavigationViewItem.Icon>
+                        <FontIcon Glyph="&#xE7F4;"/>
+                    </NavigationViewItem.Icon>
+                </NavigationViewItem>
+                <NavigationViewItem Content="设置" Tag="settings">
+                    <NavigationViewItem.Icon>
+                        <FontIcon Glyph="&#xE713;"/>
+                    </NavigationViewItem.Icon>
+                </NavigationViewItem>
+                <NavigationViewItem Content="日志" Tag="log">
+                    <NavigationViewItem.Icon>
+                        <FontIcon Glyph="&#xE8A5;"/>
+                    </NavigationViewItem.Icon>
+                </NavigationViewItem>
+            </NavigationView.MenuItems>
+            <NavigationView.PaneFooter>
+                <StackPanel Padding="16,8,16,16" Spacing="2">
+                    <Rectangle Height="1" Fill="{ThemeResource DividerStrokeColorDefaultBrush}"/>
+                    <TextBlock x:Name="PaneStatus" Margin="0,8,0,0" FontWeight="SemiBold" Text="○ 未连接"/>
+                    <TextBlock x:Name="PaneHint" Opacity="0.7" Text="请连接 LX04"/>
+                </StackPanel>
+            </NavigationView.PaneFooter>
+            <Grid Padding="20,16,20,8">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                </Grid.RowDefinitions>
+                <StackPanel Margin="0,0,0,12">
+                    <TextBlock x:Name="PageTitle" FontSize="22" FontWeight="SemiBold" Text="总览"/>
+                    <TextBlock x:Name="PageSub" Opacity="0.7" Text="连接状态与诊断"/>
+                </StackPanel>
+
+                <ScrollViewer x:Name="OverviewPage" Grid.Row="1" Visibility="Visible">
+                    <StackPanel Spacing="12">
+                        <InfoBar x:Name="ConnectBar" IsOpen="True" IsClosable="False" Severity="Informational" Title="未连接" Message="请连接 LX04 设备后开始使用"/>
+                        <TextBlock Text="设备" FontWeight="SemiBold"/>
+                        <Border Padding="12" CornerRadius="6" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
+                            <StackPanel Spacing="8">
+                                <TextBlock x:Name="DeviceLine" Text="未检测到 LX04"/>
+                                <TextBlock x:Name="DeviceSub" Opacity="0.7" Text="ADB · USB"/>
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <Button x:Name="RefreshBtn" Content="刷新设备" Click="Refresh_Click"/>
+                                    <Button x:Name="ConnectBtn" Content="连接" Style="{StaticResource AccentButtonStyle}" Click="Connect_Click"/>
+                                    <Button x:Name="DisconnectBtn" Content="断开连接" Visibility="Collapsed" Click="Disconnect_Click"/>
+                                </StackPanel>
+                            </StackPanel>
+                        </Border>
+                        <TextBlock Text="连接诊断" FontWeight="SemiBold"/>
+                        <StackPanel x:Name="DiagList" Spacing="6"/>
+                        <Button Content="重新检测" Click="Diagnose_Click" HorizontalAlignment="Right"/>
+                    </StackPanel>
+                </ScrollViewer>
+
+                <ScrollViewer x:Name="AudioPage" Grid.Row="1" Visibility="Collapsed">
+                    <StackPanel Spacing="12">
+                        <Border Padding="12" CornerRadius="6" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
+                            <StackPanel Spacing="8">
+                                <Grid>
+                                    <TextBlock Text="麦克风" FontWeight="SemiBold"/>
+                                    <TextBlock x:Name="MicStatus" HorizontalAlignment="Right" Text="○ 未连接"/>
+                                </Grid>
+                                <TextBlock Opacity="0.7" Text="LX04 双麦阵列 → Windows"/>
+                                <ProgressBar x:Name="MicMeter" Minimum="0" Maximum="1" Height="8"/>
+                                <ComboBox x:Name="InjectBox" Header="输出到" HorizontalAlignment="Stretch" SelectionChanged="Inject_Changed"/>
+                                <ToggleSwitch x:Name="MicSwitch" Header="麦克风通路" Toggled="MicSwitch_Toggled"/>
+                                <Slider x:Name="GainSlider" Header="麦克风增益" Minimum="0" Maximum="300" Value="100" ValueChanged="Gain_Changed"/>
+                                <TextBlock x:Name="GainLabel" Opacity="0.7"/>
+                                <TextBlock x:Name="MicHint" Opacity="0.7"/>
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <Button Content="静音麦克风" Click="MuteMic_Click"/>
+                                    <Button Content="试音" Click="TestTone_Click"/>
+                                </StackPanel>
+                            </StackPanel>
+                        </Border>
+                        <Border Padding="12" CornerRadius="6" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
+                            <StackPanel Spacing="8">
+                                <Grid>
+                                    <TextBlock Text="扬声器" FontWeight="SemiBold"/>
+                                    <TextBlock x:Name="SpkStatus" HorizontalAlignment="Right" Text="○ 未连接"/>
+                                </Grid>
+                                <TextBlock Opacity="0.7" Text="Windows → LX04"/>
+                                <ProgressBar x:Name="SpkMeter" Minimum="0" Maximum="1" Height="8"/>
+                                <ComboBox x:Name="SpeakerBox" Header="来源" HorizontalAlignment="Stretch" SelectionChanged="Speaker_Changed"/>
+                                <ToggleSwitch x:Name="SpkSwitch" Header="扬声器通路" Toggled="SpkSwitch_Toggled"/>
+                                <ToggleSwitch x:Name="DefaultSpkSwitch" Header="设为默认播放" Toggled="DefaultSpk_Toggled"/>
+                                <ToggleSwitch x:Name="VolSyncSwitch" Header="同步系统音量" Toggled="VolSync_Toggled"/>
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <Button Content="静音扬声器" Click="MuteSpk_Click"/>
+                                    <Button Content="音箱试音" Click="SpeakerTest_Click"/>
+                                </StackPanel>
+                            </StackPanel>
+                        </Border>
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <Button Content="安装 VB-CABLE" Click="InstallVb_Click"/>
+                            <Button Content="安装 Hi-Fi Cable" Click="InstallHifi_Click"/>
+                        </StackPanel>
+                    </StackPanel>
+                </ScrollViewer>
+
+                <ScrollViewer x:Name="ScreenPage" Grid.Row="1" Visibility="Collapsed">
+                    <StackPanel Spacing="12">
+                        <Viewbox Stretch="Uniform" HorizontalAlignment="Left" MaxWidth="720">
+                            <Border x:Name="HudFrame" Width="800" Height="480" CornerRadius="6" BorderThickness="1" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" Background="#0B1220">
+                                <Grid x:Name="HudGrid"/>
+                            </Border>
+                        </Viewbox>
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <Button x:Name="WatchBtn" Content="状态监视" Click="Watch_Click"/>
+                            <Button x:Name="MirrorBtn" Content="屏幕镜像" Click="Mirror_Click"/>
+                            <ToggleSwitch x:Name="ToastSwitch" Header="系统弹窗" Toggled="Toast_Toggled"/>
+                        </StackPanel>
+                        <ComboBox x:Name="MonitorBox" Header="显示器" HorizontalAlignment="Stretch" SelectionChanged="Monitor_Changed"/>
+                        <ComboBox x:Name="QualityBox" Header="镜像质量" HorizontalAlignment="Stretch" SelectionChanged="Quality_Changed"/>
+                        <ToggleSwitch x:Name="PcStatsSwitch" Header="音箱显示电脑状态" Toggled="PcStats_Toggled"/>
+                        <ComboBox x:Name="DiskBox" Header="监测磁盘" HorizontalAlignment="Stretch" SelectionChanged="Disk_Changed"/>
+                        <ToggleSwitch x:Name="LightSwitch" Header="音箱浅色" Toggled="Light_Toggled"/>
+                        <ToggleSwitch x:Name="UpsideSwitch" Header="吊装倒转屏幕" Toggled="Upside_Toggled"/>
+                        <TextBlock x:Name="PcLine" Opacity="0.7" TextWrapping="Wrap"/>
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <Button Content="恢复默认样式" Click="HudReset_Click"/>
+                            <Button Content="上传背景" Click="UploadBg_Click"/>
+                            <Button Content="CPU 温度 / Afterburner" Click="Afterburner_Click"/>
+                        </StackPanel>
+                    </StackPanel>
+                </ScrollViewer>
+
+                <ScrollViewer x:Name="SettingsPage" Grid.Row="1" Visibility="Collapsed">
+                    <StackPanel Spacing="16">
+                        <TextBlock Text="外观" FontWeight="SemiBold"/>
+                        <RadioButtons x:Name="ThemeBox" Header="主题" SelectionChanged="Theme_Changed">
+                            <RadioButton Content="浅色" Tag="light"/>
+                            <RadioButton Content="深色" Tag="dark"/>
+                            <RadioButton Content="跟随 Windows" Tag="default"/>
+                        </RadioButtons>
+                        <Rectangle Height="1" Fill="{ThemeResource DividerStrokeColorDefaultBrush}"/>
+                        <TextBlock Text="监控" FontWeight="SemiBold"/>
+                        <TextBlock Opacity="0.7" Text="磁盘与 CPU 温度在「屏幕」页设置。"/>
+                        <Rectangle Height="1" Fill="{ThemeResource DividerStrokeColorDefaultBrush}"/>
+                        <TextBlock Text="系统" FontWeight="SemiBold"/>
+                        <ToggleSwitch x:Name="AutoStartSwitch" Header="开机自启动" Toggled="Autostart_Toggled"/>
+                        <ToggleSwitch x:Name="TraySwitch" Header="关闭后最小化到托盘" Toggled="TrayPref_Toggled"/>
+                    </StackPanel>
+                </ScrollViewer>
+
+                <Grid x:Name="LogPage" Grid.Row="1" Visibility="Collapsed">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+                    <Grid Margin="0,0,0,8">
+                        <ComboBox x:Name="LogFilter" Width="140" HorizontalAlignment="Left" SelectionChanged="LogFilter_Changed">
+                            <ComboBoxItem Content="全部" IsSelected="True"/>
+                            <ComboBoxItem Content="INFO"/>
+                            <ComboBoxItem Content="WARNING"/>
+                            <ComboBoxItem Content="ERROR"/>
+                        </ComboBox>
+                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
+                            <Button Content="复制" Click="LogCopy_Click"/>
+                            <Button Content="清空" Click="LogClear_Click"/>
+                        </StackPanel>
+                    </Grid>
+                    <TextBox x:Name="LogBox" Grid.Row="1" AcceptsReturn="True" IsReadOnly="True" TextWrapping="Wrap" FontFamily="Consolas" ScrollViewer.VerticalScrollBarVisibility="Auto"/>
+                </Grid>
+            </Grid>
+        </NavigationView>
+        <Grid Grid.Row="1" Padding="16,6" Background="{ThemeResource LayerFillColorDefaultBrush}">
+            <StackPanel Orientation="Horizontal" Spacing="16">
+                <TextBlock x:Name="BarAudio" Text="○ 音频：—"/>
+                <TextBlock x:Name="BarScreen" Text="○ 屏幕：状态监视"/>
+                <TextBlock x:Name="BarToast" Text="○ 弹窗同步：关"/>
+            </StackPanel>
+            <TextBlock x:Name="BarLog" HorizontalAlignment="Right" Opacity="0.7"/>
+        </Grid>
+    </Grid>
+</Window>
