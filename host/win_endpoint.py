@@ -370,6 +370,11 @@ def _iter_devices(data_flow: int, device_state: int | None = None):
         from pycaw.pycaw import AudioUtilities
     except Exception:
         return []
+    try:
+        import comtypes
+        comtypes.CoInitialize()
+    except Exception:
+        pass
     state = DEVICE_STATE.ACTIVE.value if device_state is None else device_state
     try:
         return list(

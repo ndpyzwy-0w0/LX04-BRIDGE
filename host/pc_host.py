@@ -857,7 +857,10 @@ class HostApp:
             self._build()
         threading.Thread(target=pc_stats.snapshot, daemon=True).start()
         self._load_route_vars()
-        self._after(0, self._boot)
+        if self._headless:
+            self._boot()
+        else:
+            self._after(0, self._boot)
         self._after(400, self._tick)
 
     def _build(self) -> None:

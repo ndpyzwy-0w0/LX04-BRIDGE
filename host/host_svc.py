@@ -51,14 +51,11 @@ def _finish(token: str, value) -> None:
         fut.set_result(value)
 
 
-def _ui_post(app: HostController):
-    def post(fn) -> None:
-        try:
-            fn()
-        except Exception as exc:
-            _write({"event": "log", "line": "UI 回调失败: " + str(exc), "level": "ERROR"})
-
-    return post
+def _ui_post(fn) -> None:
+    try:
+        fn()
+    except Exception as exc:
+        _write({"event": "log", "line": "UI 回调失败: " + str(exc), "level": "ERROR"})
 
 
 def main() -> int:
@@ -72,7 +69,7 @@ def main() -> int:
     app = HostController(
         None,
         emit=emit,
-        ui_post=lambda fn: _ui_post(app)(fn),
+        ui_post=_ui_post,
         confirm=lambda text: bool(_wait("confirm", text)),
         ask_file=lambda: _wait("pick_file"),
         ask_slot=lambda: _wait("pick_slot"),
