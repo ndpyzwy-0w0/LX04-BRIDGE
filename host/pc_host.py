@@ -50,6 +50,37 @@ DIM = "#8FA0BE"
 GREEN = "#3DDC97"
 AMBER = "#FFB020"
 RED = "#FF5C7A"
+COMBO_FG = "#1A2333"
+COMBO_BG = "#F3F6FB"
+
+
+def _enable_dpi() -> None:
+    try:
+        import ctypes
+
+        ctypes.windll.shcore.SetProcessDpiAwareness(2)
+    except Exception:
+        try:
+            import ctypes
+
+            ctypes.windll.user32.SetProcessDPIAware()
+        except Exception:
+            pass
+
+
+def _ui_metrics(sw: int, sh: int, dpi: float) -> dict[str, float | int]:
+    """Window and type scale from screen size + DPI. Design box is 920x640 at 96 DPI."""
+    dpi_scale = max(0.85, min(2.0, float(dpi) / 96.0))
+    size_scale = min(1.0, sw / 1280.0, sh / 800.0)
+    scale = max(0.8, min(2.0, dpi_scale * max(0.85, size_scale)))
+    font = max(9, min(16, round(10 * scale)))
+    pad = max(8, min(28, round(16 * scale)))
+    meter = max(14, min(32, round(22 * scale)))
+    w = min(int(920 * scale), max(480, int(sw * 0.92)))
+    h = min(int(640 * scale), max(360, int(sh * 0.88)))
+    w = max(w, min(560, max(320, sw - 32)))
+    h = max(h, min(420, max(280, sh - 64)))
+    return {"scale": scale, "font": font, "pad": pad, "meter": meter, "w": w, "h": h}
 
 
 class BridgeClient:
@@ -317,6 +348,49 @@ def _read_exact(sock: socket.socket, size: int) -> bytes:
     return bytes(chunks)
 
 
+class ScrollPane(ttk.Frame):
+    """Tab body that scrolls when the window is shorter than the controls."""
+
+    def __init__(self, parent: tk.Misc, body_bg: str) -> None:
+        super().__init__(parent, style="TFrame")
+        self.canvas = tk.Canvas(self, bg=body_bg, highlightthickness=0, bd=0)
+        self.bar = ttk.Scrollbar(self, orient="vertical", command=self.canvas.yview)
+        self.body = ttk.Frame(self.canvas, style="Card.TFrame")
+        self._win = self.canvas.create_window((0, 0), window=self.body, anchor="nw")
+        self.canvas.configure(yscrollcommand=self._on_scroll)
+        self.canvas.pack(side="left", fill="both", expand=True)
+        self.body.bind("<Configure>", self._fit)
+        self.canvas.bind("<Configure>", self._stretch)
+        self.bind("<Enter>", lambda _e: self._wheel(True))
+        self.bind("<Leave>", lambda _e: self._wheel(False))
+        self.bind("<Unmap>", lambda _e: self._wheel(False))
+
+    def _on_scroll(self, first, last) -> None:
+        self.bar.set(first, last)
+        if float(first) <= 0 and float(last) >= 1:
+            self.bar.pack_forget()
+        elif not self.bar.winfo_ismapped():
+            self.bar.pack(side="right", fill="y")
+
+    def _fit(self, _event=None) -> None:
+        self.canvas.configure(scrollregion=self.canvas.bbox("all"))
+
+    def _stretch(self, event) -> None:
+        self.canvas.itemconfigure(self._win, width=event.width)
+
+    def _wheel(self, on: bool) -> None:
+        if on:
+            self.canvas.bind_all("<MouseWheel>", self._on_wheel)
+        else:
+            self.canvas.unbind_all("<MouseWheel>")
+
+    def _on_wheel(self, event: tk.Event) -> str | None:
+        if float(self.canvas.yview()[0]) <= 0 and float(self.canvas.yview()[1]) >= 1:
+            return None
+        self.canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+        return "break"
+
+
 class ChoiceDrop:
     """Menubutton dropdown; ttk Combobox popdowns close on mouse-up on this UI."""
 
@@ -331,6 +405,7 @@ class ChoiceDrop:
         padx: int = 8,
         expand: bool = True,
         width: int | None = None,
+        font_size: int = 10,
     ) -> None:
         self.variable = variable
         self.command = command
@@ -341,7 +416,7 @@ class ChoiceDrop:
         self.menu = tk.Menu(
             self.button,
             tearoff=False,
-            font=("Segoe UI", 10),
+            font=("Segoe UI", font_size),
             bg=bg,
             fg=fg,
             activebackground="#C5E9D6",
@@ -447,9 +522,21 @@ class HostApp:
     def _build(self) -> None:
         self.root.title("LX04 上位机")
         self.root.configure(bg=BG)
-        self.root.geometry("860x840")
-        self.root.minsize(760, 680)
+        self.root.update_idletasks()
+        m = _ui_metrics(self.root.winfo_screenwidth(), self.root.winfo_screenheight(), self.root.winfo_fpixels("1i"))
+        self._font = int(m["font"])
+        self._pad = int(m["pad"])
+        self._meter_h = int(m["meter"])
+        self._scale = float(m["scale"])
+        self.root.geometry(f"{int(m['w'])}x{int(m['h'])}")
+        self.root.minsize(min(560, int(m["w"])), min(420, int(m["h"])))
+        x = max(0, (self.root.winfo_screenwidth() - int(m["w"])) // 2)
+        y = max(0, (self.root.winfo_screenheight() - int(m["h"])) // 2)
+        self.root.geometry(f"{int(m['w'])}x{int(m['h'])}+{x}+{y}")
 
+        fs = self._font
+        title_fs = max(14, min(22, round(18 * self._scale)))
+        card_fs = max(fs, min(14, fs + 1))
         style = ttk.Style()
         try:
             style.theme_use("clam")
@@ -457,286 +544,179 @@ class HostApp:
             pass
         style.configure("TFrame", background=BG)
         style.configure("Card.TFrame", background=PANEL)
-        style.configure("TLabel", background=BG, foreground=TEXT, font=("Segoe UI", 10))
-        style.configure("Title.TLabel", background=BG, foreground=TEXT, font=("Segoe UI Semibold", 18))
-        style.configure("Dim.TLabel", background=BG, foreground=DIM, font=("Segoe UI", 10))
-        style.configure("Card.TLabel", background=PANEL, foreground=TEXT, font=("Segoe UI", 11))
-        style.configure("CardDim.TLabel", background=PANEL, foreground=DIM, font=("Segoe UI", 10))
-        style.configure("TButton", font=("Segoe UI", 10))
+        style.configure("TLabel", background=BG, foreground=TEXT, font=("Segoe UI", fs))
+        style.configure("Title.TLabel", background=BG, foreground=TEXT, font=("Segoe UI Semibold", title_fs))
+        style.configure("Dim.TLabel", background=BG, foreground=DIM, font=("Segoe UI", fs))
+        style.configure("Card.TLabel", background=PANEL, foreground=TEXT, font=("Segoe UI", card_fs))
+        style.configure("CardDim.TLabel", background=PANEL, foreground=DIM, font=("Segoe UI", fs))
+        style.configure("TButton", font=("Segoe UI", fs), padding=(max(6, fs - 2), max(3, fs // 3)))
+        style.configure("TNotebook", background=BG, borderwidth=0)
+        style.configure(
+            "TNotebook.Tab",
+            background=PANEL,
+            foreground=TEXT,
+            padding=(max(10, fs), max(5, fs // 2)),
+            font=("Segoe UI", fs),
+        )
+        style.map(
+            "TNotebook.Tab",
+            background=[("selected", "#1E2A44"), ("active", "#1A2438")],
+            foreground=[("selected", TEXT), ("active", TEXT)],
+        )
         # Windows ttk Combobox keeps a light native field; force dark text so it stays readable.
-        combo_fg = "#1A2333"
-        combo_bg = "#F3F6FB"
         style.configure(
             "TCombobox",
-            fieldbackground=combo_bg,
-            background=combo_bg,
-            foreground=combo_fg,
-            arrowcolor=combo_fg,
-            insertcolor=combo_fg,
-            padding=4,
+            fieldbackground=COMBO_BG,
+            background=COMBO_BG,
+            foreground=COMBO_FG,
+            arrowcolor=COMBO_FG,
+            insertcolor=COMBO_FG,
+            padding=max(3, fs // 3),
         )
         style.map(
             "TCombobox",
-            fieldbackground=[("readonly", combo_bg), ("disabled", "#D7DCE6")],
-            foreground=[("readonly", combo_fg), ("disabled", "#5B6B88")],
+            fieldbackground=[("readonly", COMBO_BG), ("disabled", "#D7DCE6")],
+            foreground=[("readonly", COMBO_FG), ("disabled", "#5B6B88")],
             selectbackground=[("readonly", "#C5E9D6")],
-            selectforeground=[("readonly", combo_fg)],
+            selectforeground=[("readonly", COMBO_FG)],
         )
-        self.root.option_add("*TCombobox*Listbox.background", combo_bg)
-        self.root.option_add("*TCombobox*Listbox.foreground", combo_fg)
+        self.root.option_add("*TCombobox*Listbox.background", COMBO_BG)
+        self.root.option_add("*TCombobox*Listbox.foreground", COMBO_FG)
         self.root.option_add("*TCombobox*Listbox.selectBackground", "#3DDC97")
         self.root.option_add("*TCombobox*Listbox.selectForeground", "#0B1220")
-        self.root.option_add("*TCombobox*Listbox.font", "Segoe UI 10")
+        self.root.option_add("*TCombobox*Listbox.font", f"Segoe UI {fs}")
         style.configure(
             "Drop.TMenubutton",
-            background=combo_bg,
-            foreground=combo_fg,
-            arrowcolor=combo_fg,
-            padding=4,
-            font=("Segoe UI", 10),
+            background=COMBO_BG,
+            foreground=COMBO_FG,
+            arrowcolor=COMBO_FG,
+            padding=max(3, fs // 3),
+            font=("Segoe UI", fs),
             relief="raised",
         )
         style.map(
             "Drop.TMenubutton",
-            background=[("active", combo_bg), ("pressed", combo_bg)],
-            foreground=[("active", combo_fg)],
-            arrowcolor=[("active", combo_fg)],
+            background=[("active", COMBO_BG), ("pressed", COMBO_BG)],
+            foreground=[("active", COMBO_FG)],
+            arrowcolor=[("active", COMBO_FG)],
         )
-
-        ttk.Label(self.root, text="LX04 PC Bridge", style="Title.TLabel").pack(anchor="w", padx=20, pady=(16, 4))
-        ttk.Label(
-            self.root,
-            text="USB 连接小爱触屏音箱 LX04。下面两条通路可单独开关、自选设备。",
-            style="Dim.TLabel",
-        ).pack(anchor="w", padx=20)
-
-        card = ttk.Frame(self.root, style="Card.TFrame")
-        card.pack(fill="x", padx=20, pady=16)
-
-        row = ttk.Frame(card, style="Card.TFrame")
-        row.pack(fill="x", padx=16, pady=12)
-        ttk.Label(row, text="USB 设备", style="Card.TLabel").pack(side="left")
-        self.device_var = tk.StringVar(value="正在扫描…")
-        self.device_drop = ChoiceDrop(
-            row, self.device_var, lambda: None, combo_bg, combo_fg, expand=False, width=28
-        )
-        ttk.Button(row, text="刷新", command=self.refresh_devices).pack(side="left")
-        ttk.Button(row, text="连接", command=self.connect).pack(side="left", padx=6)
-        ttk.Button(row, text="断开", command=self.disconnect).pack(side="left")
-        tk.Checkbutton(
-            row,
-            text="浅色",
-            variable=self.light_theme,
-            command=self._on_light_theme_change,
-            bg=PANEL,
-            fg=TEXT,
-            selectcolor="#1E2A44",
-            activebackground=PANEL,
-            activeforeground=TEXT,
-            highlightthickness=0,
-            font=("Segoe UI", 10),
-        ).pack(side="right")
-        tk.Checkbutton(
-            row,
-            text="吊装",
-            variable=self.upside_down,
-            command=self._on_upside_down_change,
-            bg=PANEL,
-            fg=TEXT,
-            selectcolor="#1E2A44",
-            activebackground=PANEL,
-            activeforeground=TEXT,
-            highlightthickness=0,
-            font=("Segoe UI", 10),
-        ).pack(side="right", padx=(0, 8))
-        ttk.Label(row, text="倒转音箱屏幕", style="CardDim.TLabel").pack(side="right", padx=(0, 8))
-
-        mic_row = ttk.Frame(card, style="Card.TFrame")
-        mic_row.pack(fill="x", padx=16, pady=(0, 8))
-        tk.Checkbutton(
-            mic_row,
-            text="麦克风 → 电脑",
-            variable=self.mic_enabled,
-            command=self._on_mic_route_change,
-            bg=PANEL,
-            fg=TEXT,
-            selectcolor="#1E2A44",
-            activebackground=PANEL,
-            activeforeground=TEXT,
-            highlightthickness=0,
-            font=("Segoe UI", 10),
-        ).pack(side="left")
-        self.inject_drop = ChoiceDrop(mic_row, self.inject_var, self._on_mic_route_change, combo_bg, combo_fg)
-
-        spk_row = ttk.Frame(card, style="Card.TFrame")
-        spk_row.pack(fill="x", padx=16, pady=(0, 8))
-        tk.Checkbutton(
-            spk_row,
-            text="电脑 → 音箱",
-            variable=self.spk_enabled,
-            command=self._on_spk_route_change,
-            bg=PANEL,
-            fg=TEXT,
-            selectcolor="#1E2A44",
-            activebackground=PANEL,
-            activeforeground=TEXT,
-            highlightthickness=0,
-            font=("Segoe UI", 10),
-        ).pack(side="left")
-        self.spk_drop = ChoiceDrop(spk_row, self.spk_dev_var, self._on_spk_route_change, combo_bg, combo_fg)
-        tk.Checkbutton(
-            spk_row,
-            text="设为默认播放",
-            variable=self.set_default_spk,
-            command=self._on_spk_route_change,
-            bg=PANEL,
-            fg=TEXT,
-            selectcolor="#1E2A44",
-            activebackground=PANEL,
-            activeforeground=TEXT,
-            highlightthickness=0,
-            font=("Segoe UI", 10),
-        ).pack(side="left")
-
-        vol_row = ttk.Frame(card, style="Card.TFrame")
-        vol_row.pack(fill="x", padx=16, pady=(0, 8))
-        tk.Checkbutton(
-            vol_row,
-            text="同步系统音量",
-            variable=self.volume_sync,
-            command=self._on_volume_sync_change,
-            bg=PANEL,
-            fg=TEXT,
-            selectcolor="#1E2A44",
-            activebackground=PANEL,
-            activeforeground=TEXT,
-            highlightthickness=0,
-            font=("Segoe UI", 10),
-        ).pack(side="left")
-        ttk.Label(
-            vol_row,
-            text="开了后电脑和音箱音量一起变；关掉则各自调节、互不影响。",
-            style="CardDim.TLabel",
-        ).pack(side="left", padx=8)
-
-        stats_row = ttk.Frame(card, style="Card.TFrame")
-        stats_row.pack(fill="x", padx=16, pady=(0, 8))
-        tk.Checkbutton(
-            stats_row,
-            text="音箱显示电脑状态",
-            variable=self.pc_stats_enabled,
-            command=self._on_pc_stats_change,
-            bg=PANEL,
-            fg=TEXT,
-            selectcolor="#1E2A44",
-            activebackground=PANEL,
-            activeforeground=TEXT,
-            highlightthickness=0,
-            font=("Segoe UI", 10),
-        ).pack(side="left")
-        ttk.Label(stats_row, text="磁盘", style="Card.TLabel").pack(side="left", padx=(12, 4))
-        self.disk_drop = ChoiceDrop(
-            stats_row, self.disk_var, self._on_disk_change, combo_bg, combo_fg, padx=0
-        )
-        ttk.Button(
-            stats_row, text="上传背景", command=self._upload_hud_bg
-        ).pack(side="right", padx=(0, 6))
-        ttk.Button(
-            stats_row, text="预览屏幕", command=self._open_hud_preview
-        ).pack(side="right", padx=(0, 6))
-        ttk.Button(
-            stats_row, text="CPU 温度 / Afterburner", command=self._on_afterburner
-        ).pack(side="right")
-
-        mirror_row = ttk.Frame(card, style="Card.TFrame")
-        mirror_row.pack(fill="x", padx=16, pady=(0, 8))
-        ttk.Label(mirror_row, text="同步屏幕", style="Card.TLabel").pack(side="left")
-        self.monitor_drop = ChoiceDrop(
-            mirror_row, self.monitor_var, self._on_monitor_change, combo_bg, combo_fg
-        )
-        ttk.Label(mirror_row, text="码率", style="Card.TLabel").pack(side="left", padx=(10, 0))
-        self.quality_drop = ChoiceDrop(
-            mirror_row,
-            self.quality_var,
-            self._on_quality_change,
-            combo_bg,
-            combo_fg,
-            expand=False,
-            width=6,
-        )
-        self.quality_drop.set_labels(list(screen_mirror.QUALITY_KEYS))
-        ttk.Label(
-            mirror_row,
-            text="越高越清晰，USB 忙时可能更卡。",
-            style="CardDim.TLabel",
-        ).pack(side="left")
-
-        toast_row = ttk.Frame(card, style="Card.TFrame")
-        toast_row.pack(fill="x", padx=16, pady=(0, 8))
-        tk.Checkbutton(
-            toast_row,
-            text="同步系统弹窗",
-            variable=self.toast_mirror,
-            command=self._on_toast_mirror_change,
-            bg=PANEL,
-            fg=TEXT,
-            selectcolor="#1E2A44",
-            activebackground=PANEL,
-            activeforeground=TEXT,
-            highlightthickness=0,
-            font=("Segoe UI", 10),
-        ).pack(side="left")
-        ttk.Label(
-            toast_row,
-            text="开了后系统通知的标题、正文、按钮会显示到音箱，点按钮即点系统通知。",
-            style="CardDim.TLabel",
-        ).pack(side="left", padx=8)
-
-        boot_row = ttk.Frame(card, style="Card.TFrame")
-        boot_row.pack(fill="x", padx=16, pady=(0, 8))
-        tk.Checkbutton(
-            boot_row,
-            text="开机自启动",
-            variable=self.autostart,
-            command=self._on_autostart_change,
-            bg=PANEL,
-            fg=TEXT,
-            selectcolor="#1E2A44",
-            activebackground=PANEL,
-            activeforeground=TEXT,
-            highlightthickness=0,
-            font=("Segoe UI", 10),
-        ).pack(side="left")
-        ttk.Label(
-            boot_row,
-            text="登录 Windows 后自动打开上位机。",
-            style="CardDim.TLabel",
-        ).pack(side="left", padx=8)
-
-        row2 = ttk.Frame(card, style="Card.TFrame")
-        row2.pack(fill="x", padx=16, pady=(0, 8))
-        ttk.Button(row2, text="试音", command=self._on_test_tone).pack(side="left")
-        ttk.Button(row2, text="音箱试音", command=self._on_speaker_test_tone).pack(side="left", padx=6)
-        ttk.Button(row2, text="静音切换", command=lambda: self.client.send_control("toggle_mute")).pack(side="left", padx=6)
-        ttk.Button(row2, text="安装 VB-CABLE", command=self._install_vb).pack(side="right")
-        ttk.Button(row2, text="安装 Hi-Fi Cable", command=self._install_hifi).pack(side="right", padx=6)
-
-        row3 = ttk.Frame(card, style="Card.TFrame")
-        row3.pack(fill="x", padx=16, pady=(0, 12))
-        ttk.Label(row3, text="微信请选麦克风", style="Card.TLabel").pack(side="left")
-        self.mic_var = tk.StringVar(value="尚未识别")
-        ttk.Label(row3, textvariable=self.mic_var, style="Card.TLabel").pack(side="left", padx=8)
-
-        gain_row = ttk.Frame(card, style="Card.TFrame")
-        gain_row.pack(fill="x", padx=16, pady=(0, 12))
-        ttk.Label(gain_row, text="麦克风增益", style="Card.TLabel").pack(side="left")
-        self.gain_var = tk.DoubleVar(value=100)
         style.configure(
             "Gain.Horizontal.TScale",
             background=PANEL,
             troughcolor="#1E2A44",
-            sliderthickness=16,
+            sliderthickness=max(14, min(22, fs + 6)),
         )
+
+        pad = self._pad
+        head = ttk.Frame(self.root)
+        head.pack(fill="x", padx=pad, pady=(pad, 4))
+        ttk.Label(head, text="LX04 PC Bridge", style="Title.TLabel").pack(anchor="w")
+        self.headline = ttk.Label(head, text="未连接", style="TLabel")
+        self.headline.pack(anchor="w", pady=(4, 0))
+        self.detail = ttk.Label(head, text="插入数据线后点刷新，再点连接。", style="Dim.TLabel")
+        self.detail.pack(anchor="w")
+        head.bind("<Configure>", self._reflow_header)
+
+        nb = ttk.Notebook(self.root)
+        nb.pack(fill="both", expand=True, padx=pad, pady=(8, pad))
+        self._build_tab_connect(nb)
+        self._build_tab_audio(nb)
+        self._build_tab_screen(nb)
+        self._build_tab_settings(nb)
+        self._build_tab_log(nb)
+        self._log("adb: " + (self.adb or "未找到内置 adb"))
+        if not self.sink.available():
+            self._log("音频库未安装：在 host 目录执行  pip install -r requirements.txt")
+
+    def _page(self, nb: ttk.Notebook, title: str) -> ttk.Frame:
+        pane = ScrollPane(nb, PANEL)
+        nb.add(pane, text=f"  {title}  ")
+        return pane.body
+
+    def _row(self, parent: tk.Misc, pady: tuple[int, int] | int | None = None) -> ttk.Frame:
+        if pady is None:
+            pady = (self._pad if not parent.winfo_children() else 0, 8)
+        frame = ttk.Frame(parent, style="Card.TFrame")
+        frame.pack(fill="x", padx=self._pad, pady=pady)
+        return frame
+
+    def _check(self, parent: tk.Misc, text: str, variable: tk.Variable, command=None, **pack) -> tk.Checkbutton:
+        widget = tk.Checkbutton(
+            parent,
+            text=text,
+            variable=variable,
+            command=command,
+            bg=PANEL,
+            fg=TEXT,
+            selectcolor="#1E2A44",
+            activebackground=PANEL,
+            activeforeground=TEXT,
+            highlightthickness=0,
+            font=("Segoe UI", self._font),
+        )
+        widget.pack(side="left", **pack)
+        return widget
+
+    def _hint(self, parent: tk.Misc, text: str, style: str = "CardDim.TLabel") -> ttk.Label:
+        lab = ttk.Label(parent, text=text, style=style)
+        lab.pack(anchor="w", fill="x", padx=self._pad, pady=(0, 8))
+        lab.bind("<Configure>", lambda e, w=lab: w.configure(wraplength=max(120, e.width - 4)))
+        return lab
+
+    def _drop(self, parent, variable, command, *, padx: int = 8, expand: bool = True, width: int | None = None) -> ChoiceDrop:
+        return ChoiceDrop(
+            parent,
+            variable,
+            command,
+            COMBO_BG,
+            COMBO_FG,
+            padx=padx,
+            expand=expand,
+            width=width,
+            font_size=self._font,
+        )
+
+    def _reflow_header(self, event) -> None:
+        width = max(200, event.width - 8)
+        self.headline.configure(wraplength=width)
+        self.detail.configure(wraplength=width)
+
+    def _build_tab_connect(self, nb: ttk.Notebook) -> None:
+        page = self._page(nb, "连接")
+        row = self._row(page)
+        ttk.Label(row, text="USB 设备", style="Card.TLabel").pack(side="left")
+        self.device_var = tk.StringVar(value="正在扫描…")
+        self.device_drop = self._drop(row, self.device_var, lambda: None)
+        ttk.Button(row, text="刷新", command=self.refresh_devices).pack(side="left")
+        ttk.Button(row, text="连接", command=self.connect).pack(side="left", padx=6)
+        ttk.Button(row, text="断开", command=self.disconnect).pack(side="left")
+        self._hint(page, "USB 连接小爱触屏音箱 LX04。插上线后点刷新，再点连接。")
+        ttk.Label(page, text="麦克风", style="CardDim.TLabel").pack(anchor="w", padx=self._pad)
+        self.meter = tk.Canvas(page, height=self._meter_h, bg="#1E2A44", highlightthickness=0)
+        self.meter.pack(fill="x", padx=self._pad, pady=(0, 8))
+        ttk.Label(page, text="扬声器", style="CardDim.TLabel").pack(anchor="w", padx=self._pad)
+        self.spk_meter = tk.Canvas(page, height=self._meter_h, bg="#1E2A44", highlightthickness=0)
+        self.spk_meter.pack(fill="x", padx=self._pad, pady=(0, self._pad))
+
+    def _build_tab_audio(self, nb: ttk.Notebook) -> None:
+        page = self._page(nb, "音频")
+        mic_row = self._row(page)
+        self._check(mic_row, "麦克风 → 电脑", self.mic_enabled, self._on_mic_route_change)
+        self.inject_drop = self._drop(mic_row, self.inject_var, self._on_mic_route_change)
+        spk_row = self._row(page)
+        self._check(spk_row, "电脑 → 音箱", self.spk_enabled, self._on_spk_route_change)
+        self.spk_drop = self._drop(spk_row, self.spk_dev_var, self._on_spk_route_change)
+        self._check(spk_row, "设为默认播放", self.set_default_spk, self._on_spk_route_change, padx=(8, 0))
+        vol_row = self._row(page)
+        self._check(vol_row, "同步系统音量", self.volume_sync, self._on_volume_sync_change)
+        self._hint(page, "开了后电脑和音箱音量一起变；关掉则各自调节、互不影响。")
+        wechat = self._row(page)
+        ttk.Label(wechat, text="微信请选麦克风", style="Card.TLabel").pack(side="left")
+        self.mic_var = tk.StringVar(value="尚未识别")
+        ttk.Label(wechat, textvariable=self.mic_var, style="Card.TLabel").pack(side="left", padx=8)
+        gain_row = self._row(page)
+        ttk.Label(gain_row, text="麦克风增益", style="Card.TLabel").pack(side="left")
+        self.gain_var = tk.DoubleVar(value=100)
         self.gain_scale = ttk.Scale(
             gain_row,
             from_=0,
@@ -745,41 +725,70 @@ class HostApp:
             variable=self.gain_var,
             command=self._on_gain,
             style="Gain.Horizontal.TScale",
-            length=280,
         )
         self.gain_scale.pack(side="left", padx=10, fill="x", expand=True)
         self.gain_label_var = tk.StringVar(value="100%  ·  0.0 dB")
         ttk.Label(gain_row, textvariable=self.gain_label_var, style="Card.TLabel").pack(side="left")
+        tools = self._row(page)
+        ttk.Button(tools, text="试音", command=self._on_test_tone).pack(side="left")
+        ttk.Button(tools, text="音箱试音", command=self._on_speaker_test_tone).pack(side="left", padx=6)
+        ttk.Button(tools, text="静音切换", command=lambda: self.client.send_control("toggle_mute")).pack(side="left", padx=6)
+        ttk.Button(tools, text="安装 VB-CABLE", command=self._install_vb).pack(side="right")
+        ttk.Button(tools, text="安装 Hi-Fi Cable", command=self._install_hifi).pack(side="right", padx=6)
+        self._hint(
+            page,
+            "CABLE Input 已从系统播放列表隐藏，上位机仍会把麦克风灌进去。微信选 CABLE Output。扬声器选 Hi-Fi Cable Input。",
+        )
 
-        self.headline = ttk.Label(card, text="未连接", style="Card.TLabel")
-        self.headline.pack(anchor="w", padx=16)
-        self.detail = ttk.Label(card, text="插入数据线后点刷新，再点连接。", style="CardDim.TLabel")
-        self.detail.pack(anchor="w", padx=16, pady=(2, 8))
+    def _build_tab_screen(self, nb: ttk.Notebook) -> None:
+        page = self._page(nb, "屏幕")
+        look = self._row(page)
+        self._check(look, "浅色", self.light_theme, self._on_light_theme_change)
+        self._check(look, "吊装", self.upside_down, self._on_upside_down_change, padx=(12, 0))
+        ttk.Label(look, text="倒转音箱屏幕", style="CardDim.TLabel").pack(side="left", padx=8)
+        stats = self._row(page)
+        self._check(stats, "音箱显示电脑状态", self.pc_stats_enabled, self._on_pc_stats_change)
+        ttk.Label(stats, text="磁盘", style="Card.TLabel").pack(side="left", padx=(12, 4))
+        self.disk_drop = self._drop(stats, self.disk_var, self._on_disk_change, padx=0)
+        hud = self._row(page)
+        ttk.Button(hud, text="预览屏幕", command=self._open_hud_preview).pack(side="left")
+        ttk.Button(hud, text="上传背景", command=self._upload_hud_bg).pack(side="left", padx=6)
+        ttk.Button(hud, text="CPU 温度 / Afterburner", command=self._on_afterburner).pack(side="left")
+        self.pc_line = ttk.Label(page, text="电脑状态：连接音箱后显示在音箱屏幕上。", style="CardDim.TLabel")
+        self.pc_line.pack(anchor="w", fill="x", padx=self._pad, pady=(0, 8))
+        self.pc_line.bind("<Configure>", lambda e, w=self.pc_line: w.configure(wraplength=max(120, e.width - 4)))
+        mirror = self._row(page)
+        ttk.Label(mirror, text="同步屏幕", style="Card.TLabel").pack(side="left")
+        self.monitor_drop = self._drop(mirror, self.monitor_var, self._on_monitor_change)
+        ttk.Label(mirror, text="码率", style="Card.TLabel").pack(side="left", padx=(10, 0))
+        self.quality_drop = self._drop(
+            mirror, self.quality_var, self._on_quality_change, expand=False, width=6
+        )
+        self.quality_drop.set_labels(list(screen_mirror.QUALITY_KEYS))
+        self._hint(page, "码率越高越清晰，USB 忙时可能更卡。")
+        toast = self._row(page)
+        self._check(toast, "同步系统弹窗", self.toast_mirror, self._on_toast_mirror_change)
+        self._hint(page, "开了后系统通知的标题、正文、按钮会显示到音箱，点按钮即点系统通知。")
 
-        ttk.Label(card, text="麦克风", style="CardDim.TLabel").pack(anchor="w", padx=16)
-        self.meter = tk.Canvas(card, height=22, bg="#1E2A44", highlightthickness=0)
-        self.meter.pack(fill="x", padx=16, pady=(0, 8))
-        ttk.Label(card, text="扬声器", style="CardDim.TLabel").pack(anchor="w", padx=16)
-        self.spk_meter = tk.Canvas(card, height=22, bg="#1E2A44", highlightthickness=0)
-        self.spk_meter.pack(fill="x", padx=16, pady=(0, 8))
-        self.pc_line = ttk.Label(card, text="电脑状态：连接音箱后显示在音箱屏幕上。", style="CardDim.TLabel")
-        self.pc_line.pack(anchor="w", padx=16, pady=(0, 16))
+    def _build_tab_settings(self, nb: ttk.Notebook) -> None:
+        page = self._page(nb, "设置")
+        boot = self._row(page)
+        self._check(boot, "开机自启动", self.autostart, self._on_autostart_change)
+        self._hint(page, "登录 Windows 后自动打开上位机。")
 
+    def _build_tab_log(self, nb: ttk.Notebook) -> None:
+        page = ttk.Frame(nb, style="Card.TFrame")
+        nb.add(page, text="  日志  ")
         self.log = tk.Text(
-            self.root,
-            height=14,
+            page,
+            height=8,
             bg="#10182A",
             fg=TEXT,
             insertbackground=TEXT,
             relief="flat",
-            font=("Consolas", 10),
+            font=("Consolas", self._font),
         )
-        self.log.pack(fill="both", expand=True, padx=20, pady=(0, 8))
-        hint = "CABLE Input 已从系统播放列表隐藏，上位机仍会把麦克风灌进去。微信选 CABLE Output。扬声器选 Hi-Fi Cable Input。"
-        ttk.Label(self.root, text=hint, style="Dim.TLabel").pack(anchor="w", padx=20, pady=(0, 16))
-        self._log("adb: " + (self.adb or "未找到内置 adb"))
-        if not self.sink.available():
-            self._log("音频库未安装：在 host 目录执行  pip install -r requirements.txt")
+        self.log.pack(fill="both", expand=True, padx=self._pad, pady=self._pad)
 
     def _ui(self, fn) -> None:
         try:
@@ -2159,9 +2168,10 @@ class HostApp:
     def _draw_meter(self, canvas: tk.Canvas, level: float) -> None:
         canvas.delete("all")
         width = max(canvas.winfo_width(), 10)
+        height = max(canvas.winfo_height(), 8)
         fill = max(4, int(width * min(1.0, level * 2.2)))
         color = GREEN if level < 0.35 else AMBER if level < 0.7 else RED
-        canvas.create_rectangle(0, 0, fill, 22, fill=color, outline="")
+        canvas.create_rectangle(0, 0, fill, height, fill=color, outline="")
 
     def _log(self, line: str) -> None:
         if self._closing:
@@ -2219,6 +2229,7 @@ def _pick_label(labels: list[str], saved: str, fallback: str | None) -> str:
 
 
 def main() -> None:
+    _enable_dpi()
     root = tk.Tk()
     app = HostApp(root)
     root.protocol("WM_DELETE_WINDOW", app._on_close)
