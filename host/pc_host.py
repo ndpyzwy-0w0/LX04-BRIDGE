@@ -1533,11 +1533,16 @@ class HostApp:
             self._spawn_stats(force=True)
 
     def _spawn_stats(self, force: bool = False) -> None:
+        if not self.connected:
+            return
+        want_full = bool(self.pc_stats_enabled.get()) and (force or not self.mirror.running())
+        if not want_full:
+            try:
+                self.client.send_control("pc_stats", **pc_stats.clock_fields())
+            except Exception:
+                pass
+            return
         if self._stats_busy:
-            return
-        if not self.connected or not self.pc_stats_enabled.get():
-            return
-        if self.mirror.running() and not force:
             return
         self._stats_busy = True
         disk = self._selected_disk()

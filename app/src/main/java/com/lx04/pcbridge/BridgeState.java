@@ -62,6 +62,9 @@ final class BridgeState {
     volatile float pcNetUp;
     volatile long pcUptime;
     volatile int pcCores;
+    volatile long pcNowMs;
+    volatile long pcNowAt;
+    volatile int pcTzMin;
     final HudStyle hudStyle = new HudStyle();
     final SparkHistory sparks = new SparkHistory();
 
