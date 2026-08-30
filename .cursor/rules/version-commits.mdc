@@ -14,8 +14,8 @@ After a **usable** host or APK change, pack and commit **by default**. Do not wa
 - Shared helper: `release_git.py`
 
 - Keep `VERSION.txt` as the release number (APK `versionCode` / commit title). Use `--bump` for each usable release
-- Commit source, `VERSION.txt`, `dist/LX04-PC-Bridge-Host.exe` (current only), and `dist/LX04-PC-Bridge.apk` (current only)
-- Rollback is git history of those two current artifacts. Do **not** write `dist/LX04-PC-Bridge-Host-v*.exe` or `dist/LX04-PC-Bridge-v*.apk`
+- Commit source, `VERSION.txt`, and `dist/LX04-PC-Bridge.apk` (current only). Host EXE stays in `dist/` locally and is gitignored (GitHub 100MB limit)
+- Rollback for APK is git history of the current APK. Do **not** write `dist/LX04-PC-Bridge-Host-v*.exe` or `dist/LX04-PC-Bridge-v*.apk`
 - Do **not** `git add` extra EXEs/APKs in `dist/`, `dist/vbcable/`, `driver/`, or `host/lx04mic/`
 - VB-CABLE lives once under `host/vbcable/` (official pack). Do not duplicate it into git via `dist/`
 - Commit message: `Release vN: <why this version is usable>`

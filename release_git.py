@@ -23,7 +23,6 @@ COMMIT_PATHS = [
     "host-ui",
     "protocol.md",
     "local.properties.example",
-    "dist/LX04-PC-Bridge-Host.exe",
     "dist/LX04-PC-Bridge.apk",
 ]
 
@@ -54,7 +53,7 @@ def commit_usable_version(version: int, summary: str = "") -> bool:
         message = (
             f"Release v{version}: {why}\n"
             "\n"
-            "Rollback is git history of the current host EXE and APK."
+            "Rollback for the APK is git history of the current APK."
         )
         subprocess.check_call(["git", "commit", "-m", message], cwd=ROOT)
         print("Committed git snapshot for v" + str(version))

@@ -25,9 +25,8 @@ host/.venv/
 *.iml
 .externalNativeBuild/
 
-# Do not keep versioned host EXEs; git tracks dist/LX04-PC-Bridge-Host.exe only.
+# Host EXE is ~200MB (WinUI self-contained). Do not put it on git.
 dist/*.exe
-!dist/LX04-PC-Bridge-Host.exe
 dist/LX04-PC-Bridge-Host-v*.exe
 dist/LX04-PC-Bridge-Host.exe.running
 dist/*.old.exe
