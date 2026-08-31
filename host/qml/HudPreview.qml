@@ -85,6 +85,8 @@ ApplicationWindow {
         HudView {
             objectName: "hudView"
             editor: win.api
+            samples: host.hudSamples
+            light: host.lightTheme
             Layout.fillWidth: true
             Layout.preferredHeight: {
                 const aspect = Math.round(width * 480 / 800)

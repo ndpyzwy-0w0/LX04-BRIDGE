@@ -14,7 +14,7 @@ import winreg
 from ctypes import wintypes
 from pathlib import Path
 
-from qt_ui import HostBridge, QtLoop, Var, apply_fluent_style, assets_dir, bind_qml_assets, qml_dir
+from qt_ui import HostBridge, QtLoop, Var, apply_fluent_style, assets_dir, bind_qml_assets, qml_dir, register_hud_types
 
 
 def _host_dir() -> Path:
@@ -2395,6 +2395,7 @@ def main() -> None:
     engine.rootContext().setContextProperty("host", bridge)
     bind_qml_assets(engine)
     bridge.engine = engine
+    register_hud_types()
     qml = qml_dir() / "Main.qml"
     engine.load(str(qml))
     if not engine.rootObjects():

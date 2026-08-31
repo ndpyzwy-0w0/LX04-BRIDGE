@@ -251,10 +251,14 @@ class PainterCanvas:
 
 class HudView(QQuickPaintedItem):
     editorChanged = Signal()
+    samplesChanged = Signal()
+    lightChanged = Signal()
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self._editor = None
+        self._samples = {}
+        self._light = False
         self.setAntialiasing(True)
         self.setOpaquePainting(True)
         self.setFillColor(QColor("#0B1220"))
@@ -280,17 +284,48 @@ class HudView(QQuickPaintedItem):
 
     editor = Property(QObject, getEditor, setEditor, notify=editorChanged)
 
+    def getSamples(self):
+        return self._samples
+
+    def setSamples(self, value) -> None:
+        self._samples = dict(value or {})
+        self.samplesChanged.emit()
+        self._redraw()
+
+    samples = Property("QVariantMap", getSamples, setSamples, notify=samplesChanged)
+
+    def getLight(self) -> bool:
+        return self._light
+
+    def setLight(self, value: bool) -> None:
+        value = bool(value)
+        if self._light == value:
+            return
+        self._light = value
+        self.lightChanged.emit()
+        self._redraw()
+
+    light = Property(bool, getLight, setLight, notify=lightChanged)
+
+    @Slot()
+    def tick(self) -> None:
+        self._redraw()
+
     @Slot()
     def _redraw(self) -> None:
         self.update()
 
     def paint(self, painter: QPainter) -> None:
-        editor = self._editor
         w, h = int(self.width()), int(self.height())
-        if editor is None or editor.session is None or w < 4 or h < 4:
-            painter.fillRect(0, 0, max(1, w), max(1, h), QColor("#0B1220"))
+        if w < 4 or h < 4:
             return
-        hud_preview.draw_hud(PainterCanvas(painter, w, h), editor.session.state)
+        hud_preview.set_live_samples(self._samples)
+        editor = self._editor
+        if editor is not None and editor.session is not None:
+            state = editor.session.state
+        else:
+            state = hud_preview.live_state(self._light)
+        hud_preview.draw_hud(PainterCanvas(painter, w, h), state)
 
 
 def register_hud_types() -> None:
@@ -1139,6 +1174,21 @@ class HostBridge(QObject):
     @Property(str, notify=statsChanged)
     def statNetDown(self) -> str:
         return self._stat_net_down
+
+    @Property("QVariantMap", notify=statsChanged)
+    def hudSamples(self) -> dict:
+        return {
+            "cpu": self._stat_cpu,
+            "cpuT": self._stat_cpu_temp,
+            "gpu": self._stat_gpu,
+            "gpuT": self._stat_gpu_temp,
+            "ram": self._stat_ram,
+            "ramGB": self._stat_ram_sub,
+            "disk": self._stat_disk,
+            "diskGB": self._stat_disk_sub,
+            "netD": self._stat_net_down,
+            "netU": self._stat_net_up,
+        }
 
     @Property(str, constant=True)
     def appVersion(self) -> str:

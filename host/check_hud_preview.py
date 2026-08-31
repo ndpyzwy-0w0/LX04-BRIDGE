@@ -23,6 +23,11 @@ def main() -> None:
     assert abs(scale - 1.0) < 1e-9 and ox == 0 and abs(oy - 240) < 1e-9
     src = Path(hud_preview.__file__).read_text(encoding="utf-8")
     assert "PreviewWindow" not in src
+    hud_preview.set_live_samples({"cpu": "17%"})
+    assert hud_preview.metric_sample("cpu") == "17%"
+    assert hud_preview.metric_sample("gpu") == "—"
+    hud_preview.set_live_samples({})
+    assert hud_preview.metric_sample("cpu") == "88%"
     session = hud_preview.HudSession(False)
     session.set_title(0, "CPU")
     assert session.state["cards"][0]["title"] == "CPU"
