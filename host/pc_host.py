@@ -10,11 +10,12 @@ import socket
 import sys
 import threading
 import time
-import tkinter as tk
 import winreg
 from ctypes import wintypes
 from pathlib import Path
-from tkinter import filedialog, messagebox, ttk
+
+from qt_ui import HostBridge, QtLoop, Var, apply_fluent_style, qml_dir
+
 
 def _host_dir() -> Path:
     if getattr(sys, "frozen", False):
@@ -252,27 +253,22 @@ def _tray_kind(ev: int) -> str:
     return ""
 
 
-def _toplevel_hwnd(widget: tk.Misc) -> int:
-    widget.update_idletasks()
-    inner = int(widget.winfo_id())
-    top = _user32.GetAncestor(inner, _GA_ROOT)
-    return int(top or inner)
-
-
-def _show_tk_window(widget: tk.Misc) -> None:
-    widget.deiconify()
-    widget.update_idletasks()
+def _show_host_window(window) -> None:
+    if window is None:
+        return
+    window.show()
+    window.raise_()
     try:
-        widget.wm_state("normal")
-    except tk.TclError:
+        window.requestActivate()
+    except Exception:
         pass
-    widget.update()
-    hwnd = _toplevel_hwnd(widget)
+    try:
+        hwnd = int(window.winId())
+    except Exception:
+        hwnd = 0
     if hwnd:
         _user32.ShowWindow(hwnd, _SW_RESTORE)
         _user32.SetForegroundWindow(hwnd)
-    widget.lift()
-    widget.focus_force()
 
 
 def _tray_class_proc(hwnd, msg, wparam, lparam):
@@ -577,117 +573,23 @@ def _read_exact(sock: socket.socket, size: int) -> bytes:
     return bytes(chunks)
 
 
-class ScrollPane(ttk.Frame):
-    """Tab body that scrolls when the window is shorter than the controls."""
-
-    def __init__(self, parent: tk.Misc, body_bg: str) -> None:
-        super().__init__(parent, style="TFrame")
-        self.canvas = tk.Canvas(self, bg=body_bg, highlightthickness=0, bd=0)
-        self.bar = ttk.Scrollbar(self, orient="vertical", command=self.canvas.yview)
-        self.body = ttk.Frame(self.canvas, style="Card.TFrame")
-        self._win = self.canvas.create_window((0, 0), window=self.body, anchor="nw")
-        self.canvas.configure(yscrollcommand=self._on_scroll)
-        self.canvas.pack(side="left", fill="both", expand=True)
-        self.body.bind("<Configure>", self._fit)
-        self.canvas.bind("<Configure>", self._stretch)
-        self.bind("<Enter>", lambda _e: self._wheel(True))
-        self.bind("<Leave>", lambda _e: self._wheel(False))
-        self.bind("<Unmap>", lambda _e: self._wheel(False))
-
-    def _on_scroll(self, first, last) -> None:
-        self.bar.set(first, last)
-        if float(first) <= 0 and float(last) >= 1:
-            self.bar.pack_forget()
-        elif not self.bar.winfo_ismapped():
-            self.bar.pack(side="right", fill="y")
-
-    def _fit(self, _event=None) -> None:
-        self.canvas.configure(scrollregion=self.canvas.bbox("all"))
-
-    def _stretch(self, event) -> None:
-        self.canvas.itemconfigure(self._win, width=event.width)
-
-    def _wheel(self, on: bool) -> None:
-        if on:
-            self.canvas.bind_all("<MouseWheel>", self._on_wheel)
-        else:
-            self.canvas.unbind_all("<MouseWheel>")
-
-    def _on_wheel(self, event: tk.Event) -> str | None:
-        if float(self.canvas.yview()[0]) <= 0 and float(self.canvas.yview()[1]) >= 1:
-            return None
-        self.canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
-        return "break"
-
-
 class ChoiceDrop:
-    """Menubutton dropdown; ttk Combobox popdowns close on mouse-up on this UI."""
+    """Label list pushed to the QML ComboBox."""
 
-    def __init__(
-        self,
-        parent: tk.Misc,
-        variable: tk.StringVar,
-        command,
-        bg: str,
-        fg: str,
-        *,
-        padx: int = 8,
-        expand: bool = True,
-        width: int | None = None,
-        font_size: int = 10,
-    ) -> None:
-        self.variable = variable
-        self.command = command
+    def __init__(self, kind: str, bridge: HostBridge) -> None:
+        self.kind = kind
+        self.bridge = bridge
         self.labels: list[str] = []
-        self.button = ttk.Menubutton(parent, textvariable=variable, style="Drop.TMenubutton", direction="below")
-        if width is not None:
-            self.button.configure(width=width)
-        self.menu = tk.Menu(
-            self.button,
-            tearoff=False,
-            font=("Segoe UI", font_size),
-            bg=bg,
-            fg=fg,
-            activebackground="#C5E9D6",
-            activeforeground=fg,
-            relief="solid",
-            borderwidth=1,
-        )
-        self.button["menu"] = self.menu
-        pack: dict[str, object] = {"side": "left", "padx": padx}
-        if expand:
-            pack.update(fill="x", expand=True)
-        self.button.pack(**pack)
-        self.button.bind("<MouseWheel>", self._on_wheel)
 
     def set_labels(self, labels: list[str]) -> None:
         self.labels = list(labels)
-        self.menu.delete(0, "end")
-        for label in self.labels:
-            self.menu.add_radiobutton(
-                label=label,
-                variable=self.variable,
-                value=label,
-                command=self.command,
-            )
-
-    def _on_wheel(self, event: tk.Event) -> str:
-        if not self.labels:
-            return "break"
-        current = self.variable.get()
-        try:
-            idx = self.labels.index(current)
-        except ValueError:
-            idx = 0
-        idx = (idx + (-1 if event.delta > 0 else 1)) % len(self.labels)
-        self.variable.set(self.labels[idx])
-        self.command()
-        return "break"
+        self.bridge.set_labels(self.kind, self.labels)
 
 
 class HostApp:
-    def __init__(self, root: tk.Tk) -> None:
+    def __init__(self, root: QtLoop, bridge: HostBridge) -> None:
         self.root = root
+        self.bridge = bridge
         self.client = BridgeClient(self._on_bridge_event)
         self.sink = AudioSink()
         self.hw = HardwareMic()
@@ -701,19 +603,19 @@ class HostApp:
         self._gain_sent_at = 0.0
         self._prev_render: tuple[str, str] | None = None
         self.play_peak = 0.0
-        self.mic_enabled = tk.BooleanVar(value=True)
-        self.spk_enabled = tk.BooleanVar(value=False)
-        self.set_default_spk = tk.BooleanVar(value=True)
-        self.volume_sync = tk.BooleanVar(value=False)
-        self.pc_stats_enabled = tk.BooleanVar(value=True)
-        self.upside_down = tk.BooleanVar(value=False)
-        self.light_theme = tk.BooleanVar(value=False)
-        self.toast_mirror = tk.BooleanVar(value=False)
-        self.autostart = tk.BooleanVar(value=False)
-        self.minimize_to_tray = tk.BooleanVar(value=False)
-        self.disk_var = tk.StringVar()
-        self.monitor_var = tk.StringVar()
-        self.quality_var = tk.StringVar(value=screen_mirror.DEFAULT_QUALITY)
+        self.mic_enabled = Var(True)
+        self.spk_enabled = Var(False)
+        self.set_default_spk = Var(True)
+        self.volume_sync = Var(False)
+        self.pc_stats_enabled = Var(True)
+        self.upside_down = Var(False)
+        self.light_theme = Var(False)
+        self.toast_mirror = Var(False)
+        self.autostart = Var(False)
+        self.minimize_to_tray = Var(False)
+        self.disk_var = Var("")
+        self.monitor_var = Var("")
+        self.quality_var = Var(screen_mirror.DEFAULT_QUALITY)
         self._saved_disk = ""
         self._saved_monitor = ""
         self._monitors: list[screen_mirror.Monitor] = []
@@ -722,8 +624,19 @@ class HostApp:
         self.toast = toast_mirror.ToastSender(self._on_toast_change, self._on_toast_log)
         self._toast_logged = False
         self._toast_sync_after = None
-        self.inject_var = tk.StringVar()
-        self.spk_dev_var = tk.StringVar()
+        self.inject_var = Var("")
+        self.spk_dev_var = Var("")
+        self.device_var = Var("正在扫描…")
+        self.mic_var = Var("尚未识别")
+        self.gain_var = Var(100)
+        self.gain_label_var = Var("100%  ·  0.0 dB")
+        self.device_drop = ChoiceDrop("device", bridge)
+        self.inject_drop = ChoiceDrop("inject", bridge)
+        self.spk_drop = ChoiceDrop("spk", bridge)
+        self.disk_drop = ChoiceDrop("disk", bridge)
+        self.monitor_drop = ChoiceDrop("monitor", bridge)
+        self.quality_drop = ChoiceDrop("quality", bridge)
+        self.quality_drop.set_labels(list(screen_mirror.QUALITY_KEYS))
         self._inject_devices: list[tuple[str, str | int, str]] = []
         self._spk_devices: list[tuple[str, str]] = []
         self._routes_ready = False
@@ -737,6 +650,8 @@ class HostApp:
         self._hud_need_reconcile = False
         self._hud_from_apk = False
         self._hud_bg = {"sel": -1, "used": [False, False, False], "alpha": 100}
+        self._hud_tk = None
+        self._hud_pump = None
         self._route_lock = threading.Lock()
         self._route_gen = 0
         self._cable_key = None
@@ -754,285 +669,14 @@ class HostApp:
         self._tray_last_at = 0.0
         self._tray_ping_at = 0.0
         self._host_hwnd = 0
-        self._build()
         threading.Thread(target=pc_stats.snapshot, daemon=True).start()
         self._load_route_vars()
-        self.root.after(0, self._boot)
-        self.root.after(400, self._tick)
 
-    def _build(self) -> None:
-        self.root.title(_HOST_TITLE)
-        self.root.configure(bg=BG)
-        self.root.update_idletasks()
-        m = _ui_metrics(self.root.winfo_screenwidth(), self.root.winfo_screenheight(), self.root.winfo_fpixels("1i"))
-        self._font = int(m["font"])
-        self._pad = int(m["pad"])
-        self._meter_h = int(m["meter"])
-        self._scale = float(m["scale"])
-        self.root.geometry(f"{int(m['w'])}x{int(m['h'])}")
-        self.root.minsize(min(560, int(m["w"])), min(420, int(m["h"])))
-        x = max(0, (self.root.winfo_screenwidth() - int(m["w"])) // 2)
-        y = max(0, (self.root.winfo_screenheight() - int(m["h"])) // 2)
-        self.root.geometry(f"{int(m['w'])}x{int(m['h'])}+{x}+{y}")
-
-        fs = self._font
-        title_fs = max(14, min(22, round(18 * self._scale)))
-        card_fs = max(fs, min(14, fs + 1))
-        style = ttk.Style()
-        try:
-            style.theme_use("clam")
-        except tk.TclError:
-            pass
-        style.configure("TFrame", background=BG)
-        style.configure("Card.TFrame", background=PANEL)
-        style.configure("TLabel", background=BG, foreground=TEXT, font=("Segoe UI", fs))
-        style.configure("Title.TLabel", background=BG, foreground=TEXT, font=("Segoe UI Semibold", title_fs))
-        style.configure("Dim.TLabel", background=BG, foreground=DIM, font=("Segoe UI", fs))
-        style.configure("Card.TLabel", background=PANEL, foreground=TEXT, font=("Segoe UI", card_fs))
-        style.configure("CardDim.TLabel", background=PANEL, foreground=DIM, font=("Segoe UI", fs))
-        style.configure("TButton", font=("Segoe UI", fs), padding=(max(6, fs - 2), max(3, fs // 3)))
-        style.configure("TNotebook", background=BG, borderwidth=0)
-        style.configure(
-            "TNotebook.Tab",
-            background=PANEL,
-            foreground=TEXT,
-            padding=(max(10, fs), max(5, fs // 2)),
-            font=("Segoe UI", fs),
-        )
-        style.map(
-            "TNotebook.Tab",
-            background=[("selected", "#1E2A44"), ("active", "#1A2438")],
-            foreground=[("selected", TEXT), ("active", TEXT)],
-        )
-        # Windows ttk Combobox keeps a light native field; force dark text so it stays readable.
-        style.configure(
-            "TCombobox",
-            fieldbackground=COMBO_BG,
-            background=COMBO_BG,
-            foreground=COMBO_FG,
-            arrowcolor=COMBO_FG,
-            insertcolor=COMBO_FG,
-            padding=max(3, fs // 3),
-        )
-        style.map(
-            "TCombobox",
-            fieldbackground=[("readonly", COMBO_BG), ("disabled", "#D7DCE6")],
-            foreground=[("readonly", COMBO_FG), ("disabled", "#5B6B88")],
-            selectbackground=[("readonly", "#C5E9D6")],
-            selectforeground=[("readonly", COMBO_FG)],
-        )
-        self.root.option_add("*TCombobox*Listbox.background", COMBO_BG)
-        self.root.option_add("*TCombobox*Listbox.foreground", COMBO_FG)
-        self.root.option_add("*TCombobox*Listbox.selectBackground", "#3DDC97")
-        self.root.option_add("*TCombobox*Listbox.selectForeground", "#0B1220")
-        self.root.option_add("*TCombobox*Listbox.font", f"Segoe UI {fs}")
-        style.configure(
-            "Drop.TMenubutton",
-            background=COMBO_BG,
-            foreground=COMBO_FG,
-            arrowcolor=COMBO_FG,
-            padding=max(3, fs // 3),
-            font=("Segoe UI", fs),
-            relief="raised",
-        )
-        style.map(
-            "Drop.TMenubutton",
-            background=[("active", COMBO_BG), ("pressed", COMBO_BG)],
-            foreground=[("active", COMBO_FG)],
-            arrowcolor=[("active", COMBO_FG)],
-        )
-        style.configure(
-            "Gain.Horizontal.TScale",
-            background=PANEL,
-            troughcolor="#1E2A44",
-            sliderthickness=max(14, min(22, fs + 6)),
-        )
-
-        pad = self._pad
-        head = ttk.Frame(self.root)
-        head.pack(fill="x", padx=pad, pady=(pad, 4))
-        ttk.Label(head, text="LX04 PC Bridge", style="Title.TLabel").pack(anchor="w")
-        self.headline = ttk.Label(head, text="未连接", style="TLabel")
-        self.headline.pack(anchor="w", pady=(4, 0))
-        self.detail = ttk.Label(head, text="插入数据线后点刷新，再点连接。", style="Dim.TLabel")
-        self.detail.pack(anchor="w")
-        head.bind("<Configure>", self._reflow_header)
-
-        nb = ttk.Notebook(self.root)
-        nb.pack(fill="both", expand=True, padx=pad, pady=(8, pad))
-        self._build_tab_connect(nb)
-        self._build_tab_audio(nb)
-        self._build_tab_screen(nb)
-        self._build_tab_settings(nb)
-        self._build_tab_log(nb)
+    def _boot_ui(self) -> None:
         self._log("adb: " + (self.adb or "未找到内置 adb"))
         if not self.sink.available():
             self._log("音频库未安装：在 host 目录执行  pip install -r requirements.txt")
-
-    def _page(self, nb: ttk.Notebook, title: str) -> ttk.Frame:
-        pane = ScrollPane(nb, PANEL)
-        nb.add(pane, text=f"  {title}  ")
-        return pane.body
-
-    def _row(self, parent: tk.Misc, pady: tuple[int, int] | int | None = None) -> ttk.Frame:
-        if pady is None:
-            pady = (self._pad if not parent.winfo_children() else 0, 8)
-        frame = ttk.Frame(parent, style="Card.TFrame")
-        frame.pack(fill="x", padx=self._pad, pady=pady)
-        return frame
-
-    def _check(self, parent: tk.Misc, text: str, variable: tk.Variable, command=None, **pack) -> tk.Checkbutton:
-        widget = tk.Checkbutton(
-            parent,
-            text=text,
-            variable=variable,
-            command=command,
-            bg=PANEL,
-            fg=TEXT,
-            selectcolor="#1E2A44",
-            activebackground=PANEL,
-            activeforeground=TEXT,
-            highlightthickness=0,
-            font=("Segoe UI", self._font),
-        )
-        widget.pack(side="left", **pack)
-        return widget
-
-    def _hint(self, parent: tk.Misc, text: str, style: str = "CardDim.TLabel") -> ttk.Label:
-        lab = ttk.Label(parent, text=text, style=style)
-        lab.pack(anchor="w", fill="x", padx=self._pad, pady=(0, 8))
-        lab.bind("<Configure>", lambda e, w=lab: w.configure(wraplength=max(120, e.width - 4)))
-        return lab
-
-    def _drop(self, parent, variable, command, *, padx: int = 8, expand: bool = True, width: int | None = None) -> ChoiceDrop:
-        return ChoiceDrop(
-            parent,
-            variable,
-            command,
-            COMBO_BG,
-            COMBO_FG,
-            padx=padx,
-            expand=expand,
-            width=width,
-            font_size=self._font,
-        )
-
-    def _reflow_header(self, event) -> None:
-        width = max(200, event.width - 8)
-        self.headline.configure(wraplength=width)
-        self.detail.configure(wraplength=width)
-
-    def _build_tab_connect(self, nb: ttk.Notebook) -> None:
-        page = self._page(nb, "连接")
-        row = self._row(page)
-        ttk.Label(row, text="USB 设备", style="Card.TLabel").pack(side="left")
-        self.device_var = tk.StringVar(value="正在扫描…")
-        self.device_drop = self._drop(row, self.device_var, lambda: None)
-        ttk.Button(row, text="刷新", command=self.refresh_devices).pack(side="left")
-        ttk.Button(row, text="连接", command=self.connect).pack(side="left", padx=6)
-        ttk.Button(row, text="断开", command=self.disconnect).pack(side="left")
-        self._hint(page, "USB 连接小爱触屏音箱 LX04。插上线后点刷新，再点连接。")
-        ttk.Label(page, text="麦克风", style="CardDim.TLabel").pack(anchor="w", padx=self._pad)
-        self.meter = tk.Canvas(page, height=self._meter_h, bg="#1E2A44", highlightthickness=0)
-        self.meter.pack(fill="x", padx=self._pad, pady=(0, 8))
-        ttk.Label(page, text="扬声器", style="CardDim.TLabel").pack(anchor="w", padx=self._pad)
-        self.spk_meter = tk.Canvas(page, height=self._meter_h, bg="#1E2A44", highlightthickness=0)
-        self.spk_meter.pack(fill="x", padx=self._pad, pady=(0, self._pad))
-
-    def _build_tab_audio(self, nb: ttk.Notebook) -> None:
-        page = self._page(nb, "音频")
-        mic_row = self._row(page)
-        self._check(mic_row, "麦克风 → 电脑", self.mic_enabled, self._on_mic_route_change)
-        self.inject_drop = self._drop(mic_row, self.inject_var, self._on_mic_route_change)
-        spk_row = self._row(page)
-        self._check(spk_row, "电脑 → 音箱", self.spk_enabled, self._on_spk_route_change)
-        self.spk_drop = self._drop(spk_row, self.spk_dev_var, self._on_spk_route_change)
-        self._check(spk_row, "设为默认播放", self.set_default_spk, self._on_spk_route_change, padx=(8, 0))
-        vol_row = self._row(page)
-        self._check(vol_row, "同步系统音量", self.volume_sync, self._on_volume_sync_change)
-        self._hint(page, "开了后电脑和音箱音量一起变；关掉则各自调节、互不影响。")
-        wechat = self._row(page)
-        ttk.Label(wechat, text="微信请选麦克风", style="Card.TLabel").pack(side="left")
-        self.mic_var = tk.StringVar(value="尚未识别")
-        ttk.Label(wechat, textvariable=self.mic_var, style="Card.TLabel").pack(side="left", padx=8)
-        gain_row = self._row(page)
-        ttk.Label(gain_row, text="麦克风增益", style="Card.TLabel").pack(side="left")
-        self.gain_var = tk.DoubleVar(value=100)
-        self.gain_scale = ttk.Scale(
-            gain_row,
-            from_=0,
-            to=300,
-            orient="horizontal",
-            variable=self.gain_var,
-            command=self._on_gain,
-            style="Gain.Horizontal.TScale",
-        )
-        self.gain_scale.pack(side="left", padx=10, fill="x", expand=True)
-        self.gain_label_var = tk.StringVar(value="100%  ·  0.0 dB")
-        ttk.Label(gain_row, textvariable=self.gain_label_var, style="Card.TLabel").pack(side="left")
-        tools = self._row(page)
-        ttk.Button(tools, text="试音", command=self._on_test_tone).pack(side="left")
-        ttk.Button(tools, text="音箱试音", command=self._on_speaker_test_tone).pack(side="left", padx=6)
-        ttk.Button(tools, text="静音切换", command=lambda: self.client.send_control("toggle_mute")).pack(side="left", padx=6)
-        ttk.Button(tools, text="安装 VB-CABLE", command=self._install_vb).pack(side="right")
-        ttk.Button(tools, text="安装 Hi-Fi Cable", command=self._install_hifi).pack(side="right", padx=6)
-        self._hint(
-            page,
-            "CABLE Input 已从系统播放列表隐藏，上位机仍会把麦克风灌进去。微信选 CABLE Output。扬声器选 Hi-Fi Cable Input。",
-        )
-
-    def _build_tab_screen(self, nb: ttk.Notebook) -> None:
-        page = self._page(nb, "屏幕")
-        look = self._row(page)
-        self._check(look, "浅色", self.light_theme, self._on_light_theme_change)
-        self._check(look, "吊装", self.upside_down, self._on_upside_down_change, padx=(12, 0))
-        ttk.Label(look, text="倒转音箱屏幕", style="CardDim.TLabel").pack(side="left", padx=8)
-        stats = self._row(page)
-        self._check(stats, "音箱显示电脑状态", self.pc_stats_enabled, self._on_pc_stats_change)
-        ttk.Label(stats, text="磁盘", style="Card.TLabel").pack(side="left", padx=(12, 4))
-        self.disk_drop = self._drop(stats, self.disk_var, self._on_disk_change, padx=0)
-        hud = self._row(page)
-        ttk.Button(hud, text="预览屏幕", command=self._open_hud_preview).pack(side="left")
-        ttk.Button(hud, text="上传背景", command=self._upload_hud_bg).pack(side="left", padx=6)
-        ttk.Button(hud, text="CPU 温度 / Afterburner", command=self._on_afterburner).pack(side="left")
-        self.pc_line = ttk.Label(page, text="电脑状态：连接音箱后显示在音箱屏幕上。", style="CardDim.TLabel")
-        self.pc_line.pack(anchor="w", fill="x", padx=self._pad, pady=(0, 8))
-        self.pc_line.bind("<Configure>", lambda e, w=self.pc_line: w.configure(wraplength=max(120, e.width - 4)))
-        mirror = self._row(page)
-        ttk.Label(mirror, text="同步屏幕", style="Card.TLabel").pack(side="left")
-        self.monitor_drop = self._drop(mirror, self.monitor_var, self._on_monitor_change)
-        ttk.Label(mirror, text="码率", style="Card.TLabel").pack(side="left", padx=(10, 0))
-        self.quality_drop = self._drop(
-            mirror, self.quality_var, self._on_quality_change, expand=False, width=6
-        )
-        self.quality_drop.set_labels(list(screen_mirror.QUALITY_KEYS))
-        self._hint(page, "码率越高越清晰，USB 忙时可能更卡。")
-        toast = self._row(page)
-        self._check(toast, "同步系统弹窗", self.toast_mirror, self._on_toast_mirror_change)
-        self._hint(page, "开了后系统通知的标题、正文、按钮会显示到音箱，点按钮即点系统通知。")
-
-    def _build_tab_settings(self, nb: ttk.Notebook) -> None:
-        page = self._page(nb, "设置")
-        boot = self._row(page)
-        self._check(boot, "开机自启动", self.autostart, self._on_autostart_change)
-        self._hint(page, "登录 Windows 后自动打开上位机。")
-        tray = self._row(page)
-        self._check(tray, "关闭后最小化到托盘", self.minimize_to_tray, self._on_tray_pref_change)
-        self._hint(page, "开了后点窗口关闭会藏到托盘继续跑。左键图标恢复窗口，右键可选退出。")
-
-    def _build_tab_log(self, nb: ttk.Notebook) -> None:
-        page = ttk.Frame(nb, style="Card.TFrame")
-        nb.add(page, text="  日志  ")
-        self.log = tk.Text(
-            page,
-            height=8,
-            bg="#10182A",
-            fg=TEXT,
-            insertbackground=TEXT,
-            relief="flat",
-            font=("Consolas", self._font),
-        )
-        self.log.pack(fill="both", expand=True, padx=self._pad, pady=self._pad)
+        self._boot()
 
     def _ui(self, fn) -> None:
         try:
@@ -1667,38 +1311,57 @@ class HostApp:
         self._start_speaker(speaker=speaker, set_default=set_default, inject=inject, mic_on=mic_on)
 
     def _install_vb(self) -> None:
-        if not messagebox.askokcancel("LX04", vb_cable.DONATE_TEXT):
+        if not self.bridge.askokcancel(vb_cable.DONATE_TEXT):
             return
         self._log(vb_cable.run_official_setup())
         self.refresh_audio_devices()
 
     def _install_hifi(self) -> None:
-        if not messagebox.askokcancel("LX04", hifi_cable.DONATE_TEXT):
+        if not self.bridge.askokcancel(hifi_cable.DONATE_TEXT):
             return
         self._log(hifi_cable.run_official_setup())
         self.refresh_audio_devices()
 
     def _on_afterburner(self) -> None:
         if afterburner.sensors_live():
-            messagebox.showinfo("LX04", afterburner.RUNNING_TEXT)
+            self.bridge.showinfo(afterburner.RUNNING_TEXT)
             return
         exe = afterburner.find_exe()
         if exe is not None:
-            if not messagebox.askokcancel("LX04", afterburner.LAUNCH_TEXT):
+            if not self.bridge.askokcancel(afterburner.LAUNCH_TEXT):
                 return
             self._log(afterburner.launch(exe))
             self.root.after(2000, lambda: self._spawn_stats(force=True))
             return
-        if not messagebox.askokcancel("LX04", afterburner.DOWNLOAD_TEXT):
+        if not self.bridge.askokcancel(afterburner.DOWNLOAD_TEXT):
             return
         self._log(afterburner.open_download())
 
     def _open_hud_preview(self) -> None:
+        import tkinter as tk
+        from PySide6.QtCore import QTimer
+
+        if self._hud_tk is None:
+            self._hud_tk = tk.Tk()
+            self._hud_tk.withdraw()
+            pump = QTimer(self.bridge)
+            pump.timeout.connect(self._pump_hud)
+            pump.start(33)
+            self._hud_pump = pump
         hud_preview.open_window(
-            self.root,
+            self._hud_tk,
             light=bool(self.light_theme.get()),
             on_change=self._on_hud_style_change,
         )
+
+    def _pump_hud(self) -> None:
+        tk_root = self._hud_tk
+        if tk_root is None:
+            return
+        try:
+            tk_root.update()
+        except Exception:
+            pass
 
     def _on_hud_bg_status(self, data: dict) -> None:
         payload = data.get("hudBg")
@@ -1720,21 +1383,15 @@ class HostApp:
 
     def _upload_hud_bg(self) -> None:
         if not self.connected:
-            messagebox.showinfo("LX04", "请先连接音箱，再上传监视页背景。")
+            self.bridge.showinfo("请先连接音箱，再上传监视页背景。")
             return
-        path = filedialog.askopenfilename(
-            title="选择监视页背景",
-            filetypes=[
-                ("图片", "*.jpg;*.jpeg;*.png;*.bmp;*.gif;*.webp"),
-                ("所有文件", "*.*"),
-            ],
-        )
+        path = self.bridge.pick_image()
         if not path:
             return
         try:
             jpeg = screen_mirror.encode_still(path)
         except Exception as exc:
-            messagebox.showerror("LX04", "无法处理这张图片：\n" + str(exc))
+            self.bridge.showerror("无法处理这张图片：\n" + str(exc))
             return
         slot = self._pick_hud_bg_slot()
         if slot is None:
@@ -1749,36 +1406,7 @@ class HostApp:
         for i, taken in enumerate(used):
             if not taken:
                 return i
-        win = tk.Toplevel(self.root)
-        win.title("背景库已满")
-        win.configure(bg=BG)
-        win.resizable(False, False)
-        result: dict[str, int | None] = {"slot": None}
-        ttk.Label(
-            win,
-            text="音箱已存 3 张背景，请选择要替换的一张：",
-            style="TLabel",
-        ).pack(anchor="w", padx=16, pady=(16, 8))
-        row = ttk.Frame(win)
-        row.pack(fill="x", padx=16, pady=(0, 8))
-
-        def choose(index: int) -> None:
-            result["slot"] = index
-            win.destroy()
-
-        for i in range(3):
-            ttk.Button(row, text=f"替换 {i + 1}", command=lambda n=i: choose(n)).pack(
-                side="left", padx=(0, 8)
-            )
-        ttk.Button(win, text="取消", command=win.destroy).pack(anchor="e", padx=16, pady=(0, 16))
-        win.transient(self.root)
-        win.grab_set()
-        win.update_idletasks()
-        x = self.root.winfo_rootx() + 80
-        y = self.root.winfo_rooty() + 80
-        win.geometry(f"+{x}+{y}")
-        self.root.wait_window(win)
-        return result["slot"]
+        return self.bridge.pick_bg_slot()
 
     def _on_hud_style_change(self, state: dict, reset: bool = False) -> None:
         if self._hud_from_apk:
@@ -1953,7 +1581,7 @@ class HostApp:
 
     def _on_speaker_test_tone(self) -> None:
         if not self.connected:
-            messagebox.showerror("LX04", "请先连接音箱。")
+            self.bridge.showerror("请先连接音箱。")
             return
         rate = 48000
         frames = int(rate * 0.7)
@@ -1979,7 +1607,7 @@ class HostApp:
 
     def _on_test_tone(self) -> None:
         if not self.mic_enabled.get():
-            messagebox.showerror("LX04", "请先勾选「麦克风 → 电脑」，并选好 CABLE Input。")
+            self.bridge.showerror("请先勾选「麦克风 → 电脑」，并选好 CABLE Input。")
             return
         try:
             if not self.sink.running():
@@ -1988,7 +1616,7 @@ class HostApp:
             self.sink.play_test_tone()
             self._log("已送出试音。请看语音软件里「CABLE Output」的音量条是否跳动。")
         except Exception as exc:
-            messagebox.showerror("LX04", str(exc))
+            self.bridge.showerror(str(exc))
             self._log("试音失败: " + str(exc))
 
     def _on_gain(self, _value=None) -> None:
@@ -2026,11 +1654,11 @@ class HostApp:
 
     def connect(self) -> None:
         if not self.adb:
-            messagebox.showerror("LX04", "没有找到内置 adb。请重新打包上位机。")
+            self.bridge.showerror("没有找到内置 adb。请重新打包上位机。")
             return
         serial = self.device_var.get()
         if not self.devices or serial.startswith("没有") or serial.startswith("未找到"):
-            messagebox.showerror("LX04", "没有可用的 USB 设备。请拔掉数据线再插上，并打开 USB 调试。")
+            self.bridge.showerror("没有可用的 USB 设备。请拔掉数据线再插上，并打开 USB 调试。")
             return
         try:
             gadget = adb_usb.enable_usb_microphone(self.adb, serial)
@@ -2081,7 +1709,7 @@ class HostApp:
                 adb_usb.release_speaker_mic(self.adb, serial)
             except Exception:
                 pass
-            messagebox.showerror("LX04", str(exc))
+            self.bridge.showerror(str(exc))
             self._log("连接失败: " + str(exc))
 
     def _connect_tcp(self, serial: str) -> None:
@@ -2121,8 +1749,8 @@ class HostApp:
         if not self._closing:
             self.headline.configure(text="已断开")
             self.detail.configure(text="可以重新点连接。")
-            self._draw_meter(self.meter, 0)
-            self._draw_meter(self.spk_meter, 0)
+            self._draw_meter("mic", 0)
+            self._draw_meter("spk", 0)
         threading.Thread(target=self._shutdown_work, daemon=True, name="lx04-disc").start()
 
     def _shutdown_work(self) -> None:
@@ -2156,6 +1784,15 @@ class HostApp:
         self._session = False
         self.connected = False
         self._tray_remove()
+        pump = getattr(self, "_hud_pump", None)
+        if pump is not None:
+            pump.stop()
+        if self._hud_tk is not None:
+            try:
+                self._hud_tk.destroy()
+            except Exception:
+                pass
+            self._hud_tk = None
         try:
             self.root.withdraw()
             self.root.update_idletasks()
@@ -2295,7 +1932,7 @@ class HostApp:
 
     def _hide_to_tray(self) -> None:
         try:
-            self._host_hwnd = _toplevel_hwnd(self.root)
+            self._host_hwnd = int(self.root.winfo_id())
         except Exception:
             self._host_hwnd = 0
         if not self._tray_add():
@@ -2318,7 +1955,7 @@ class HostApp:
             if self._host_hwnd:
                 _user32.ShowWindow(self._host_hwnd, _SW_RESTORE)
                 _user32.SetForegroundWindow(self._host_hwnd)
-            _show_tk_window(self.root)
+            _show_host_window(self.root.window)
             self._log("已打开窗口")
         except Exception as exc:
             self._log("恢复窗口失败: " + str(exc))
@@ -2465,8 +2102,8 @@ class HostApp:
         self.headline.configure(text="USB 已断开")
         self.detail.configure(text="多次拉起失败。请检查 USB，或在音箱上打开一次应用。")
         self._log("无法拉起后台服务: " + err)
-        self._draw_meter(self.meter, 0)
-        self._draw_meter(self.spk_meter, 0)
+        self._draw_meter("mic", 0)
+        self._draw_meter("spk", 0)
 
     def _apply_mute_headline(self, mic_muted: bool, spk_muted: bool) -> None:
         if mic_muted and spk_muted:
@@ -2597,8 +2234,8 @@ class HostApp:
             self._mirror_logged = False
             self.toast.stop()
             self._toast_logged = False
-            self._draw_meter(self.meter, 0)
-            self._draw_meter(self.spk_meter, 0)
+            self._draw_meter("mic", 0)
+            self._draw_meter("spk", 0)
             if not self._session:
                 return
             if self._reviving:
@@ -2613,13 +2250,13 @@ class HostApp:
             return
         if _poll_activate_event():
             try:
-                _show_tk_window(self.root)
+                _show_host_window(self.root.window)
                 self._log("已切换到正在运行的上位机")
             except Exception:
                 pass
         spk = self.loopback.peak if self.loopback.running() else self.play_peak
-        self._draw_meter(self.meter, self.sink.peak if self.connected else 0)
-        self._draw_meter(self.spk_meter, spk if self.connected else 0)
+        self._draw_meter("mic", self.sink.peak if self.connected else 0)
+        self._draw_meter("spk", spk if self.connected else 0)
         if not self.loopback.running():
             self.play_peak *= 0.82
         self._push_pc_volume()
@@ -2644,13 +2281,11 @@ class HostApp:
         except Exception:
             return
 
-    def _draw_meter(self, canvas: tk.Canvas, level: float) -> None:
-        canvas.delete("all")
-        width = max(canvas.winfo_width(), 10)
-        height = max(canvas.winfo_height(), 8)
-        fill = max(4, int(width * min(1.0, level * 2.2)))
-        color = GREEN if level < 0.35 else AMBER if level < 0.7 else RED
-        canvas.create_rectangle(0, 0, fill, height, fill=color, outline="")
+    def _draw_meter(self, which: str, level: float) -> None:
+        if which == "mic":
+            self.bridge.set_levels(level, self.bridge._spk_level)
+        else:
+            self.bridge.set_levels(self.bridge._mic_level, level)
 
     def _log(self, line: str) -> None:
         if self._closing:
@@ -2715,11 +2350,35 @@ def main() -> None:
     if not _claim_single_instance():
         _activate_running_host()
         return
-    _enable_dpi()
-    root = tk.Tk()
-    app = HostApp(root)
-    root.protocol("WM_DELETE_WINDOW", app._on_close)
-    root.mainloop()
+    from PySide6.QtQml import QQmlApplicationEngine
+    from PySide6.QtWidgets import QApplication
+
+    apply_fluent_style()
+    qapp = QApplication(sys.argv)
+    qapp.setQuitOnLastWindowClosed(False)
+    qapp.setApplicationName("LX04 PC Bridge")
+    loop = QtLoop()
+    bridge = HostBridge()
+    host = HostApp(loop, bridge)
+    bridge.bind(host)
+    engine = QQmlApplicationEngine()
+    engine.rootContext().setContextProperty("host", bridge)
+    qml = qml_dir() / "Main.qml"
+    engine.load(str(qml))
+    if not engine.rootObjects():
+        print("QML load failed:", qml)
+        return
+    window = engine.rootObjects()[0]
+    loop.window = window
+    # HostApp._on_close is wired from QML onClosing via HostBridge.onWindowClosing
+    screen = qapp.primaryScreen()
+    geo = screen.availableGeometry()
+    m = _ui_metrics(geo.width(), geo.height(), screen.logicalDotsPerInch())
+    window.setWidth(int(m["w"]))
+    window.setHeight(int(m["h"]))
+    host._boot_ui()
+    loop.after(400, host._tick)
+    raise SystemExit(qapp.exec())
 
 
 if __name__ == "__main__":
