@@ -4,10 +4,25 @@ from __future__ import annotations
 import threading
 from pathlib import Path
 
-from PySide6.QtCore import Property, QObject, QStringListModel, QTimer, QUrl, Signal, Slot
-from PySide6.QtGui import QFont
+from PySide6.QtCore import (
+    Property,
+    QObject,
+    QPointF,
+    QRectF,
+    QStringListModel,
+    Qt,
+    QTimer,
+    QUrl,
+    Signal,
+    Slot,
+)
+from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPainterPath, QPen, QPolygonF
+from PySide6.QtQml import QQmlComponent, qmlRegisterType
+from PySide6.QtQuick import QQuickPaintedItem
 from PySide6.QtQuickControls2 import QQuickStyle
-from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox
+from PySide6.QtWidgets import QApplication, QColorDialog, QFileDialog, QMessageBox
+
+import hud_preview
 
 
 def _fmt_rate(n: float) -> str:
@@ -125,6 +140,355 @@ class _LogBox:
         pass
 
 
+_HUD_TYPE = False
+
+
+class PainterCanvas:
+    """Duck-type tk.Canvas so draw_hud layout stays the speaker mock."""
+
+    def __init__(self, painter: QPainter, width: int, height: int) -> None:
+        self._p = painter
+        self._w = max(4, int(width))
+        self._h = max(4, int(height))
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        painter.setRenderHint(QPainter.RenderHint.TextAntialiasing, True)
+
+    def delete(self, _what) -> None:
+        return
+
+    def winfo_width(self) -> int:
+        return self._w
+
+    def winfo_height(self) -> int:
+        return self._h
+
+    def cget(self, key: str):
+        if key == "width":
+            return self._w
+        if key == "height":
+            return self._h
+        return ""
+
+    def configure(self, **kw) -> None:
+        bg = kw.get("bg")
+        if bg:
+            self._p.fillRect(0, 0, self._w, self._h, QColor(str(bg)))
+
+    def create_rectangle(self, x1, y1, x2, y2, **kw) -> None:
+        fill = str(kw.get("fill") or "")
+        if not fill:
+            return
+        self._p.setPen(Qt.PenStyle.NoPen)
+        self._p.setBrush(QColor(fill))
+        x, y = min(x1, x2), min(y1, y2)
+        self._p.drawRect(QRectF(x, y, abs(x2 - x1), abs(y2 - y1)))
+
+    def create_oval(self, x1, y1, x2, y2, **kw) -> None:
+        fill = str(kw.get("fill") or "")
+        if not fill:
+            return
+        self._p.setPen(Qt.PenStyle.NoPen)
+        self._p.setBrush(QColor(fill))
+        x, y = min(x1, x2), min(y1, y2)
+        self._p.drawEllipse(QRectF(x, y, abs(x2 - x1), abs(y2 - y1)))
+
+    def create_polygon(self, *pts, **kw) -> None:
+        fill = str(kw.get("fill") or "")
+        if not fill or len(pts) < 6:
+            return
+        path = QPainterPath()
+        path.moveTo(float(pts[0]), float(pts[1]))
+        for i in range(2, len(pts), 2):
+            path.lineTo(float(pts[i]), float(pts[i + 1]))
+        path.closeSubpath()
+        self._p.setPen(Qt.PenStyle.NoPen)
+        self._p.setBrush(QColor(fill))
+        self._p.drawPath(path)
+
+    def create_line(self, *pts, **kw) -> None:
+        if len(pts) < 4:
+            return
+        color = QColor(str(kw.get("fill") or "#ffffff"))
+        pen = QPen(color, float(kw.get("width") or 1))
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+        self._p.setPen(pen)
+        self._p.setBrush(Qt.BrushStyle.NoBrush)
+        points = [QPointF(float(pts[i]), float(pts[i + 1])) for i in range(0, len(pts) - 1, 2)]
+        if kw.get("smooth"):
+            path = QPainterPath(points[0])
+            for pt in points[1:]:
+                path.lineTo(pt)
+            self._p.drawPath(path)
+            return
+        self._p.drawPolyline(QPolygonF(points))
+
+    def create_text(self, x, y, **kw) -> None:
+        text = str(kw.get("text") or "")
+        if not text:
+            return
+        spec = kw.get("font") or ("Microsoft YaHei UI", -12, "normal")
+        qf = QFont(str(spec[0]))
+        qf.setPixelSize(max(8, abs(int(spec[1]))))
+        qf.setBold(len(spec) > 2 and str(spec[2]) == "bold")
+        self._p.setFont(qf)
+        self._p.setPen(QColor(str(kw.get("fill") or "#ffffff")))
+        fm = QFontMetrics(qf)
+        tx, ty = float(x), float(y)
+        anchor = str(kw.get("anchor") or "c")
+        if "s" in anchor:
+            ty -= fm.descent()
+        elif "n" in anchor:
+            ty += fm.ascent()
+        else:
+            ty += (fm.ascent() - fm.descent()) / 2.0
+        if "e" in anchor:
+            tx -= fm.horizontalAdvance(text)
+        elif "w" not in anchor:
+            tx -= fm.horizontalAdvance(text) / 2.0
+        self._p.drawText(QPointF(tx, ty), text)
+
+
+class HudView(QQuickPaintedItem):
+    hudChanged = Signal()
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self._hud = None
+        self.setAntialiasing(True)
+        self.setOpaquePainting(True)
+
+    def getHud(self):
+        return self._hud
+
+    def setHud(self, value) -> None:
+        if self._hud is value:
+            return
+        if self._hud is not None:
+            try:
+                self._hud.viewTick.disconnect(self.update)
+            except Exception:
+                pass
+        self._hud = value
+        if value is not None:
+            value.viewTick.connect(self.update)
+        self.hudChanged.emit()
+        self.update()
+
+    hud = Property(QObject, getHud, setHud, notify=hudChanged)
+
+    def paint(self, painter: QPainter) -> None:
+        editor = self._hud
+        if editor is None or editor.session is None:
+            painter.fillRect(self.boundingRect(), QColor("#0B1220"))
+            return
+        hud_preview.draw_hud(PainterCanvas(painter, int(self.width()), int(self.height())), editor.session.state)
+
+
+def register_hud_types() -> None:
+    global _HUD_TYPE
+    if _HUD_TYPE:
+        return
+    qmlRegisterType(HudView, "Lx04", 1, 0, "HudView")
+    _HUD_TYPE = True
+
+
+class HudEditor(QObject):
+    viewTick = Signal()
+    changed = Signal()
+    lightChanged = Signal()
+    closed = Signal()
+
+    def __init__(self, on_change=None, light: bool = False) -> None:
+        super().__init__()
+        self._gen = 0
+        self.session = hud_preview.open_session(
+            light=light,
+            on_change=on_change,
+            on_view=self._on_view,
+        )
+        self.session.on_editor = self._on_editor
+        self.session.bind_flush(self._arm_flush)
+        self._save = QTimer(self)
+        self._save.setSingleShot(True)
+        self._save.timeout.connect(self.session.flush_save)
+
+    def _arm_flush(self) -> None:
+        self._save.start(250)
+
+    def _on_view(self) -> None:
+        self.viewTick.emit()
+
+    def _on_editor(self) -> None:
+        self._gen += 1
+        self.changed.emit()
+        self.lightChanged.emit()
+
+    def attach(self, on_change, light: bool) -> None:
+        self.session.on_change = on_change
+        if bool(self.session.state.get("light")) != bool(light) and hud_preview.style_is_default(self.session.state):
+            self.session.set_light(light, remote=True)
+        self._on_editor()
+        self.viewTick.emit()
+
+    @Property(int, notify=changed)
+    def gen(self) -> int:
+        return self._gen
+
+    @Property(bool, notify=lightChanged)
+    def light(self) -> bool:
+        return bool(self.session.state.get("light"))
+
+    @Property(list, constant=True)
+    def metricLabels(self) -> list:
+        return hud_preview.metric_labels()
+
+    @Property(list, constant=True)
+    def chartLabels(self) -> list:
+        return hud_preview.chart_metric_labels()
+
+    @Property(list, constant=True)
+    def subLabels(self) -> list:
+        return hud_preview.sub_metric_labels()
+
+    @Slot(int, result=str)
+    def slotName(self, index: int) -> str:
+        return hud_preview.DEFAULT_SLOTS[index][1]
+
+    @Slot(int, result=str)
+    def cardTitle(self, index: int) -> str:
+        return str(self.session.state["cards"][index].get("title") or "")
+
+    @Slot(int, result=int)
+    def metricIndex(self, index: int) -> int:
+        key = str(self.session.state["cards"][index].get("metric") or hud_preview.DEFAULT_SLOTS[index][2])
+        try:
+            return self.metricLabels.index(hud_preview.metric_label(key))
+        except ValueError:
+            return 0
+
+    @Slot(int, result=str)
+    def titleColor(self, index: int) -> str:
+        return str(self.session.state["cards"][index].get("title_color") or hud_preview.palette(False)["dim"])
+
+    @Slot(int, result=str)
+    def valueColor(self, index: int) -> str:
+        return str(self.session.state["cards"][index].get("value_color") or hud_preview.OK)
+
+    @Slot(int, result=int)
+    def valueSize(self, index: int) -> int:
+        return hud_preview.card_value_size(self.session.state["cards"][index])
+
+    @Slot(int, result=int)
+    def subSize(self, index: int) -> int:
+        return hud_preview.card_sub_size(self.session.state["cards"][index])
+
+    @Slot(int, result=bool)
+    def chartOn(self, index: int) -> bool:
+        return bool(self.session.state["cards"][index].get("chart", True))
+
+    @Slot(int, result=int)
+    def chartIndex(self, index: int) -> int:
+        key = str(self.session.state["cards"][index].get("chart_metric") or "")
+        labels = self.chartLabels
+        if not key:
+            return 0
+        try:
+            return labels.index(hud_preview.metric_label(key))
+        except ValueError:
+            return 0
+
+    @Slot(int, result="QVariantList")
+    def subMetricIndexes(self, index: int) -> list:
+        keys = hud_preview.card_sub_metrics(self.session.state["cards"][index]) or [hud_preview.DEFAULT_SLOTS[index][3]]
+        labels = self.subLabels
+        out = []
+        for key in keys:
+            lab = hud_preview.sub_metric_label(key)
+            try:
+                out.append(labels.index(lab))
+            except ValueError:
+                out.append(0)
+        return out
+
+    @Slot(int, str)
+    def setTitle(self, index: int, text: str) -> None:
+        self.session.set_title(index, text)
+
+    @Slot(int, int)
+    def setMetric(self, index: int, combo: int) -> None:
+        labels = self.metricLabels
+        if 0 <= combo < len(labels):
+            self.session.set_metric_label(index, labels[combo])
+            self._on_editor()
+
+    @Slot(int, str)
+    def pickColor(self, index: int, which: str) -> None:
+        current = self.titleColor(index) if which == "title" else self.valueColor(index)
+        picked = QColorDialog.getColor(QColor(current), None, "选择颜色")
+        if not picked.isValid():
+            return
+        self.session.set_color(index, which, picked.name().upper())
+        self._on_editor()
+
+    @Slot(int, int)
+    def setValueSize(self, index: int, size: int) -> None:
+        self.session.set_value_size(index, size)
+
+    @Slot(int, int)
+    def setSubSize(self, index: int, size: int) -> None:
+        self.session.set_sub_size(index, size)
+
+    @Slot(int, bool)
+    def setChart(self, index: int, on: bool) -> None:
+        self.session.set_chart(index, on)
+
+    @Slot(int, int)
+    def setChartMetric(self, index: int, combo: int) -> None:
+        labels = self.chartLabels
+        if 0 <= combo < len(labels):
+            self.session.set_chart_metric_label(index, labels[combo])
+
+    @Slot(int)
+    def addSub(self, index: int) -> None:
+        self.session.add_sub(index)
+        self._on_editor()
+
+    @Slot(int, int)
+    def removeSub(self, index: int, line: int) -> None:
+        self.session.remove_sub(index, line)
+        self._on_editor()
+
+    @Slot(int, int, int)
+    def setSubMetric(self, index: int, line: int, combo: int) -> None:
+        labels = self.subLabels
+        if 0 <= combo < len(labels):
+            self.session.set_sub_metric_label(index, line, labels[combo])
+            self._on_editor()
+
+    @Slot(bool)
+    def setLight(self, on: bool) -> None:
+        self.session.set_light(bool(on))
+        self._on_editor()
+
+    @Slot()
+    def reset(self) -> None:
+        self.session.reset()
+        self._on_editor()
+
+    @Slot()
+    def tick(self) -> None:
+        self.viewTick.emit()
+
+    @Slot()
+    def closePreview(self) -> None:
+        self._save.stop()
+        if self.session is not None:
+            hud_preview.close_session()
+            self.session = None
+        self.closed.emit()
+
+
 class HostBridge(QObject):
     headlineChanged = Signal()
     detailChanged = Signal()
@@ -160,6 +524,9 @@ class HostBridge(QObject):
     def __init__(self) -> None:
         super().__init__()
         self.host = None
+        self.engine = None
+        self._hud_win = None
+        self._hud_editor = None
         self._headline = "未连接"
         self._detail = "插入数据线后点刷新，再点连接。"
         self._pc_line = "电脑状态：连接音箱后显示在音箱屏幕上。"
@@ -846,6 +1213,46 @@ class HostBridge(QObject):
     @Slot()
     def openHudPreview(self) -> None:
         self.host._open_hud_preview()
+
+    def show_hud_window(self, on_change) -> None:
+        register_hud_types()
+        light = bool(self.host.light_theme.get()) if self.host else False
+        win = self._hud_win
+        if win is not None:
+            try:
+                if self._hud_editor is not None:
+                    self._hud_editor.attach(on_change, light)
+                win.show()
+                win.raise_()
+                win.requestActivate()
+                return
+            except RuntimeError:
+                self._hud_win = None
+                self._hud_editor = None
+        if self.engine is None:
+            return
+        self._hud_editor = HudEditor(on_change=on_change, light=light)
+        self.engine.rootContext().setContextProperty("hud", self._hud_editor)
+        qml = qml_dir() / "HudPreview.qml"
+        comp = QQmlComponent(self.engine, QUrl.fromLocalFile(str(qml)))
+        if comp.status() != QQmlComponent.Status.Ready:
+            print(comp.errorString())
+            return
+        win = comp.create(self.engine.rootContext())
+        if win is None:
+            print(comp.errorString())
+            return
+        from PySide6.QtGui import QIcon
+        ico = assets_dir() / "app-icon.ico"
+        if ico.is_file():
+            win.setIcon(QIcon(str(ico)))
+        self._hud_win = win
+        self._hud_editor.closed.connect(self._hud_closed)
+        win.show()
+
+    def _hud_closed(self, *_args) -> None:
+        self._hud_win = None
+        self._hud_editor = None
 
     @Slot()
     def uploadHudBg(self) -> None:

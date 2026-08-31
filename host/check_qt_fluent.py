@@ -16,7 +16,7 @@ from PySide6.QtQml import QQmlApplicationEngine
 from PySide6.QtQuickControls2 import QQuickStyle
 from PySide6.QtWidgets import QApplication
 
-from qt_ui import HostBridge, QtLoop, apply_fluent_style, bind_qml_assets, qml_dir
+from qt_ui import HostBridge, HudEditor, QtLoop, apply_fluent_style, bind_qml_assets, qml_dir, register_hud_types
 
 
 def main() -> None:
@@ -84,6 +84,21 @@ def main() -> None:
     assert list(bridge.deviceModel.stringList()) == ["SERIAL-1", "SERIAL-2"]
     assert int(box.property("count") or 0) == 2, box.property("count")
     win.close()
+    register_hud_types()
+    editor = HudEditor()
+    engine.rootContext().setContextProperty("hud", editor)
+    from PySide6.QtQml import QQmlComponent
+    from PySide6.QtCore import QUrl
+    hud_qml = qml_dir() / "HudPreview.qml"
+    comp = QQmlComponent(engine, QUrl.fromLocalFile(str(hud_qml)))
+    assert comp.status() == QQmlComponent.Status.Ready, comp.errorString()
+    hudwin = comp.create(engine.rootContext())
+    assert hudwin is not None, comp.errorString()
+    app.processEvents()
+    assert hudwin.findChild(QObject, "hudView") is not None
+    assert hudwin.findChild(QObject, "hudEditor") is not None
+    hudwin.close()
+    editor.closePreview()
     print("ok", QQuickStyle.name(), qml)
 
 

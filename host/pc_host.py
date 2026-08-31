@@ -655,7 +655,6 @@ class HostApp:
         self._hud_from_apk = False
         self._hud_bg = {"sel": -1, "used": [False, False, False], "alpha": 100}
         self._hud_tk = None
-        self._hud_pump = None
         self._route_lock = threading.Lock()
         self._route_gen = 0
         self._cable_key = None
@@ -1369,30 +1368,8 @@ class HostApp:
         self._log(afterburner.open_download())
 
     def _open_hud_preview(self) -> None:
-        import tkinter as tk
-        from PySide6.QtCore import QTimer
-
-        if self._hud_tk is None:
-            self._hud_tk = tk.Tk()
-            self._hud_tk.withdraw()
-            pump = QTimer(self.bridge)
-            pump.timeout.connect(self._pump_hud)
-            pump.start(33)
-            self._hud_pump = pump
-        hud_preview.open_window(
-            self._hud_tk,
-            light=bool(self.light_theme.get()),
-            on_change=self._on_hud_style_change,
-        )
-
-    def _pump_hud(self) -> None:
-        tk_root = self._hud_tk
-        if tk_root is None:
-            return
-        try:
-            tk_root.update()
-        except Exception:
-            pass
+        self._hud_tk = hud_preview.ensure_tk()
+        self.bridge.show_hud_window(self._on_hud_style_change)
 
     def _on_hud_bg_status(self, data: dict) -> None:
         payload = data.get("hudBg")
@@ -1818,15 +1795,14 @@ class HostApp:
         self._session = False
         self.connected = False
         self._tray_remove()
-        pump = getattr(self, "_hud_pump", None)
-        if pump is not None:
-            pump.stop()
-        if self._hud_tk is not None:
+        if getattr(self, "bridge", None) is not None and getattr(self.bridge, "_hud_win", None) is not None:
             try:
-                self._hud_tk.destroy()
+                self.bridge._hud_win.close()
             except Exception:
                 pass
-            self._hud_tk = None
+        hud_preview.close_session()
+        hud_preview.shutdown_tk()
+        self._hud_tk = None
         try:
             self.root.withdraw()
             self.root.update_idletasks()
@@ -2419,6 +2395,7 @@ def main() -> None:
     engine = QQmlApplicationEngine()
     engine.rootContext().setContextProperty("host", bridge)
     bind_qml_assets(engine)
+    bridge.engine = engine
     qml = qml_dir() / "Main.qml"
     engine.load(str(qml))
     if not engine.rootObjects():
