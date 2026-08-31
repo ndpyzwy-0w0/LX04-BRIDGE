@@ -15,7 +15,8 @@ ApplicationWindow {
     property bool navOpen: true
     property int uptimeSec: 0
     property var logLines: []
-    property int logFilterIndex: 0
+    property int scrollTick: 0
+    function noteScroll() { scrollTick++ }
     readonly property bool dark: palette.window.hslLightness < 0.5
     readonly property color chrome: dark ? "#202020" : "#F3F3F3"
     readonly property color surface: dark ? "#2C2C2C" : "#FFFFFF"
@@ -108,10 +109,33 @@ ApplicationWindow {
         displayText: count ? currentText : emptyText
         enabled: count > 0
         popup.parent: Overlay.overlay
-        popup.onAboutToShow: {
-            const p = mapToItem(Overlay.overlay, 0, height)
+        function pinPopup() {
+            const overlay = Overlay.overlay
+            if (overlay === null)
+                return
+            const p = mapToItem(overlay, 0, height)
             popup.x = p.x
             popup.y = p.y
+            if (popup.visible && (p.y < 0 || p.y > overlay.height))
+                popup.close()
+        }
+        popup.onAboutToShow: pinPopup()
+        Connections {
+            target: win
+            function onScrollTickChanged() { pinPopup() }
+        }
+    }
+
+    component PageScroll: ScrollView {
+        clip: true
+        visible: StackLayout.isCurrentItem
+        enabled: StackLayout.isCurrentItem
+        property real _bar: ScrollBar.vertical.position
+        on_BarChanged: win.noteScroll()
+        Component.onCompleted: {
+            const f = contentItem
+            if (f && f.contentYChanged)
+                f.contentYChanged.connect(win.noteScroll)
         }
     }
 
@@ -395,10 +419,7 @@ ApplicationWindow {
                         Layout.fillWidth: true
                         Layout.fillHeight: true
 
-                        ScrollView {
-                            visible: StackLayout.isCurrentItem
-                            enabled: StackLayout.isCurrentItem
-                            clip: true
+                        PageScroll {
                             ColumnLayout {
                                 width: Math.max(240, content.width - 72)
                                 spacing: 16
@@ -546,10 +567,7 @@ ApplicationWindow {
                             }
                         }
 
-                        ScrollView {
-                            visible: StackLayout.isCurrentItem
-                            enabled: StackLayout.isCurrentItem
-                            clip: true
+                        PageScroll {
                             ColumnLayout {
                                 width: Math.max(240, content.width - 72)
                                 spacing: 12
@@ -562,7 +580,6 @@ ApplicationWindow {
                                     RowLayout {
                                         Layout.fillWidth: true
                                         Switch {
-                                            text: "麦克风 → 电脑"
                                             checked: host.micEnabled
                                             onClicked: host.setMicEnabled(checked)
                                         }
@@ -614,7 +631,6 @@ ApplicationWindow {
                                     RowLayout {
                                         Layout.fillWidth: true
                                         Switch {
-                                            text: "电脑 → 音箱"
                                             checked: host.spkEnabled
                                             onClicked: host.setSpkEnabled(checked)
                                         }
@@ -668,10 +684,7 @@ ApplicationWindow {
                             }
                         }
 
-                        ScrollView {
-                            visible: StackLayout.isCurrentItem
-                            enabled: StackLayout.isCurrentItem
-                            clip: true
+                        PageScroll {
                             ColumnLayout {
                                 width: Math.max(240, content.width - 72)
                                 spacing: 12
@@ -803,10 +816,7 @@ ApplicationWindow {
                             }
                         }
 
-                        ScrollView {
-                            visible: StackLayout.isCurrentItem
-                            enabled: StackLayout.isCurrentItem
-                            clip: true
+                        PageScroll {
                             ColumnLayout {
                                 width: Math.max(240, content.width - 72)
                                 spacing: 12
@@ -888,11 +898,8 @@ ApplicationWindow {
                             }
                         }
 
-                        ScrollView {
+                        PageScroll {
                             objectName: "aboutPage"
-                            visible: StackLayout.isCurrentItem
-                            enabled: StackLayout.isCurrentItem
-                            clip: true
                             ColumnLayout {
                                 width: Math.max(240, content.width - 72)
                                 spacing: 12

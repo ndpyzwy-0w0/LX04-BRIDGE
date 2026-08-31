@@ -67,6 +67,12 @@ def main() -> None:
     assert bridge.diagVb == "off"
     assert bridge.diagHifi == "off"
     assert bridge.statCpu == ""
+    assert win.findChild(QObject, "usbBox") is not None
+    assert win.property("scrollTick") == 0
+    from PySide6.QtCore import QMetaObject, Qt
+    QMetaObject.invokeMethod(win, "noteScroll", Qt.ConnectionType.DirectConnection)
+    app.processEvents()
+    assert int(win.property("scrollTick") or 0) >= 1
     box = win.findChild(QObject, "usbBox")
     assert box is not None
     app.processEvents()
