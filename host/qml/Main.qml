@@ -318,7 +318,8 @@ ApplicationWindow {
 
                 Item {
                     objectName: "navToggle"
-                    Layout.fillWidth: true
+                    Layout.alignment: Qt.AlignLeft
+                    implicitWidth: 36
                     implicitHeight: 36
                     FaText {
                         anchors.centerIn: parent
@@ -333,13 +334,8 @@ ApplicationWindow {
                 }
 
                 NavBtn { pageIndex: 0 }
-                RowLayout {
-                    Layout.fillWidth: true
-                    spacing: 2
-                    NavBtn { pageIndex: 1 }
-                    NavBtn { pageIndex: 2; visible: win.navOpen }
-                }
-                NavBtn { pageIndex: 2; visible: !win.navOpen }
+                NavBtn { pageIndex: 1 }
+                NavBtn { pageIndex: 2 }
                 NavBtn { pageIndex: 3 }
                 NavBtn { pageIndex: 4 }
                 NavBtn { pageIndex: 5 }
@@ -464,14 +460,8 @@ ApplicationWindow {
                                     }
                                 }
 
-                                RowLayout {
-                                    Layout.fillWidth: true
-                                    spacing: 12
-                                    GroupCard {
+                                GroupCard {
                                     title: "设备"
-                                    Layout.fillWidth: true
-                                    Layout.fillHeight: true
-                                    Layout.preferredWidth: 1
                                     Label {
                                         text: host.connected ? (host.hasDevice ? usbBox.displayText : "LX04") : (host.hasDevice ? usbBox.displayText : "未检测到 LX04")
                                         font.bold: true
@@ -517,59 +507,71 @@ ApplicationWindow {
                                             onClicked: host.disconnectDevice()
                                         }
                                     }
-                                    }
-                                    GroupCard {
-                                        objectName: "diagBox"
-                                        title: "连接诊断"
-                                        Layout.fillWidth: true
-                                        Layout.fillHeight: true
-                                        Layout.preferredWidth: 1
-                                    DiagRow { tone: host.diagAdb; label: "LX04 ADB"; note: host.diagAdb === "warn" ? "未检测到" : (host.diagAdb === "error" ? "未找到 adb" : "") }
-                                    DiagRow { tone: host.diagUsb; label: "USB 数据通道"; note: host.diagUsb === "error" ? "已断开" : (host.diagUsb === "off" ? "未检测" : "") }
-                                    DiagRow { tone: host.diagAudio; label: "音频通道"; note: host.diagAudio === "warn" ? "已关闭" : (host.diagAudio === "off" ? "未检测" : "") }
-                                    DiagRow { tone: host.diagVb; label: "VB-CABLE"; note: host.diagVb === "warn" ? "未安装" : (host.diagVb === "off" ? "未检测" : "") }
-                                    DiagRow { tone: host.diagHifi; label: "Hi-Fi Cable"; note: host.diagHifi === "warn" ? "未安装" : (host.diagHifi === "off" ? "未检测" : "") }
-                                    DiagRow { tone: host.diagMirror; label: "镜像通道"; note: host.diagMirror === "warn" ? "未打开" : (host.diagMirror === "off" ? "未检测" : "") }
-                                    DiagRow { tone: host.diagToast; label: "系统弹窗通道"; note: host.diagToast === "warn" ? "走 17890" : (host.diagToast === "off" ? "未检测" : "") }
-                                    Label {
-                                        text: host.diagHint
-                                        visible: host.diagHint.length > 0
-                                        wrapMode: Text.Wrap
-                                        color: win.warn
-                                        Layout.fillWidth: true
-                                    }
-                                    RowLayout {
-                                        Layout.fillWidth: true
-                                        Button { text: "重新检测"; onClicked: host.redetect() }
-                                        Item { Layout.fillWidth: true }
-                                        Button {
-                                            text: "查看帮助"
-                                            visible: host.diagHifi === "warn" || host.diagVb === "warn"
-                                            onClicked: host.diagHifi === "warn" ? host.installHifi() : host.installVb()
-                                        }
-                                    }
-                                    }
                                 }
 
                                 RowLayout {
                                     Layout.fillWidth: true
                                     spacing: 12
                                     GroupCard {
-                                    title: "音频"
-                                    Layout.fillWidth: true
-                                    Layout.fillHeight: true
-                                    Layout.preferredWidth: 1
-                                    Label { text: "麦克风"; color: win.muted; font.pixelSize: 12 }
-                                    LevelMeter { objectName: "micMeter"; level: host.micLevel }
-                                    Label { text: "扬声器"; color: win.muted; font.pixelSize: 12 }
-                                    LevelMeter { objectName: "spkMeter"; level: host.spkLevel }
-                                    }
-                                    GroupCard {
-                                        title: "屏幕"
+                                        objectName: "diagBox"
+                                        title: "连接诊断"
                                         Layout.fillWidth: true
                                         Layout.fillHeight: true
                                         Layout.preferredWidth: 1
-                                        Label { text: host.screenMode; color: win.ink }
+                                        DiagRow { tone: host.diagAdb; label: "LX04 ADB"; note: host.diagAdb === "warn" ? "未检测到" : (host.diagAdb === "error" ? "未找到 adb" : "") }
+                                        DiagRow { tone: host.diagUsb; label: "USB 数据通道"; note: host.diagUsb === "error" ? "已断开" : (host.diagUsb === "off" ? "未检测" : "") }
+                                        DiagRow { tone: host.diagAudio; label: "音频通道"; note: host.diagAudio === "warn" ? "已关闭" : (host.diagAudio === "off" ? "未检测" : "") }
+                                        DiagRow { tone: host.diagVb; label: "VB-CABLE"; note: host.diagVb === "warn" ? "未安装" : (host.diagVb === "off" ? "未检测" : "") }
+                                        DiagRow { tone: host.diagHifi; label: "Hi-Fi Cable"; note: host.diagHifi === "warn" ? "未安装" : (host.diagHifi === "off" ? "未检测" : "") }
+                                        DiagRow { tone: host.diagMirror; label: "镜像通道"; note: host.diagMirror === "warn" ? "未打开" : (host.diagMirror === "off" ? "未检测" : "") }
+                                        DiagRow { tone: host.diagToast; label: "系统弹窗通道"; note: host.diagToast === "warn" ? "走 17890" : (host.diagToast === "off" ? "未检测" : "") }
+                                        Label {
+                                            text: host.diagHint
+                                            visible: host.diagHint.length > 0
+                                            wrapMode: Text.Wrap
+                                            color: win.warn
+                                            Layout.fillWidth: true
+                                        }
+                                        RowLayout {
+                                            Layout.fillWidth: true
+                                            Button { text: "重新检测"; onClicked: host.redetect() }
+                                            Item { Layout.fillWidth: true }
+                                            Button {
+                                                text: "查看帮助"
+                                                visible: host.diagHifi === "warn" || host.diagVb === "warn"
+                                                onClicked: host.diagHifi === "warn" ? host.installHifi() : host.installVb()
+                                            }
+                                        }
+                                    }
+                                    GroupCard {
+                                        title: "音频"
+                                        Layout.fillWidth: true
+                                        Layout.fillHeight: true
+                                        Layout.preferredWidth: 1
+                                        RowLayout {
+                                            Layout.fillWidth: true
+                                            Label { text: "麦克风"; color: win.muted; font.pixelSize: 12; Layout.fillWidth: true }
+                                            Button {
+                                                text: host.micMuted ? "取消静音" : "静音麦克风"
+                                                enabled: host.connected
+                                                onClicked: host.toggleMicMute()
+                                                ToolTip.visible: hovered && !enabled
+                                                ToolTip.text: "请先连接 LX04"
+                                            }
+                                        }
+                                        LevelMeter { objectName: "micMeter"; level: host.micLevel }
+                                        RowLayout {
+                                            Layout.fillWidth: true
+                                            Label { text: "扬声器"; color: win.muted; font.pixelSize: 12; Layout.fillWidth: true }
+                                            Button {
+                                                text: host.spkMuted ? "取消静音" : "静音扬声器"
+                                                enabled: host.connected
+                                                onClicked: host.toggleSpkMute()
+                                                ToolTip.visible: hovered && !enabled
+                                                ToolTip.text: "请先连接 LX04"
+                                            }
+                                        }
+                                        LevelMeter { objectName: "spkMeter"; level: host.spkLevel }
                                     }
                                 }
                             }
