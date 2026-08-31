@@ -53,7 +53,6 @@ _QT_DROP_PREFIXES = (
     "Qt6QuickTimeline",
     "Qt6QuickDialogs2",
     "Qt6OpenGLWidgets",
-    "QtOpenGL.",
     "opengl32sw",
 )
 _QML_DROP = (
@@ -241,6 +240,8 @@ def main() -> int:
         "qt_ui",
         "--hidden-import",
         "PySide6.QtQuick",
+        "--hidden-import",
+        "PySide6.QtOpenGL",
         "--hidden-import",
         "PySide6.QtQuickControls2",
         "--hidden-import",
