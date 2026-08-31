@@ -8,7 +8,8 @@ import time
 from datetime import datetime
 from pathlib import Path
 import tkinter as tk
-import tkinter.font as tkfont
+
+from PySide6.QtGui import QFont, QFontMetricsF
 
 SCREEN_W = 800
 SCREEN_H = 480
@@ -231,6 +232,38 @@ def shutdown_tk() -> None:
     except Exception:
         pass
     _tk_root = None
+
+
+_font_cache: dict[tuple, QFont] = {}
+_metrics_cache: dict[tuple, QFontMetricsF] = {}
+
+
+def _qfont(spec: tuple) -> QFont:
+    family = str(spec[0])
+    px = max(8, abs(int(spec[1])))
+    weight = str(spec[2]) if len(spec) > 2 else "normal"
+    key = (family, px, weight)
+    qf = _font_cache.get(key)
+    if qf is None:
+        qf = QFont(family)
+        qf.setPixelSize(px)
+        qf.setBold(weight == "bold")
+        _font_cache[key] = qf
+    return qf
+
+
+def _metrics(spec: tuple) -> QFontMetricsF:
+    qf = _qfont(spec)
+    key = (qf.family(), qf.pixelSize(), qf.bold())
+    fm = _metrics_cache.get(key)
+    if fm is None:
+        fm = QFontMetricsF(qf)
+        _metrics_cache[key] = fm
+    return fm
+
+
+def _measure(spec: tuple, text: str) -> float:
+    return float(_metrics(spec).horizontalAdvance(text or ""))
 
 
 _DP_SCALE = 1.0
@@ -536,12 +569,11 @@ def _font(size_dp: float, medium: bool = False) -> tuple:
 def _fit(font: tuple, text: str, max_width: float) -> str:
     if not text:
         return ""
-    spec = tkfont.Font(font=font)
-    if spec.measure(text) <= max_width:
+    if _measure(font, text) <= max_width:
         return text
     for i in range(len(text) - 1, 0, -1):
         cut = text[:i] + "…"
-        if spec.measure(cut) <= max_width:
+        if _measure(font, cut) <= max_width:
             return cut
     return "…"
 
@@ -569,7 +601,6 @@ def _canvas_wh(canvas: tk.Canvas) -> tuple[int, int]:
 
 def draw_hud(canvas: tk.Canvas, state: dict) -> None:
     global _DP_SCALE
-    ensure_tk()
     canvas.delete("all")
     cw, ch = _canvas_wh(canvas)
     light = bool(state.get("light"))
@@ -597,7 +628,7 @@ def _draw_hud_body(canvas, colors: dict[str, str], cards: list, w: float, h: flo
     now = datetime.now()
     clock = f"{now.month}月{now.day}日  {now.strftime('%H:%M:%S')}"
     clock_font = _font(13, medium=True)
-    clock_w = tkfont.Font(font=clock_font).measure(clock)
+    clock_w = _measure(clock_font, clock)
     clock_x = w - dp(40) - clock_w
     canvas.create_text(clock_x, dp(27), text=clock, fill=colors["text"], font=clock_font, anchor="sw")
     mid_font = _font(11)
@@ -643,8 +674,7 @@ def _draw_hud_body(canvas, colors: dict[str, str], cards: list, w: float, h: flo
 def _fit_size(size_dp: float, medium: bool, text: str, max_width: float, min_dp: float) -> float:
     size = float(size_dp)
     while size > min_dp:
-        spec = tkfont.Font(font=_font(size, medium))
-        if spec.measure(text or "") <= max_width:
+        if _measure(_font(size, medium), text or "") <= max_width:
             return size
         size -= 1
     return min_dp

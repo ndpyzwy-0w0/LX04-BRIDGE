@@ -94,11 +94,13 @@ def main() -> None:
     assert comp.status() == QQmlComponent.Status.Ready, comp.errorString()
     hudwin = comp.create(engine.rootContext())
     assert hudwin is not None, comp.errorString()
+    hudwin.setWidth(1100)
+    hudwin.setHeight(720)
     app.processEvents()
-    assert hudwin.findChild(QObject, "hudView") is not None
-    assert hudwin.findChild(QObject, "hudEditor") is not None
     view = hudwin.findChild(QObject, "hudView")
+    assert view is not None
     assert view.property("editor") is not None
+    assert float(view.property("height") or 0) >= 160
     hudwin.close()
     editor.closePreview()
     print("ok", QQuickStyle.name(), qml)
