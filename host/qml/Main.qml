@@ -13,6 +13,23 @@ ApplicationWindow {
 
     onClosing: (event) => { event.accepted = host.onWindowClosing() }
 
+    component HostCombo: ComboBox {
+        required property var hostModel
+        required property int hostIndex
+        property string emptyText: ""
+        Layout.fillWidth: true
+        model: hostModel
+        textRole: "display"
+        currentIndex: hostIndex
+        displayText: count ? currentText : emptyText
+        popup.parent: Overlay.overlay
+        popup.onAboutToShow: {
+            const p = mapToItem(Overlay.overlay, 0, height)
+            popup.x = p.x
+            popup.y = p.y
+        }
+    }
+
     header: TabBar {
         id: tabs
         TabButton { text: "连接" }
@@ -50,6 +67,8 @@ ApplicationWindow {
             currentIndex: tabs.currentIndex
 
             ScrollView {
+                visible: StackLayout.isCurrentItem
+                enabled: StackLayout.isCurrentItem
                 clip: true
                 ColumnLayout {
                     width: win.width - 48
@@ -57,10 +76,11 @@ ApplicationWindow {
 
                     RowLayout {
                         Label { text: "USB 设备" }
-                        ComboBox {
-                            Layout.fillWidth: true
-                            model: host.deviceLabels
-                            currentIndex: host.deviceIndex
+                        HostCombo {
+                            objectName: "usbBox"
+                            hostModel: host.deviceModel
+                            hostIndex: host.deviceIndex
+                            emptyText: "正在扫描…"
                             onActivated: (i) => host.setDeviceIndex(i)
                         }
                         Button { text: "刷新"; onClicked: host.refreshDevices() }
@@ -81,6 +101,8 @@ ApplicationWindow {
             }
 
             ScrollView {
+                visible: StackLayout.isCurrentItem
+                enabled: StackLayout.isCurrentItem
                 clip: true
                 ColumnLayout {
                     width: win.width - 48
@@ -92,10 +114,10 @@ ApplicationWindow {
                             checked: host.micEnabled
                             onClicked: host.setMicEnabled(checked)
                         }
-                        ComboBox {
-                            Layout.fillWidth: true
-                            model: host.injectLabels
-                            currentIndex: host.injectIndex
+                        HostCombo {
+                            hostModel: host.injectModel
+                            hostIndex: host.injectIndex
+                            emptyText: "暂无设备"
                             onActivated: (i) => host.setInjectIndex(i)
                         }
                     }
@@ -105,10 +127,10 @@ ApplicationWindow {
                             checked: host.spkEnabled
                             onClicked: host.setSpkEnabled(checked)
                         }
-                        ComboBox {
-                            Layout.fillWidth: true
-                            model: host.spkLabels
-                            currentIndex: host.spkIndex
+                        HostCombo {
+                            hostModel: host.spkModel
+                            hostIndex: host.spkIndex
+                            emptyText: "暂无设备"
                             onActivated: (i) => host.setSpkIndex(i)
                         }
                         Switch {
@@ -161,6 +183,8 @@ ApplicationWindow {
             }
 
             ScrollView {
+                visible: StackLayout.isCurrentItem
+                enabled: StackLayout.isCurrentItem
                 clip: true
                 ColumnLayout {
                     width: win.width - 48
@@ -186,10 +210,9 @@ ApplicationWindow {
                             onClicked: host.setPcStatsEnabled(checked)
                         }
                         Label { text: "磁盘" }
-                        ComboBox {
-                            Layout.fillWidth: true
-                            model: host.diskLabels
-                            currentIndex: host.diskIndex
+                        HostCombo {
+                            hostModel: host.diskModel
+                            hostIndex: host.diskIndex
                             onActivated: (i) => host.setDiskIndex(i)
                         }
                     }
@@ -206,16 +229,17 @@ ApplicationWindow {
                     }
                     RowLayout {
                         Label { text: "同步屏幕" }
-                        ComboBox {
-                            Layout.fillWidth: true
-                            model: host.monitorLabels
-                            currentIndex: host.monitorIndex
+                        HostCombo {
+                            hostModel: host.monitorModel
+                            hostIndex: host.monitorIndex
                             onActivated: (i) => host.setMonitorIndex(i)
                         }
                         Label { text: "码率" }
-                        ComboBox {
-                            model: host.qualityLabels
-                            currentIndex: host.qualityIndex
+                        HostCombo {
+                            hostModel: host.qualityModel
+                            hostIndex: host.qualityIndex
+                            Layout.fillWidth: false
+                            Layout.preferredWidth: 120
                             onActivated: (i) => host.setQualityIndex(i)
                         }
                     }
@@ -240,6 +264,8 @@ ApplicationWindow {
             }
 
             ScrollView {
+                visible: StackLayout.isCurrentItem
+                enabled: StackLayout.isCurrentItem
                 clip: true
                 ColumnLayout {
                     width: win.width - 48

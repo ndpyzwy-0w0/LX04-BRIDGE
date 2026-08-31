@@ -695,13 +695,22 @@ class HostApp:
         gen = self._route_gen
 
         def work() -> None:
-            with self._route_lock:
-                if gen != self._route_gen:
-                    return
+            import comtypes
+
+            comtypes.CoInitialize()
+            try:
+                with self._route_lock:
+                    if gen != self._route_gen:
+                        return
+                    try:
+                        fn()
+                    except Exception as exc:
+                        self._log("切换通路失败: " + str(exc))
+            finally:
                 try:
-                    fn()
-                except Exception as exc:
-                    self._log("切换通路失败: " + str(exc))
+                    comtypes.CoUninitialize()
+                except Exception:
+                    pass
 
         threading.Thread(target=work, daemon=True, name="lx04-route").start()
 
@@ -755,18 +764,27 @@ class HostApp:
         threading.Thread(target=self._boot_scan, daemon=True, name="lx04-boot").start()
 
     def _boot_scan(self) -> None:
+        import comtypes
+
+        comtypes.CoInitialize()
         hidden: list[str] = []
         devices: list[str] = []
         err = ""
         try:
-            hidden = win_endpoint.tidy_cable_endpoints()
-        except Exception as exc:
-            err = str(exc)
-        if self.adb:
             try:
-                devices = adb_usb.list_devices(self.adb)
+                hidden = win_endpoint.tidy_cable_endpoints()
             except Exception as exc:
-                err = (err + " " + str(exc)).strip()
+                err = str(exc)
+            if self.adb:
+                try:
+                    devices = adb_usb.list_devices(self.adb)
+                except Exception as exc:
+                    err = (err + " " + str(exc)).strip()
+        finally:
+            try:
+                comtypes.CoUninitialize()
+            except Exception:
+                pass
         try:
             self.root.after(0, lambda: self._boot_apply(hidden, devices, err))
         except Exception:

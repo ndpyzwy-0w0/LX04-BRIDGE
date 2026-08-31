@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import Property, QObject, QTimer, Signal, Slot
+from PySide6.QtCore import Property, QObject, QStringListModel, QTimer, Signal, Slot
 from PySide6.QtQuickControls2 import QQuickStyle
 from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox
 
@@ -115,17 +115,11 @@ class HostBridge(QObject):
     micLevelChanged = Signal()
     spkLevelChanged = Signal()
     logLine = Signal(str)
-    deviceLabelsChanged = Signal()
     deviceIndexChanged = Signal()
-    injectLabelsChanged = Signal()
     injectIndexChanged = Signal()
-    spkLabelsChanged = Signal()
     spkIndexChanged = Signal()
-    diskLabelsChanged = Signal()
     diskIndexChanged = Signal()
-    monitorLabelsChanged = Signal()
     monitorIndexChanged = Signal()
-    qualityLabelsChanged = Signal()
     qualityIndexChanged = Signal()
     micEnabledChanged = Signal()
     spkEnabledChanged = Signal()
@@ -149,12 +143,14 @@ class HostBridge(QObject):
         self._gain_percent = 100.0
         self._mic_level = 0.0
         self._spk_level = 0.0
-        self._device_labels: list[str] = ["正在扫描…"]
-        self._inject_labels: list[str] = []
-        self._spk_labels: list[str] = []
-        self._disk_labels: list[str] = []
-        self._monitor_labels: list[str] = []
-        self._quality_labels: list[str] = []
+        self._models = {
+            "device": QStringListModel(self),
+            "inject": QStringListModel(self),
+            "spk": QStringListModel(self),
+            "disk": QStringListModel(self),
+            "monitor": QStringListModel(self),
+            "quality": QStringListModel(self),
+        }
         self._device_index = 0
         self._inject_index = 0
         self._spk_index = 0
@@ -240,35 +236,27 @@ class HostBridge(QObject):
 
     def set_labels(self, kind: str, labels: list[str]) -> None:
         labels = [str(x) for x in labels]
-        attr = f"_{kind}_labels"
-        sig = {
-            "device": self.deviceLabelsChanged,
-            "inject": self.injectLabelsChanged,
-            "spk": self.spkLabelsChanged,
-            "disk": self.diskLabelsChanged,
-            "monitor": self.monitorLabelsChanged,
-            "quality": self.qualityLabelsChanged,
-        }[kind]
-        if getattr(self, attr) == labels:
+        model = self._models[kind]
+        if model.stringList() == labels:
             if self.host is not None:
                 self._sync_combo(kind)
             return
-        setattr(self, attr, labels)
-        sig.emit()
+        model.setStringList(labels)
         if self.host is not None:
             self._sync_combo(kind)
 
     def _combo(self, kind: str) -> tuple[list[str], str, Signal]:
         host = self.host
         table = {
-            "device": (self._device_labels, "device_var", self.deviceIndexChanged),
-            "inject": (self._inject_labels, "inject_var", self.injectIndexChanged),
-            "spk": (self._spk_labels, "spk_dev_var", self.spkIndexChanged),
-            "disk": (self._disk_labels, "disk_var", self.diskIndexChanged),
-            "monitor": (self._monitor_labels, "monitor_var", self.monitorIndexChanged),
-            "quality": (self._quality_labels, "quality_var", self.qualityIndexChanged),
+            "device": ("device_var", self.deviceIndexChanged),
+            "inject": ("inject_var", self.injectIndexChanged),
+            "spk": ("spk_dev_var", self.spkIndexChanged),
+            "disk": ("disk_var", self.diskIndexChanged),
+            "monitor": ("monitor_var", self.monitorIndexChanged),
+            "quality": ("quality_var", self.qualityIndexChanged),
         }
-        labels, var_name, sig = table[kind]
+        var_name, sig = table[kind]
+        labels = list(self._models[kind].stringList())
         return labels, getattr(host, var_name).get() if host else "", sig
 
     def _sync_combo(self, kind: str) -> None:
@@ -280,6 +268,8 @@ class HostBridge(QObject):
         attr = f"_{kind}_index"
         if getattr(self, attr) != index:
             setattr(self, attr, index)
+            sig.emit()
+        else:
             sig.emit()
 
     def _set_combo_index(self, kind: str, index: int, command) -> None:
@@ -387,49 +377,49 @@ class HostBridge(QObject):
     def spkLevel(self) -> float:
         return self._spk_level
 
-    @Property(list, notify=deviceLabelsChanged)
-    def deviceLabels(self) -> list[str]:
-        return self._device_labels
+    @Property(QObject, constant=True)
+    def deviceModel(self):
+        return self._models["device"]
 
     @Property(int, notify=deviceIndexChanged)
     def deviceIndex(self) -> int:
         return self._device_index
 
-    @Property(list, notify=injectLabelsChanged)
-    def injectLabels(self) -> list[str]:
-        return self._inject_labels
+    @Property(QObject, constant=True)
+    def injectModel(self):
+        return self._models["inject"]
 
     @Property(int, notify=injectIndexChanged)
     def injectIndex(self) -> int:
         return self._inject_index
 
-    @Property(list, notify=spkLabelsChanged)
-    def spkLabels(self) -> list[str]:
-        return self._spk_labels
+    @Property(QObject, constant=True)
+    def spkModel(self):
+        return self._models["spk"]
 
     @Property(int, notify=spkIndexChanged)
     def spkIndex(self) -> int:
         return self._spk_index
 
-    @Property(list, notify=diskLabelsChanged)
-    def diskLabels(self) -> list[str]:
-        return self._disk_labels
+    @Property(QObject, constant=True)
+    def diskModel(self):
+        return self._models["disk"]
 
     @Property(int, notify=diskIndexChanged)
     def diskIndex(self) -> int:
         return self._disk_index
 
-    @Property(list, notify=monitorLabelsChanged)
-    def monitorLabels(self) -> list[str]:
-        return self._monitor_labels
+    @Property(QObject, constant=True)
+    def monitorModel(self):
+        return self._models["monitor"]
 
     @Property(int, notify=monitorIndexChanged)
     def monitorIndex(self) -> int:
         return self._monitor_index
 
-    @Property(list, notify=qualityLabelsChanged)
-    def qualityLabels(self) -> list[str]:
-        return self._quality_labels
+    @Property(QObject, constant=True)
+    def qualityModel(self):
+        return self._models["quality"]
 
     @Property(int, notify=qualityIndexChanged)
     def qualityIndex(self) -> int:
@@ -603,6 +593,8 @@ class HostBridge(QObject):
     def onWindowClosing(self) -> bool:
         """True = quit; False = hide to tray."""
         host = self.host
+        if host is None:
+            return True
         if (not host._closing) and bool(host.minimize_to_tray.get()):
             host._hide_to_tray()
             return False
