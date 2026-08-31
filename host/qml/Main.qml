@@ -55,6 +55,20 @@ ApplicationWindow {
         }
     }
 
+    component LevelMeter: Rectangle {
+        property real level: 0
+        implicitHeight: 22
+        Layout.fillWidth: true
+        color: "#1E2A44"
+        radius: 3
+        clip: true
+        Rectangle {
+            width: Math.max(4, parent.width * Math.min(1.0, parent.level * 2.2))
+            height: parent.height
+            color: parent.level < 0.35 ? "#3DDC97" : (parent.level < 0.7 ? "#FFB020" : "#FF5C7A")
+        }
+    }
+
     component PageHead: ColumnLayout {
         required property string title
         required property string subtitle
@@ -266,11 +280,11 @@ ApplicationWindow {
                                     Button { text: "断开"; onClicked: host.disconnectDevice() }
                                 }
 
-                                Label { text: "连接诊断"; font.bold: true; font.pixelSize: 15 }
+                                Label { text: "电平"; font.bold: true; font.pixelSize: 15 }
                                 Label { text: "麦克风"; opacity: 0.7 }
-                                ProgressBar { Layout.fillWidth: true; from: 0; to: 1; value: host.micLevel }
+                                LevelMeter { level: host.micLevel }
                                 Label { text: "扬声器"; opacity: 0.7 }
-                                ProgressBar { Layout.fillWidth: true; from: 0; to: 1; value: host.spkLevel }
+                                LevelMeter { level: host.spkLevel }
                             }
                         }
 
