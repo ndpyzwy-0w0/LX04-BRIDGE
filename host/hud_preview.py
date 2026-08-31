@@ -7,7 +7,6 @@ import sys
 import time
 from datetime import datetime
 from pathlib import Path
-from tkinter import colorchooser, ttk
 import tkinter as tk
 import tkinter.font as tkfont
 
@@ -209,32 +208,29 @@ def _host_dir() -> Path:
     return Path(__file__).resolve().parent
 
 
-_EDITOR_HEADERS = (
-    "板块",
-    "标题字母",
-    "字母色",
-    "大字内容",
-    "大字色",
-    "小字内容",
-    "大字号",
-    "小字号",
-    "折线",
-    "折线内容",
-)
-_EDITOR_MIN = (56, 88, 44, 120, 44, 168, 56, 56, 40, 120)
-
-
-def _setup_editor_grid(frame: tk.Misc) -> None:
-    for col, minw in enumerate(_EDITOR_MIN):
-        frame.grid_columnconfigure(col, minsize=minw, weight=0, pad=0)
-    frame.grid_columnconfigure(5, weight=1)
-    frame.grid_columnconfigure(9, weight=1)
-
-
 PREVIEW_FILE = _host_dir() / "hud_preview.json"
 
-_open_root: tk.Toplevel | None = None
-_open_win: PreviewWindow | None = None
+_tk_root: tk.Tk | None = None
+_session: HudSession | None = None
+
+
+def ensure_tk() -> tk.Misc:
+    global _tk_root
+    if _tk_root is None:
+        _tk_root = tk.Tk()
+        _tk_root.withdraw()
+    return _tk_root
+
+
+def shutdown_tk() -> None:
+    global _tk_root
+    if _tk_root is None:
+        return
+    try:
+        _tk_root.destroy()
+    except Exception:
+        pass
+    _tk_root = None
 
 
 _DP_SCALE = 1.0
@@ -494,35 +490,17 @@ def state_from_payload(payload: dict, light: bool) -> dict:
 
 def replace_state(state: dict) -> None:
     save_state(state)
-    win = _open_win
-    if win is None:
-        return
-    try:
-        if win.root.winfo_exists():
-            win.apply_state(state)
-    except tk.TclError:
-        pass
+    if _session is not None:
+        _session.apply_state(state)
 
 
 def set_light(light: bool) -> None:
     light = bool(light)
-    win = _open_win
-    if win is None:
+    if _session is None:
         return
-    try:
-        if not win.root.winfo_exists():
-            return
-    except tk.TclError:
+    if bool(_session.state.get("light")) == light:
         return
-    if bool(win.state.get("light")) == light and bool(win.light_var.get()) == light:
-        return
-    win._remote = True
-    try:
-        win.state["light"] = light
-        win.light_var.set(light)
-        win._redraw()
-    finally:
-        win._remote = False
+    _session.set_light(light, remote=True)
 
 
 def _hex(value: object) -> str:
@@ -591,6 +569,7 @@ def _canvas_wh(canvas: tk.Canvas) -> tuple[int, int]:
 
 def draw_hud(canvas: tk.Canvas, state: dict) -> None:
     global _DP_SCALE
+    ensure_tk()
     canvas.delete("all")
     cw, ch = _canvas_wh(canvas)
     light = bool(state.get("light"))
@@ -770,342 +749,122 @@ def _draw_mute(canvas: tk.Canvas, rect: tuple[float, float, float, float], label
     canvas.create_text((x1 + x2) / 2.0, y1 + (y2 - y1) * 0.66, text=label, fill=colors["text"], font=font, anchor="s")
 
 
-def open_window(parent: tk.Misc, light: bool = False, on_change=None) -> tk.Toplevel:
-    global _open_root, _open_win
-    if _open_win is not None:
-        try:
-            if _open_win.root.winfo_exists():
-                _open_win.on_change = on_change
-                _open_win.root.lift()
-                _open_win.root.focus_force()
-                return _open_win.root
-        except tk.TclError:
-            _open_win = None
-            _open_root = None
-    win = PreviewWindow(parent, light, on_change)
-    _open_win = win
-    _open_root = win.root
-    return win.root
+def metric_labels() -> list[str]:
+    return [label for _key, label, _sample in METRICS]
+
+
+def chart_metric_labels() -> list[str]:
+    return [CHART_FOLLOW_LABEL] + [metric_label(key) for key in CHART_METRICS]
+
+
+def sub_metric_labels() -> list[str]:
+    return [NONE_LABEL] + metric_labels()
 
 
 def live_state(light: bool = False) -> dict:
-    win = _open_win
-    if win is not None:
-        try:
-            if win.root.winfo_exists():
-                win._cards_from_vars()
-                return win.state
-        except tk.TclError:
-            pass
+    if _session is not None:
+        return _session.state
     return load_state(light)
 
 
-class PreviewWindow:
-    def __init__(self, parent: tk.Misc, light: bool, on_change=None) -> None:
+def open_session(light: bool = False, on_change=None, on_view=None) -> HudSession:
+    global _session
+    if _session is not None:
+        _session.on_change = on_change
+        if on_view is not None:
+            _session.on_view = on_view
+        return _session
+    _session = HudSession(light, on_change=on_change, on_view=on_view)
+    return _session
+
+
+def close_session() -> None:
+    global _session
+    if _session is None:
+        return
+    save_state(_session.state)
+    _session.emit(reset=False)
+    _session = None
+
+
+class HudSession:
+    def __init__(self, light: bool, on_change=None, on_view=None) -> None:
         self.on_change = on_change
-        self.root = tk.Toplevel(parent)
-        self.root.title("音箱屏幕预览")
-        self.root.configure(bg="#0B1220")
-        self.root.minsize(560, 420)
+        self.on_view = on_view
+        self.on_editor = None
         self.state = load_state(light)
-        self._canvas_size: tuple[int, int] | None = None
-        self._saving = False
         self._remote = False
-        self.light_var = tk.BooleanVar(value=bool(self.state["light"]))
-        self.title_vars: list[tk.StringVar] = []
-        self.metric_vars: list[tk.StringVar] = []
-        self.sub_metric_vars: list[list[tk.StringVar]] = []
-        self.sub_frames: list[tk.Frame] = []
-        self._combo_bg = "#F3F6FB"
-        self._combo_fg = "#1A2333"
-        self.value_size_vars: list[tk.IntVar] = []
-        self.sub_size_vars: list[tk.IntVar] = []
-        self.chart_vars: list[tk.BooleanVar] = []
-        self.chart_metric_vars: list[tk.StringVar] = []
-        self._swatches: list[tuple[tk.Button, tk.Button]] = []
+        self._saving = False
+        self._flush = None
 
-        hint = ttk.Label(
-            self.root,
-            text="每个格子可加大字和多条小字。音箱上长按栏目也能改，两边会同步。",
-            style="Dim.TLabel",
-        )
-        hint.pack(anchor="w", padx=16, pady=(12, 6))
-
-        self.canvas = tk.Canvas(
-            self.root,
-            width=SCREEN_W,
-            height=SCREEN_H,
-            highlightthickness=0,
-            bg=palette(self.light_var.get())["bg"],
-        )
-        self.canvas.pack(fill="both", expand=True, padx=16, pady=(0, 8))
-        self.canvas.bind("<Configure>", self._on_canvas)
-
-        tools = tk.Frame(self.root, bg="#141C2E")
-        tools.pack(fill="x", padx=16, pady=(0, 8))
-        tk.Checkbutton(
-            tools,
-            text="浅色",
-            variable=self.light_var,
-            command=self._on_light,
-            bg="#141C2E",
-            fg="#E8EEF8",
-            selectcolor="#1E2A44",
-            activebackground="#141C2E",
-            activeforeground="#E8EEF8",
-            highlightthickness=0,
-            font=("Segoe UI", 10),
-        ).pack(side="left", padx=8, pady=8)
-        ttk.Label(tools, text="浅色和板块样式会同步到已连接的音箱。", style="CardDim.TLabel").pack(side="left")
-        ttk.Button(tools, text="恢复默认", command=self._reset).pack(side="right", padx=8, pady=6)
-
-        editors = tk.Frame(self.root, bg="#141C2E")
-        editors.pack(fill="both", expand=True, padx=16, pady=(0, 16))
-        rows_wrap = tk.Frame(editors, bg="#141C2E")
-        rows_wrap.pack(fill="both", expand=True, padx=8, pady=(8, 8))
-        scroll = ttk.Scrollbar(rows_wrap, orient="vertical")
-        self._rows_canvas = tk.Canvas(
-            rows_wrap,
-            bg="#141C2E",
-            highlightthickness=0,
-            height=180,
-            yscrollcommand=scroll.set,
-        )
-        scroll.configure(command=self._rows_canvas.yview)
-        scroll.pack(side="right", fill="y")
-        self._rows_canvas.pack(side="left", fill="both", expand=True)
-        self._rows_inner = tk.Frame(self._rows_canvas, bg="#141C2E")
-        self._rows_win = self._rows_canvas.create_window((0, 0), window=self._rows_inner, anchor="nw")
-        self._rows_inner.bind("<Configure>", lambda _e: self._sync_rows_scroll())
-        self._rows_canvas.bind("<Configure>", self._on_rows_canvas)
-        self.root.bind("<MouseWheel>", self._on_rows_wheel)
-        _setup_editor_grid(self._rows_inner)
-        for col, title in enumerate(_EDITOR_HEADERS):
-            ttk.Label(self._rows_inner, text=title, style="CardDim.TLabel").grid(
-                row=0, column=col, sticky="nw", padx=4, pady=(0, 4)
-            )
-
-        combo_bg = self._combo_bg
-        combo_fg = self._combo_fg
-        for index, (_key, label, _metric, _sub) in enumerate(DEFAULT_SLOTS):
-            card = self.state["cards"][index]
-            row = index + 1
-            title_var = tk.StringVar(value=str(card["title"]))
-            metric_var = tk.StringVar(value=metric_label(str(card.get("metric") or _metric)))
-            value_size_var = tk.IntVar(value=card_value_size(card))
-            sub_size_var = tk.IntVar(value=card_sub_size(card))
-            chart_var = tk.BooleanVar(value=bool(card.get("chart", True)))
-            chart_metric_var = tk.StringVar(value=chart_metric_label(str(card.get("chart_metric") or "")))
-            self.title_vars.append(title_var)
-            self.metric_vars.append(metric_var)
-            self.sub_metric_vars.append([])
-            self.value_size_vars.append(value_size_var)
-            self.sub_size_vars.append(sub_size_var)
-            self.chart_vars.append(chart_var)
-            self.chart_metric_vars.append(chart_metric_var)
-            ttk.Label(self._rows_inner, text=label, style="Card.TLabel").grid(
-                row=row, column=0, sticky="nw", padx=4, pady=4
-            )
-            ttk.Entry(self._rows_inner, textvariable=title_var, width=10).grid(
-                row=row, column=1, sticky="nw", padx=4, pady=4
-            )
-            title_swatch = tk.Button(
-                self._rows_inner, width=3, relief="groove", bd=1, command=lambda i=index: self._pick(i, "title")
-            )
-            title_swatch.grid(row=row, column=2, sticky="nw", padx=4, pady=4)
-            drop = ttk.Menubutton(
-                self._rows_inner, textvariable=metric_var, style="Drop.TMenubutton", width=12, direction="below"
-            )
-            drop["menu"] = self._metric_menu(drop, metric_var, combo_bg, combo_fg, lambda i=index: self._on_metric(i))
-            drop.grid(row=row, column=3, sticky="nw", padx=4, pady=4)
-            value_swatch = tk.Button(
-                self._rows_inner, width=3, relief="groove", bd=1, command=lambda i=index: self._pick(i, "value")
-            )
-            value_swatch.grid(row=row, column=4, sticky="nw", padx=4, pady=4)
-            sub_col = tk.Frame(self._rows_inner, bg="#141C2E")
-            sub_col.grid(row=row, column=5, sticky="nw", padx=4, pady=4)
-            self.sub_frames.append(sub_col)
-            self._rebuild_sub_col(index)
-            ttk.Spinbox(
-                self._rows_inner,
-                from_=VALUE_SIZE_MIN,
-                to=VALUE_SIZE_MAX,
-                increment=1,
-                textvariable=value_size_var,
-                width=4,
-                command=lambda i=index: self._on_text(i),
-            ).grid(row=row, column=6, sticky="nw", padx=4, pady=4)
-            ttk.Spinbox(
-                self._rows_inner,
-                from_=SUB_SIZE_MIN,
-                to=SUB_SIZE_MAX,
-                increment=1,
-                textvariable=sub_size_var,
-                width=4,
-                command=lambda i=index: self._on_text(i),
-            ).grid(row=row, column=7, sticky="nw", padx=4, pady=4)
-            tk.Checkbutton(
-                self._rows_inner,
-                text="开",
-                variable=chart_var,
-                command=lambda i=index: self._on_text(i),
-                bg="#141C2E",
-                fg="#E8EEF8",
-                selectcolor="#1E2A44",
-                activebackground="#141C2E",
-                activeforeground="#E8EEF8",
-                highlightthickness=0,
-                font=("Segoe UI", 10),
-            ).grid(row=row, column=8, sticky="nw", padx=4, pady=4)
-            chart_drop = ttk.Menubutton(
-                self._rows_inner, textvariable=chart_metric_var, style="Drop.TMenubutton", width=12, direction="below"
-            )
-            chart_drop["menu"] = self._metric_menu(
-                chart_drop,
-                chart_metric_var,
-                combo_bg,
-                combo_fg,
-                lambda i=index: self._on_chart_metric(i),
-                include_follow=True,
-            )
-            chart_drop.grid(row=row, column=9, sticky="nw", padx=4, pady=4)
-            self._swatches.append((title_swatch, value_swatch))
-            title_var.trace_add("write", lambda *_a, i=index: self._on_text(i))
-            value_size_var.trace_add("write", lambda *_a, i=index: self._on_text(i))
-            sub_size_var.trace_add("write", lambda *_a, i=index: self._on_text(i))
-
-        self.root.protocol("WM_DELETE_WINDOW", self._close)
-        self._paint_swatches()
-        self._redraw()
-        self.root.after_idle(self._sync_rows_scroll)
+    def bind_flush(self, fn) -> None:
+        self._flush = fn
 
     def apply_state(self, state: dict) -> None:
         self._remote = True
         try:
             self.state = state
-            self.light_var.set(bool(state.get("light")))
-            for index, card in enumerate(self.state["cards"]):
-                self.title_vars[index].set(str(card.get("title") or DEFAULT_SLOTS[index][1]))
-                self.metric_vars[index].set(metric_label(str(card.get("metric") or DEFAULT_SLOTS[index][2])))
-                self._rebuild_sub_col(index)
-                self.value_size_vars[index].set(card_value_size(card))
-                self.sub_size_vars[index].set(card_sub_size(card))
-                self.chart_vars[index].set(bool(card.get("chart", True)))
-                self.chart_metric_vars[index].set(chart_metric_label(str(card.get("chart_metric") or "")))
-            self._paint_swatches()
-            self._redraw()
+            self.notify()
+            if self.on_editor is not None:
+                self.on_editor()
         finally:
             self._remote = False
 
-    def _metric_menu(
-        self, drop, variable, combo_bg, combo_fg, command, include_none: bool = False, include_follow: bool = False
-    ) -> tk.Menu:
-        menu = tk.Menu(
-            drop,
-            tearoff=False,
-            font=("Segoe UI", 10),
-            bg=combo_bg,
-            fg=combo_fg,
-            activebackground="#C5E9D6",
-            activeforeground=combo_fg,
-            relief="solid",
-            borderwidth=1,
-        )
-        if include_none:
-            menu.add_radiobutton(label=NONE_LABEL, variable=variable, value=NONE_LABEL, command=command)
-        if include_follow:
-            menu.add_radiobutton(
-                label=CHART_FOLLOW_LABEL, variable=variable, value=CHART_FOLLOW_LABEL, command=command
-            )
-        keys = CHART_METRICS if include_follow else None
-        for mkey, mlabel, _sample in METRICS:
-            if keys is not None and mkey not in keys:
-                continue
-            menu.add_radiobutton(label=mlabel, variable=variable, value=mlabel, command=command)
-        return menu
-
-    def _cards_from_vars(self) -> None:
-        for index, card in enumerate(self.state["cards"]):
-            card["title"] = self.title_vars[index].get()[:8]
-            card["metric"] = metric_key(self.metric_vars[index].get())
-            keys = [sub_metric_key(var.get()) for var in self.sub_metric_vars[index]]
-            store_sub_metrics(card, keys)
-            card["value_size"] = self._spin_int(self.value_size_vars[index], VALUE_SIZE_DEFAULT, VALUE_SIZE_MIN, VALUE_SIZE_MAX)
-            card["sub_size"] = self._spin_int(self.sub_size_vars[index], SUB_SIZE_DEFAULT, SUB_SIZE_MIN, SUB_SIZE_MAX)
-            card["chart"] = bool(self.chart_vars[index].get())
-            card["chart_metric"] = chart_metric_key(self.chart_metric_vars[index].get())
-
-    @staticmethod
-    def _spin_int(var: tk.IntVar, default: int, lo: int, hi: int) -> int:
+    def set_light(self, light: bool, remote: bool = False) -> None:
+        if remote:
+            self._remote = True
         try:
-            return clamp_int(var.get(), default, lo, hi)
-        except (tk.TclError, ValueError, TypeError):
-            return default
+            self.state["light"] = bool(light)
+            self.notify()
+            if remote and self.on_editor is not None:
+                self.on_editor()
+            if not remote:
+                self.schedule_save()
+        finally:
+            if remote:
+                self._remote = False
 
-    def _on_metric(self, index: int) -> None:
+    def set_title(self, index: int, text: str) -> None:
+        self.state["cards"][index]["title"] = str(text)[:8]
+        self.touch()
+
+    def set_metric_label(self, index: int, label: str) -> None:
         card = self.state["cards"][index]
         old_metric = str(card.get("metric") or DEFAULT_SLOTS[index][2])
-        new_metric = metric_key(self.metric_vars[index].get())
+        new_metric = metric_key(label)
         old_title = default_title_for(old_metric, DEFAULT_SLOTS[index][1])
-        if self.title_vars[index].get() in {"", old_title, DEFAULT_SLOTS[index][1], "D:"}:
-            self.title_vars[index].set(default_title_for(new_metric, DEFAULT_SLOTS[index][1]))
+        if str(card.get("title") or "") in {"", old_title, DEFAULT_SLOTS[index][1], "D:"}:
+            card["title"] = default_title_for(new_metric, DEFAULT_SLOTS[index][1])
         card["metric"] = new_metric
-        self._on_text(index)
+        self.touch()
 
-    def _rebuild_sub_col(self, index: int) -> None:
-        frame = self.sub_frames[index]
-        for child in frame.winfo_children():
-            child.destroy()
-        keys = card_sub_metrics(self.state["cards"][index]) or [DEFAULT_SLOTS[index][3]]
-        vars: list[tk.StringVar] = []
-        for line, key in enumerate(keys):
-            row = tk.Frame(frame, bg="#141C2E")
-            row.pack(fill="x", pady=1)
-            var = tk.StringVar(value=sub_metric_label(key))
-            drop = ttk.Menubutton(row, textvariable=var, style="Drop.TMenubutton", width=12, direction="below")
-            drop["menu"] = self._metric_menu(
-                drop,
-                var,
-                self._combo_bg,
-                self._combo_fg,
-                lambda i=index, n=line: self._on_sub_metric(i, n),
-                include_none=True,
-            )
-            drop.pack(side="left")
-            ttk.Button(row, text="×", width=2, command=lambda i=index, n=line: self._remove_sub(i, n)).pack(
-                side="left", padx=(4, 0)
-            )
-            vars.append(var)
-        if len(keys) < MAX_SUBS:
-            ttk.Button(frame, text="+ 小字", command=lambda i=index: self._add_sub(i)).pack(
-                anchor="w", pady=(2, 0)
-            )
-        self.sub_metric_vars[index] = vars
-        self._sync_rows_scroll()
-
-    def _sync_rows_scroll(self) -> None:
-        canvas = getattr(self, "_rows_canvas", None)
-        if canvas is None:
+    def set_color(self, index: int, which: str, hex_color: str) -> None:
+        color = _hex(hex_color)
+        if not color:
             return
-        canvas.update_idletasks()
-        canvas.configure(scrollregion=canvas.bbox("all") or (0, 0, 0, 0))
+        key = "title_color" if which == "title" else "value_color"
+        flag = "title_color_set" if which == "title" else "value_color_set"
+        self.state["cards"][index][key] = color
+        self.state["cards"][index][flag] = True
+        self.touch()
 
-    def _on_rows_canvas(self, event) -> None:
-        self._rows_canvas.itemconfigure(self._rows_win, width=event.width)
+    def set_value_size(self, index: int, size: int) -> None:
+        self.state["cards"][index]["value_size"] = clamp_int(size, VALUE_SIZE_DEFAULT, VALUE_SIZE_MIN, VALUE_SIZE_MAX)
+        self.touch()
 
-    def _on_rows_wheel(self, event) -> None:
-        canvas = self._rows_canvas
-        try:
-            x, y = canvas.winfo_pointerx(), canvas.winfo_pointery()
-            left, top = canvas.winfo_rootx(), canvas.winfo_rooty()
-            if not (left <= x < left + canvas.winfo_width() and top <= y < top + canvas.winfo_height()):
-                return
-            canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
-            return "break"
-        except tk.TclError:
-            return
+    def set_sub_size(self, index: int, size: int) -> None:
+        self.state["cards"][index]["sub_size"] = clamp_int(size, SUB_SIZE_DEFAULT, SUB_SIZE_MIN, SUB_SIZE_MAX)
+        self.touch()
 
-    def _add_sub(self, index: int) -> None:
+    def set_chart(self, index: int, on: bool) -> None:
+        self.state["cards"][index]["chart"] = bool(on)
+        self.touch()
+
+    def set_chart_metric_label(self, index: int, label: str) -> None:
+        self.state["cards"][index]["chart_metric"] = chart_metric_key(label)
+        self.touch()
+
+    def add_sub(self, index: int) -> None:
         keys = card_sub_metrics(self.state["cards"][index]) or [DEFAULT_SLOTS[index][3]]
         if len(keys) >= MAX_SUBS:
             return
@@ -1113,10 +872,9 @@ class PreviewWindow:
         nxt = next((key for key, _label, _sample in METRICS if key not in used), METRICS[0][0])
         keys.append(nxt)
         store_sub_metrics(self.state["cards"][index], keys)
-        self._rebuild_sub_col(index)
-        self._on_text(index)
+        self.touch()
 
-    def _remove_sub(self, index: int, line: int) -> None:
+    def remove_sub(self, index: int, line: int) -> None:
         keys = card_sub_metrics(self.state["cards"][index]) or [DEFAULT_SLOTS[index][3]]
         if line < 0 or line >= len(keys):
             return
@@ -1125,97 +883,54 @@ class PreviewWindow:
         else:
             keys.pop(line)
         store_sub_metrics(self.state["cards"][index], keys)
-        self._rebuild_sub_col(index)
-        self._on_text(index)
+        self.touch()
 
-    def _on_sub_metric(self, index: int, line: int = 0) -> None:
-        keys = [sub_metric_key(var.get()) for var in self.sub_metric_vars[index]]
-        if 0 <= line < len(keys):
-            keys[line] = sub_metric_key(self.sub_metric_vars[index][line].get())
+    def set_sub_metric_label(self, index: int, line: int, label: str) -> None:
+        keys = card_sub_metrics(self.state["cards"][index]) or [DEFAULT_SLOTS[index][3]]
+        if line < 0 or line >= len(keys):
+            return
+        keys[line] = sub_metric_key(label)
         store_sub_metrics(self.state["cards"][index], keys)
-        self._on_text(index)
+        self.touch()
 
-    def _on_chart_metric(self, index: int) -> None:
-        self.state["cards"][index]["chart_metric"] = chart_metric_key(self.chart_metric_vars[index].get())
-        self._on_text(index)
-
-    def _on_text(self, _index: int) -> None:
-        if self._remote:
-            return
-        self._cards_from_vars()
-        self._redraw()
-        self._schedule_save()
-
-    def _on_light(self) -> None:
-        if self._remote:
-            return
-        self.state["light"] = bool(self.light_var.get())
-        self._redraw()
-        self._schedule_save()
-
-    def _pick(self, index: int, which: str) -> None:
-        key = "title_color" if which == "title" else "value_color"
-        current = self.state["cards"][index].get(key) or OK
-        picked = colorchooser.askcolor(color=current, parent=self.root, title="选择颜色")
-        if not picked or not picked[1]:
-            return
-        self.state["cards"][index][key] = picked[1].upper()
-        self.state["cards"][index]["title_color_set" if which == "title" else "value_color_set"] = True
-        self._paint_swatches()
-        self._redraw()
-        self._schedule_save()
-
-    def _reset(self) -> None:
-        self.state = default_state(bool(self.light_var.get()))
+    def reset(self) -> None:
+        self.state = default_state(bool(self.state.get("light")))
         bump_rev(self.state)
-        self.light_var.set(bool(self.state["light"]))
-        for index, card in enumerate(self.state["cards"]):
-            self.metric_vars[index].set(metric_label(str(card.get("metric") or DEFAULT_SLOTS[index][2])))
-            self._rebuild_sub_col(index)
-            self.value_size_vars[index].set(card_value_size(card))
-            self.sub_size_vars[index].set(card_sub_size(card))
-            self.chart_vars[index].set(bool(card.get("chart", True)))
-            self.chart_metric_vars[index].set(chart_metric_label(str(card.get("chart_metric") or "")))
-            self.title_vars[index].set(card["title"])
-        self._paint_swatches()
-        self._redraw()
         save_state(self.state)
-        self._emit(reset=True)
+        self.notify()
+        self.emit(reset=True)
 
-    def _paint_swatches(self) -> None:
-        for index, (title_btn, value_btn) in enumerate(self._swatches):
-            card = self.state["cards"][index]
-            title_btn.configure(bg=card["title_color"], activebackground=card["title_color"])
-            value_btn.configure(bg=card["value_color"], activebackground=card["value_color"])
+    def close(self) -> None:
+        close_session()
 
-    def _on_canvas(self, event) -> None:
-        size = (int(event.width), int(event.height))
-        if size[0] < 4 or size[1] < 4 or size == self._canvas_size:
+    def touch(self) -> None:
+        if self._remote:
             return
-        self._canvas_size = size
-        self._redraw()
+        self.notify()
+        self.schedule_save()
 
-    def _redraw(self) -> None:
-        self._cards_from_vars()
-        self.canvas.configure(bg=palette(bool(self.state["light"]))["bg"])
-        draw_hud(self.canvas, self.state)
+    def notify(self) -> None:
+        if self.on_view is not None:
+            self.on_view()
 
-    def _schedule_save(self) -> None:
+    def schedule_save(self) -> None:
         if self._saving:
             return
         self._saving = True
-        self.root.after(250, self._flush_save)
+        if self._flush is not None:
+            self._flush()
+            return
+        self.flush_save()
 
-    def _flush_save(self) -> None:
+    def flush_save(self) -> None:
         self._saving = False
         if self._remote:
             return
-        self._cards_from_vars()
         bump_rev(self.state)
         save_state(self.state)
-        self._emit(reset=False)
+        self.emit(reset=False)
 
-    def _emit(self, reset: bool = False) -> None:
+    def emit(self, reset: bool = False) -> None:
         callback = self.on_change
         if callback is None:
             return
@@ -1224,11 +939,3 @@ class PreviewWindow:
         except Exception:
             pass
 
-    def _close(self) -> None:
-        global _open_root, _open_win
-        self._cards_from_vars()
-        save_state(self.state)
-        self._emit(reset=False)
-        _open_win = None
-        _open_root = None
-        self.root.destroy()

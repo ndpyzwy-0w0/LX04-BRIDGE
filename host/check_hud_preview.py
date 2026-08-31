@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Assert HUD preview scales into a resized canvas."""
+"""Assert HUD preview scales and Fluent editor QML can draw the mock."""
 from __future__ import annotations
 
 import sys
@@ -22,23 +22,23 @@ def main() -> None:
     scale, w, h, ox, oy = hud_preview._hud_fit(800, 960)
     assert abs(scale - 1.0) < 1e-9 and ox == 0 and abs(oy - 240) < 1e-9
     src = Path(hud_preview.__file__).read_text(encoding="utf-8")
-    assert "resizable(False, False)" not in src
-    assert len(hud_preview._EDITOR_HEADERS) == len(hud_preview._EDITOR_MIN) == 10
-    import tkinter as tk
+    assert "PreviewWindow" not in src
+    session = hud_preview.HudSession(False)
+    session.set_title(0, "CPU")
+    assert session.state["cards"][0]["title"] == "CPU"
+    from PySide6.QtGui import QImage, QPainter
+    from PySide6.QtWidgets import QApplication
+    from qt_ui import PainterCanvas, apply_fluent_style
 
-    root = tk.Tk()
-    root.withdraw()
-    win = hud_preview.PreviewWindow(root, False)
-    win.root.update_idletasks()
-    win.root.update()
-    inner = win._rows_inner
-    for col in range(10):
-        head = inner.grid_bbox(col, 0)
-        cell = inner.grid_bbox(col, 1)
-        assert head and cell, col
-        assert abs(head[0] - cell[0]) <= 2, (col, head, cell)
-    win.root.destroy()
-    root.destroy()
+    app = QApplication.instance() or QApplication([])
+    apply_fluent_style()
+    img = QImage(800, 480, QImage.Format.Format_ARGB32)
+    painter = QPainter(img)
+    hud_preview.draw_hud(PainterCanvas(painter, 800, 480), session.state)
+    painter.end()
+    assert img.pixelColor(20, 20).alpha() > 0
+    hud_preview.close_session()
+    hud_preview.shutdown_tk()
     print("ok")
 
 
