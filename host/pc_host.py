@@ -1368,7 +1368,6 @@ class HostApp:
         self._log(afterburner.open_download())
 
     def _open_hud_preview(self) -> None:
-        self._hud_tk = hud_preview.ensure_tk()
         self.bridge.show_hud_window(self._on_hud_style_change)
 
     def _on_hud_bg_status(self, data: dict) -> None:

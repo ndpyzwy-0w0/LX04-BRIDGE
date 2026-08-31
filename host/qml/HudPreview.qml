@@ -20,6 +20,7 @@ ApplicationWindow {
     readonly property color muted: dark ? "#9A9A9A" : "#6B6B6B"
     readonly property color ink: dark ? "#F0F0F0" : "#1A1A1A"
     readonly property int gen: hud.gen
+    readonly property var api: hud
 
     component HostCombo: ComboBox {
         Layout.preferredWidth: 128
@@ -64,9 +65,14 @@ ApplicationWindow {
 
         HudView {
             objectName: "hudView"
-            editor: hud
+            editor: win.api
             Layout.fillWidth: true
-            Layout.preferredHeight: Math.max(180, Math.round(width * 480 / 800))
+            Layout.preferredHeight: {
+                const aspect = Math.round(width * 480 / 800)
+                const cap = Math.max(180, win.height - 280)
+                return Math.max(180, Math.min(aspect, cap))
+            }
+            Layout.maximumHeight: Math.max(180, win.height - 260)
         }
 
         RowLayout {
@@ -86,31 +92,23 @@ ApplicationWindow {
         }
 
         ScrollView {
+            id: hudEditor
             objectName: "hudEditor"
             Layout.fillWidth: true
             Layout.fillHeight: true
             clip: true
-            ColumnLayout {
+            ScrollBar.vertical.policy: ScrollBar.AsNeeded
+            Column {
+                width: hudEditor.availableWidth
                 spacing: 8
-                width: Math.max(win.width - 56, 1080)
-
-                RowLayout {
-                    Layout.fillWidth: true
-                    Label { text: "板块"; color: win.muted; Layout.preferredWidth: 40 }
-                    Label { text: "标题 / 色"; color: win.muted; Layout.preferredWidth: 118 }
-                    Label { text: "大字 / 色"; color: win.muted; Layout.preferredWidth: 164 }
-                    Label { text: "小字"; color: win.muted; Layout.fillWidth: true }
-                    Label { text: "字号"; color: win.muted; Layout.preferredWidth: 168 }
-                    Label { text: "折线"; color: win.muted; Layout.preferredWidth: 168 }
-                }
 
                 Repeater {
                     model: 4
                     Rectangle {
                         property int cardIndex: index
                         property var subIdx: { win.gen; return hud.subMetricIndexes(cardIndex) }
-                        Layout.fillWidth: true
-                        implicitHeight: row.implicitHeight + 12
+                        width: parent.width
+                        height: row.implicitHeight + 12
                         radius: 6
                         border.color: win.stroke
                         color: "transparent"

@@ -9,7 +9,6 @@ from PySide6.QtCore import (
     QObject,
     QPointF,
     QRectF,
-    QSize,
     QStringListModel,
     Qt,
     QTimer,
@@ -285,23 +284,13 @@ class HudView(QQuickPaintedItem):
     def _redraw(self) -> None:
         self.update()
 
-    def geometryChange(self, new_geo, old) -> None:
-        super().geometryChange(new_geo, old)
-        win = self.window()
-        dpr = float(win.effectiveDevicePixelRatio()) if win is not None else 1.0
-        self.setTextureSize(QSize(max(1, int(self.width() * dpr)), max(1, int(self.height() * dpr))))
-        self.update()
-
     def paint(self, painter: QPainter) -> None:
         editor = self._editor
         w, h = int(self.width()), int(self.height())
         if editor is None or editor.session is None or w < 4 or h < 4:
             painter.fillRect(0, 0, max(1, w), max(1, h), QColor("#0B1220"))
             return
-        try:
-            hud_preview.draw_hud(PainterCanvas(painter, w, h), editor.session.state)
-        except Exception:
-            painter.fillRect(0, 0, w, h, QColor("#0B1220"))
+        hud_preview.draw_hud(PainterCanvas(painter, w, h), editor.session.state)
 
 
 def register_hud_types() -> None:
