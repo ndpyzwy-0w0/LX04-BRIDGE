@@ -23,11 +23,13 @@ def main() -> None:
     assert "_after_paint" in mic and "_after_paint" in spk and "_after_paint" in light
     assert "_apply_mic_route" not in mic
     init = inspect.getsource(pc_host.HostApp.__init__)
-    assert "_boot" in init
+    assert "_boot" in inspect.getsource(pc_host.HostApp._boot_ui)
     assert "refresh_devices" not in init
     assert "tidy_cable" not in init
     main_src = inspect.getsource(pc_host.main)
     assert "_claim_single_instance" in main_src
+    assert "apply_fluent_style" in main_src
+    assert "_boot_ui" in main_src
     assert "_on_close" in main_src
     close = inspect.getsource(pc_host.HostApp._on_close)
     assert "withdraw" in close
@@ -38,7 +40,7 @@ def main() -> None:
     assert not pc_host._close_goes_to_tray(True, False, True)
     restore = inspect.getsource(pc_host.HostApp._restore_from_tray)
     assert "_tray_remove" not in restore
-    assert "_show_tk_window" in restore
+    assert "_show_host_window" in restore
     menu_src = inspect.getsource(pc_host.HostApp._show_tray_menu)
     assert '"打开"' in menu_src
     on_msg = inspect.getsource(pc_host.HostApp._tray_on_msg)

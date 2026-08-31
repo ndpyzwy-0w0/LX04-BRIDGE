@@ -1,4 +1,4 @@
-"""Fail if withdraw/deiconify cannot bring a Tk window back."""
+"""Fail if withdraw/show cannot bring a Qt host window back."""
 from __future__ import annotations
 
 import sys
@@ -8,24 +8,26 @@ HERE = Path(__file__).resolve().parent
 if str(HERE) not in sys.path:
     sys.path.insert(0, str(HERE))
 
-import tkinter as tk
+from PySide6.QtWidgets import QApplication, QWidget
 
 import pc_host
 
 
 def main() -> None:
-    root = tk.Tk()
-    root.geometry("240x80+80+80")
-    root.update()
-    assert root.winfo_viewable(), root.state()
-    root.withdraw()
-    root.update()
-    assert root.state() == "withdrawn"
-    pc_host._show_tk_window(root)
-    root.update()
-    assert root.state() != "withdrawn", root.state()
-    assert root.winfo_viewable(), root.state()
-    root.destroy()
+    app = QApplication.instance() or QApplication([])
+    w = QWidget()
+    w.setWindowTitle("LX04 上位机")
+    w.resize(240, 80)
+    w.show()
+    app.processEvents()
+    assert w.isVisible()
+    w.hide()
+    app.processEvents()
+    assert not w.isVisible()
+    pc_host._show_host_window(w)
+    app.processEvents()
+    assert w.isVisible(), w.isVisible()
+    w.close()
     print("ok")
 
 

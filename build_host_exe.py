@@ -50,7 +50,7 @@ def main() -> int:
     built = staging / f"{name}.exe"
     latest = DIST / f"{name}.exe"
 
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "-q", "pyinstaller", "sounddevice", "pycaw", "comtypes", "psutil"])
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "-q", "pyinstaller", "sounddevice", "pycaw", "comtypes", "psutil", "PySide6"])
     subprocess.check_call(
         [sys.executable, "-c", "import comtypes.client; comtypes.client.GetModule('UIAutomationCore.dll')"]
     )
@@ -123,6 +123,12 @@ def main() -> int:
         "--hidden-import",
         "toast_mirror",
         "--hidden-import",
+        "qt_ui",
+        "--hidden-import",
+        "PySide6.QtQuick",
+        "--hidden-import",
+        "PySide6.QtQuickControls2",
+        "--hidden-import",
         "comtypes.gen.UIAutomationClient",
         "--collect-all",
         "psutil",
@@ -134,6 +140,8 @@ def main() -> int:
         "pycaw",
         "--collect-all",
         "comtypes",
+        "--add-data",
+        f"{HOST / 'qml'};qml",
     ]
     vbcable_pack = HOST / "vbcable" / "pack"
     if vbcable_pack.is_dir():
