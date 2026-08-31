@@ -5,6 +5,7 @@ import threading
 from pathlib import Path
 
 from PySide6.QtCore import Property, QObject, QStringListModel, QTimer, Signal, Slot
+from PySide6.QtGui import QFont
 from PySide6.QtQuickControls2 import QQuickStyle
 from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox
 
@@ -625,6 +626,9 @@ def apply_fluent_style() -> None:
 
     os.environ.setdefault("QT_QUICK_CONTROLS_STYLE", "FluentWinUI3")
     QQuickStyle.setStyle("FluentWinUI3")
+    app = QApplication.instance()
+    if app is not None:
+        app.setFont(QFont("Microsoft YaHei"))
 
 
 def askokcancel(host, text: str) -> bool:

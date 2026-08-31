@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Package the Windows host into a onefile EXE. Rollback is git, not extra copies."""
+"""Package the Windows host into an onedir folder. Rollback is git, not extra copies."""
 from __future__ import annotations
 
 import argparse
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -47,8 +48,9 @@ def main() -> int:
     name = "LX04-PC-Bridge-Host"
     staging = ROOT / "build" / "pyinstaller" / "dist"
     staging.mkdir(parents=True, exist_ok=True)
-    built = staging / f"{name}.exe"
-    latest = DIST / f"{name}.exe"
+    built = staging / name
+    latest = DIST / name
+    old_onefile = DIST / f"{name}.exe"
 
     subprocess.check_call([sys.executable, "-m", "pip", "install", "-q", "pyinstaller", "sounddevice", "pycaw", "comtypes", "psutil", "PySide6"])
     subprocess.check_call(
@@ -61,7 +63,7 @@ def main() -> int:
         "--noconfirm",
         "--clean",
         "--windowed",
-        "--onefile",
+        "--onedir",
         "--name",
         name,
         "--distpath",
@@ -193,13 +195,19 @@ def main() -> int:
     cmd.append(str(HOST / "pc_host.py"))
     print("Building", latest)
     subprocess.check_call(cmd)
-    payload = built.read_bytes()
+    if not built.is_dir():
+        print("PyInstaller did not write", built)
+        return 1
     try:
-        latest.write_bytes(payload)
-        print("Wrote", latest)
+        if old_onefile.is_file():
+            old_onefile.unlink()
+        if latest.exists():
+            shutil.rmtree(latest)
+        shutil.copytree(built, latest)
+        print("Wrote", latest / f"{name}.exe")
     except OSError as exc:
-        print("Current EXE is in use, left", built, ":", exc)
-        print("请先退出上位机，再把该文件复制到", latest)
+        print("Current host folder is in use, left", built, ":", exc)
+        print("请先退出上位机，再把该目录复制到", latest)
         return 1
     if not args.no_commit:
         commit_usable_version(version, args.message or "host EXE snapshot")

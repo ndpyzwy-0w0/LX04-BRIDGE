@@ -22,7 +22,6 @@ COMMIT_PATHS = [
     "host",
     "protocol.md",
     "local.properties.example",
-    "dist/LX04-PC-Bridge-Host.exe",
     "dist/LX04-PC-Bridge.apk",
 ]
 

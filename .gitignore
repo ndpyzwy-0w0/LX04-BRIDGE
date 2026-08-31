@@ -25,9 +25,9 @@ host/.venv/
 *.iml
 .externalNativeBuild/
 
-# Do not keep versioned host EXEs; git tracks dist/LX04-PC-Bridge-Host.exe only.
+# Host is an onedir folder (Qt). Do not commit it; GitHub 100MB.
 dist/*.exe
-!dist/LX04-PC-Bridge-Host.exe
+dist/LX04-PC-Bridge-Host/
 dist/LX04-PC-Bridge-Host-v*.exe
 dist/LX04-PC-Bridge-Host.exe.running
 dist/*.old.exe
