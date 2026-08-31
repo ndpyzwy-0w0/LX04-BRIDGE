@@ -109,6 +109,7 @@ ApplicationWindow {
         displayText: count ? currentText : emptyText
         enabled: count > 0
         popup.parent: Overlay.overlay
+        popup.closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
         function pinPopup() {
             const overlay = Overlay.overlay
             if (overlay === null)
@@ -120,6 +121,7 @@ ApplicationWindow {
                 popup.close()
         }
         popup.onAboutToShow: pinPopup()
+        popup.onOpened: pinPopup()
         Connections {
             target: win
             function onScrollTickChanged() { pinPopup() }
@@ -281,7 +283,6 @@ ApplicationWindow {
         property string title: ""
         property string value: ""
         property string sub: ""
-        visible: value.length > 0
         Layout.fillWidth: true
         implicitHeight: 72
         radius: 6
@@ -743,7 +744,7 @@ ApplicationWindow {
                                             anchors.margins: 12
                                             spacing: 8
                                             Label {
-                                                text: "800 × 480  ·  " + host.screenMode
+                                                text: "800 × 480  ·  状态监视"
                                                 color: win.muted
                                                 font.pixelSize: 12
                                                 Layout.alignment: Qt.AlignHCenter
@@ -754,22 +755,33 @@ ApplicationWindow {
                                                 columns: 5
                                                 rowSpacing: 8
                                                 columnSpacing: 8
-                                                visible: host.statCpu.length > 0
-                                                StatTile { title: "CPU"; value: host.statCpu; sub: host.statCpuTemp }
-                                                StatTile { title: "GPU"; value: host.statGpu; sub: host.statGpuTemp }
-                                                StatTile { title: "内存"; value: host.statRam; sub: host.statRamSub }
-                                                StatTile { title: "磁盘"; value: host.statDisk; sub: host.statDiskSub }
-                                                StatTile { title: "网络"; value: host.statNetDown.length > 0 ? ("↓ " + host.statNetDown) : ""; sub: host.statNetUp.length > 0 ? ("↑ " + host.statNetUp) : "" }
-                                            }
-                                            Label {
-                                                visible: host.statCpu.length === 0
-                                                text: host.screenMode
-                                                color: win.muted
-                                                Layout.alignment: Qt.AlignHCenter
-                                                Layout.fillHeight: true
-                                                verticalAlignment: Text.AlignVCenter
+                                                StatTile { title: "CPU"; value: host.statCpu || "—"; sub: host.statCpuTemp }
+                                                StatTile { title: "GPU"; value: host.statGpu || "—"; sub: host.statGpuTemp }
+                                                StatTile { title: "内存"; value: host.statRam || "—"; sub: host.statRamSub }
+                                                StatTile { title: "磁盘"; value: host.statDisk || "—"; sub: host.statDiskSub }
+                                                StatTile { title: "网络"; value: host.statNetDown.length > 0 ? ("↓ " + host.statNetDown) : "↓ —"; sub: host.statNetUp.length > 0 ? ("↑ " + host.statNetUp) : "↑ —" }
                                             }
                                         }
+                                    }
+                                }
+
+                                Button {
+                                    text: "删除预览屏幕"
+                                    onClicked: host.setPcStatsEnabled(false)
+                                }
+
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    Label { text: "监测磁盘"; color: win.ink }
+                                    HostCombo {
+                                        hostModel: host.diskModel
+                                        hostIndex: host.diskIndex
+                                        onActivated: (i) => host.setDiskIndex(i)
+                                    }
+                                    Switch {
+                                        text: "同步系统弹窗"
+                                        checked: host.toastMirror
+                                        onClicked: host.setToastMirror(checked)
                                     }
                                 }
 
@@ -789,11 +801,6 @@ ApplicationWindow {
                                             onClicked: host.setMirrorEnabled(!host.mirrorRunning)
                                             ToolTip.visible: hovered && !enabled
                                             ToolTip.text: "请先连接 LX04"
-                                        }
-                                        Button {
-                                            text: "系统弹窗"
-                                            highlighted: host.toastMirror
-                                            onClicked: host.setToastMirror(!host.toastMirror)
                                         }
                                     }
                                     RowLayout {
@@ -861,25 +868,7 @@ ApplicationWindow {
                                 spacing: 12
 
                                 GroupCard {
-                                    title: "监控"
-                                    RowLayout {
-                                        Layout.fillWidth: true
-                                        Label { text: "监测磁盘"; color: win.ink }
-                                        HostCombo {
-                                            hostModel: host.diskModel
-                                            hostIndex: host.diskIndex
-                                            onActivated: (i) => host.setDiskIndex(i)
-                                        }
-                                    }
-                                }
-
-                                GroupCard {
                                     title: "系统"
-                                    Switch {
-                                        text: "同步系统弹窗"
-                                        checked: host.toastMirror
-                                        onClicked: host.setToastMirror(checked)
-                                    }
                                     Switch {
                                         text: "开机自启动"
                                         checked: host.autostart
@@ -905,6 +894,7 @@ ApplicationWindow {
                                     objectName: "logFilter"
                                     model: ["全部", "INFO", "WARN", "ERROR"]
                                     Layout.preferredWidth: 120
+                                    popup.closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
                                     onActivated: (i) => { win.logFilterIndex = i; win.applyLog() }
                                 }
                                 Item { Layout.fillWidth: true }

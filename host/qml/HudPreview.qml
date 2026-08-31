@@ -21,10 +21,29 @@ ApplicationWindow {
     readonly property color ink: dark ? "#F0F0F0" : "#1A1A1A"
     readonly property int gen: hud.gen
     readonly property var api: hud
+    property int scrollTick: 0
+    function noteScroll() { scrollTick++ }
 
     component HostCombo: ComboBox {
         Layout.preferredWidth: 128
         popup.parent: Overlay.overlay
+        popup.closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+        function pinPopup() {
+            const overlay = Overlay.overlay
+            if (overlay === null)
+                return
+            const p = mapToItem(overlay, 0, height)
+            popup.x = p.x
+            popup.y = p.y
+            if (popup.visible && (p.y < 0 || p.y > overlay.height))
+                popup.close()
+        }
+        popup.onAboutToShow: pinPopup()
+        popup.onOpened: pinPopup()
+        Connections {
+            target: win
+            function onScrollTickChanged() { pinPopup() }
+        }
     }
 
     component Swatch: Rectangle {
@@ -98,6 +117,13 @@ ApplicationWindow {
             Layout.fillHeight: true
             clip: true
             ScrollBar.vertical.policy: ScrollBar.AsNeeded
+            property real _bar: ScrollBar.vertical.position
+            on_BarChanged: win.noteScroll()
+            Component.onCompleted: {
+                const f = contentItem
+                if (f && f.contentYChanged)
+                    f.contentYChanged.connect(win.noteScroll)
+            }
             Column {
                 width: hudEditor.availableWidth
                 spacing: 8
