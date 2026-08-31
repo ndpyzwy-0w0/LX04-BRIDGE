@@ -22,6 +22,7 @@ ApplicationWindow {
         textRole: "display"
         currentIndex: hostIndex
         displayText: count ? currentText : emptyText
+        enabled: count > 0
         popup.parent: Overlay.overlay
         popup.onAboutToShow: {
             const p = mapToItem(Overlay.overlay, 0, height)

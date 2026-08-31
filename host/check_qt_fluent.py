@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import sys
+import threading
+import time
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -14,13 +16,21 @@ from PySide6.QtQml import QQmlApplicationEngine
 from PySide6.QtQuickControls2 import QQuickStyle
 from PySide6.QtWidgets import QApplication
 
-from qt_ui import HostBridge, apply_fluent_style, qml_dir
+from qt_ui import HostBridge, QtLoop, apply_fluent_style, qml_dir
 
 
 def main() -> None:
     apply_fluent_style()
     app = QApplication.instance() or QApplication([])
     assert QQuickStyle.name() == "FluentWinUI3", QQuickStyle.name()
+    loop = QtLoop()
+    hit: list[int] = []
+    threading.Thread(target=lambda: loop.after(0, lambda: hit.append(1)), daemon=True).start()
+    deadline = time.monotonic() + 2
+    while time.monotonic() < deadline and not hit:
+        app.processEvents()
+        time.sleep(0.01)
+    assert hit, "QtLoop.after from a worker thread must run on the GUI loop"
     bridge = HostBridge()
     assert bridge.deviceModel.rowCount() == 0
     engine = QQmlApplicationEngine()
