@@ -673,6 +673,7 @@ class HostApp:
         self._tray_last_at = 0.0
         self._tray_ping_at = 0.0
         self._host_hwnd = 0
+        self._usb_link = None
         threading.Thread(target=pc_stats.snapshot, daemon=True).start()
         self._load_route_vars()
 
@@ -1236,7 +1237,8 @@ class HostApp:
             payload = {key: value for key, value in snap.items() if value is not None and value != ""}
             self.client.send_control("pc_stats", **payload)
             line = pc_stats.format_line(snap)
-            self._ui(lambda t=line: self.pc_line.configure(text=t))
+            payload_ui = dict(payload)
+            self._ui(lambda t=line, s=payload_ui: (self.pc_line.configure(text=t), self.bridge.set_stats(s)))
             if not self._stats_logged:
                 self._stats_logged = True
                 extra = ""
@@ -1740,6 +1742,8 @@ class HostApp:
                 pass
             self.bridge.showerror(str(exc))
             self._log("连接失败: " + str(exc))
+            self.headline.configure(text="连接失败")
+            self.detail.configure(text="无法连接到 LX04。")
 
     def _connect_tcp(self, serial: str) -> None:
         last_err: Exception | None = None
@@ -1772,6 +1776,7 @@ class HostApp:
     def disconnect(self) -> None:
         self._session = False
         self.connected = False
+        self._usb_link = None
         self._mirror_logged = False
         self._toast_logged = False
         self._stats_logged = False
@@ -2220,6 +2225,8 @@ class HostApp:
             fallback = bool(data.get("muted"))
             mic_muted = bool(data["micMuted"]) if "micMuted" in data else fallback
             spk_muted = bool(data["spkMuted"]) if "spkMuted" in data else fallback
+            if "usbConnected" in data:
+                self._usb_link = bool(data.get("usbConnected"))
             self.loopback.muted = spk_muted
             if self.loopback.error:
                 self._log("扬声器环回: " + self.loopback.error)
@@ -2312,6 +2319,7 @@ class HostApp:
         if self._tray_hwnd and time.monotonic() - self._tray_ping_at > 3:
             self._tray_ping_at = time.monotonic()
             self._tray_ping()
+        self.bridge.sync_screen()
         try:
             self.root.after(80, self._tick)
         except Exception:
@@ -2329,8 +2337,18 @@ class HostApp:
         if threading.current_thread() is not threading.main_thread():
             self._ui(lambda l=line: self._log(l))
             return
-        self.log.insert("end", line + "\n")
+        stamp = time.strftime("%H:%M:%S")
+        self.log.insert("end", f"{stamp}  {_log_level(line)}  {line}\n")
         self.log.see("end")
+
+
+def _log_level(line: str) -> str:
+    low = line.lower()
+    if any(key in line for key in ("失败", "错误", "无法")) or "error" in low:
+        return "ERROR"
+    if any(key in line for key in ("警告", "未接通", "未找到", "未安装", "未打开")) or "warn" in low:
+        return "WARN"
+    return "INFO"
 
 
 def _autostart_command() -> str:

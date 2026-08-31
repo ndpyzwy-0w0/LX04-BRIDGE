@@ -10,6 +10,15 @@ from PySide6.QtQuickControls2 import QQuickStyle
 from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox
 
 
+def _fmt_rate(n: float) -> str:
+    n = float(n)
+    if n >= 1024 * 1024:
+        return f"{n / (1024 * 1024):.1f} MB/s"
+    if n >= 1024:
+        return f"{n / 1024:.0f} KB/s"
+    return f"{n:.0f} B/s"
+
+
 class Var:
     """tk.Variable stand-in: get/set plus optional notify."""
 
@@ -143,6 +152,10 @@ class HostBridge(QObject):
     autostartChanged = Signal()
     minimizeToTrayChanged = Signal()
     connectedChanged = Signal()
+    diagChanged = Signal()
+    screenChanged = Signal()
+    muteChanged = Signal()
+    statsChanged = Signal()
 
     def __init__(self) -> None:
         super().__init__()
@@ -169,6 +182,20 @@ class HostBridge(QObject):
         self._disk_index = 0
         self._monitor_index = 0
         self._quality_index = 0
+        self._vb = False
+        self._hifi = False
+        self._diag_scanned = False
+        self._screen_state = None
+        self._stat_cpu = ""
+        self._stat_cpu_temp = ""
+        self._stat_gpu = ""
+        self._stat_gpu_temp = ""
+        self._stat_ram = ""
+        self._stat_ram_sub = ""
+        self._stat_disk = ""
+        self._stat_disk_sub = ""
+        self._stat_net_up = ""
+        self._stat_net_down = ""
 
     def bind(self, host) -> None:
         self.host = host
@@ -201,6 +228,7 @@ class HostBridge(QObject):
             self._sync_combo(kind)
         self.sync_toggles()
         self.connectedChanged.emit()
+        self.refresh_diag()
 
     def set_headline(self, text: str) -> None:
         text = str(text)
@@ -209,6 +237,7 @@ class HostBridge(QObject):
         self._headline = text
         self.headlineChanged.emit()
         self.connectedChanged.emit()
+        self.diagChanged.emit()
 
     def set_detail(self, text: str) -> None:
         text = str(text)
@@ -258,6 +287,8 @@ class HostBridge(QObject):
         model.setStringList(labels)
         if self.host is not None:
             self._sync_combo(kind)
+        if kind == "device":
+            self.diagChanged.emit()
 
     def _combo(self, kind: str) -> tuple[list[str], str, Signal]:
         host = self.host
@@ -322,6 +353,131 @@ class HostBridge(QObject):
         self.minimizeToTrayChanged.emit()
         self.gainPercentChanged.emit()
         self.connectedChanged.emit()
+        self.diagChanged.emit()
+        self.screenChanged.emit()
+
+    def _combo_label(self, kind: str, index: int) -> str:
+        labels = list(self._models[kind].stringList())
+        if 0 <= index < len(labels):
+            return labels[index]
+        return ""
+
+    def _device_ready(self) -> bool:
+        labels = list(self._models["device"].stringList())
+        if not labels:
+            return False
+        text = labels[0]
+        return text != "正在扫描…" and not text.startswith("没有") and not text.startswith("未找到")
+
+    def refresh_diag(self) -> None:
+        try:
+            import vb_cable
+
+            self._vb = bool(vb_cable.present())
+        except Exception:
+            self._vb = False
+        try:
+            import hifi_cable
+
+            self._hifi = bool(hifi_cable.present())
+        except Exception:
+            self._hifi = False
+        self._diag_scanned = True
+        self.diagChanged.emit()
+
+    def sync_screen(self) -> None:
+        host = self.host
+        if host is None:
+            return
+        state = (
+            bool(host.connected),
+            bool(host.mirror.running()),
+            bool(host.toast.showing()),
+            getattr(host, "_usb_link", None),
+            bool(host.hw.muted),
+            bool(host.loopback.muted),
+            host.client.video_sock is not None,
+            host.client.toast_sock is not None,
+        )
+        if state == self._screen_state:
+            return
+        self._screen_state = state
+        self.screenChanged.emit()
+        self.muteChanged.emit()
+        self.diagChanged.emit()
+
+    def set_stats(self, snap: dict) -> None:
+        def num(key):
+            value = snap.get(key)
+            return value if isinstance(value, (int, float)) else None
+
+        cpu = num("cpu")
+        self._stat_cpu = f"{int(round(cpu))}%" if cpu is not None else ""
+        cpu_t = num("cpuT")
+        self._stat_cpu_temp = f"{int(round(cpu_t))}°C" if cpu_t is not None else ""
+        gpu = num("gpu")
+        self._stat_gpu = f"{int(round(gpu))}%" if gpu is not None else ""
+        gpu_t = num("gpuT")
+        self._stat_gpu_temp = f"{int(round(gpu_t))}°C" if gpu_t is not None else ""
+        ram = num("ram")
+        self._stat_ram = f"{int(round(ram))}%" if ram is not None else ""
+        ram_u, ram_t = num("ramU"), num("ramT")
+        self._stat_ram_sub = f"{ram_u:.1f} / {ram_t:.1f} GB" if ram_u is not None and ram_t is not None else ""
+        disk = num("disk")
+        self._stat_disk = f"{int(round(disk))}%" if disk is not None else ""
+        disk_u, disk_t = num("diskU"), num("diskT")
+        letter = str(snap.get("diskN") or "").strip()
+        if disk_u is not None and disk_t is not None:
+            prefix = (letter + "  ") if letter else ""
+            self._stat_disk_sub = f"{prefix}{disk_u:.0f} / {disk_t:.0f} GB"
+        else:
+            self._stat_disk_sub = letter
+        net_u, net_d = num("netU"), num("netD")
+        self._stat_net_up = _fmt_rate(net_u) if net_u is not None else ""
+        self._stat_net_down = _fmt_rate(net_d) if net_d is not None else ""
+        self.statsChanged.emit()
+
+    def _tone(self, kind: str) -> str:
+        host = self.host
+        connected = bool(host and host.connected)
+        if kind == "adb":
+            if host is None:
+                return "off"
+            if not host.adb:
+                return "error"
+            if connected or self._device_ready():
+                return "ok"
+            return "warn"
+        if kind == "usb":
+            if not connected:
+                return "off"
+            link = getattr(host, "_usb_link", None)
+            if link is False:
+                return "error"
+            return "ok"
+        if kind == "audio":
+            if not connected:
+                return "off"
+            if host.mic_enabled.get() or host.spk_enabled.get():
+                return "ok"
+            return "warn"
+        if kind == "vb":
+            if not self._diag_scanned:
+                return "off"
+            return "ok" if self._vb else "warn"
+        if kind == "hifi":
+            if not self._diag_scanned:
+                return "off"
+            return "ok" if self._hifi else "warn"
+        if kind == "mirror":
+            if not connected:
+                return "off"
+            return "ok" if host.client.video_sock is not None else "warn"
+        if kind == "toast":
+            if not connected:
+                return "off"
+            return "ok" if host.client.toast_sock is not None else "warn"
+        return "off"
 
     def parent_widget(self):
         return None
@@ -484,6 +640,131 @@ class HostBridge(QObject):
     def connected(self) -> bool:
         return bool(getattr(self.host, "connected", False))
 
+    @Property(bool, notify=diagChanged)
+    def hasDevice(self) -> bool:
+        return self._device_ready()
+
+    @Property(str, notify=diagChanged)
+    def diagAdb(self) -> str:
+        return self._tone("adb")
+
+    @Property(str, notify=diagChanged)
+    def diagUsb(self) -> str:
+        return self._tone("usb")
+
+    @Property(str, notify=diagChanged)
+    def diagAudio(self) -> str:
+        return self._tone("audio")
+
+    @Property(str, notify=diagChanged)
+    def diagVb(self) -> str:
+        return self._tone("vb")
+
+    @Property(str, notify=diagChanged)
+    def diagHifi(self) -> str:
+        return self._tone("hifi")
+
+    @Property(str, notify=diagChanged)
+    def diagMirror(self) -> str:
+        return self._tone("mirror")
+
+    @Property(str, notify=diagChanged)
+    def diagToast(self) -> str:
+        return self._tone("toast")
+
+    @Property(str, notify=diagChanged)
+    def diagHint(self) -> str:
+        if self._headline == "连接失败":
+            return "无法连接到 LX04。"
+        if self._tone("usb") == "error":
+            return "USB 数据通道已断开。"
+        if self._tone("hifi") == "warn":
+            return "电脑声音无法发送到 LX04。"
+        if self._tone("vb") == "warn":
+            return "微信麦克风需要 VB-CABLE。"
+        if self._tone("adb") == "error":
+            return "没有找到内置 adb。"
+        if self._tone("adb") == "warn":
+            return "未检测到 LX04。"
+        return ""
+
+    @Property(str, notify=injectIndexChanged)
+    def injectLabel(self) -> str:
+        return self._combo_label("inject", self._inject_index)
+
+    @Property(str, notify=spkIndexChanged)
+    def spkLabel(self) -> str:
+        return self._combo_label("spk", self._spk_index)
+
+    @Property(bool, notify=muteChanged)
+    def micMuted(self) -> bool:
+        return bool(self.host.hw.muted) if self.host else False
+
+    @Property(bool, notify=muteChanged)
+    def spkMuted(self) -> bool:
+        return bool(self.host.loopback.muted) if self.host else False
+
+    @Property(bool, notify=screenChanged)
+    def mirrorRunning(self) -> bool:
+        return bool(self.host and self.host.mirror.running())
+
+    @Property(bool, notify=screenChanged)
+    def toastShowing(self) -> bool:
+        return bool(self.host and self.host.toast.showing())
+
+    @Property(str, notify=screenChanged)
+    def screenMode(self) -> str:
+        host = self.host
+        if host is None:
+            return "—"
+        if host.toast.showing():
+            return "系统弹窗"
+        if host.mirror.running():
+            return "屏幕镜像"
+        if host.pc_stats_enabled.get():
+            return "状态监视"
+        return "—"
+
+    @Property(str, notify=statsChanged)
+    def statCpu(self) -> str:
+        return self._stat_cpu
+
+    @Property(str, notify=statsChanged)
+    def statCpuTemp(self) -> str:
+        return self._stat_cpu_temp
+
+    @Property(str, notify=statsChanged)
+    def statGpu(self) -> str:
+        return self._stat_gpu
+
+    @Property(str, notify=statsChanged)
+    def statGpuTemp(self) -> str:
+        return self._stat_gpu_temp
+
+    @Property(str, notify=statsChanged)
+    def statRam(self) -> str:
+        return self._stat_ram
+
+    @Property(str, notify=statsChanged)
+    def statRamSub(self) -> str:
+        return self._stat_ram_sub
+
+    @Property(str, notify=statsChanged)
+    def statDisk(self) -> str:
+        return self._stat_disk
+
+    @Property(str, notify=statsChanged)
+    def statDiskSub(self) -> str:
+        return self._stat_disk_sub
+
+    @Property(str, notify=statsChanged)
+    def statNetUp(self) -> str:
+        return self._stat_net_up
+
+    @Property(str, notify=statsChanged)
+    def statNetDown(self) -> str:
+        return self._stat_net_down
+
     @Property(str, constant=True)
     def appVersion(self) -> str:
         return app_version()
@@ -495,6 +776,29 @@ class HostBridge(QObject):
     @Slot()
     def refreshDevices(self) -> None:
         self.host.refresh_devices()
+        self.refresh_diag()
+
+    @Slot()
+    def redetect(self) -> None:
+        if self.host is not None:
+            self.host.refresh_devices()
+        self.refresh_diag()
+
+    @Slot()
+    def syncScreen(self) -> None:
+        self.sync_screen()
+
+    @Slot()
+    def refreshStats(self) -> None:
+        if self.host is None:
+            return
+        try:
+            import pc_stats
+
+            snap = pc_stats.snapshot(str(self.host.disk_var.get() or "C:"))
+        except Exception:
+            return
+        self.set_stats(snap)
 
     @Slot()
     def connectDevice(self) -> None:
@@ -515,6 +819,21 @@ class HostBridge(QObject):
     @Slot()
     def toggleMute(self) -> None:
         self.host.client.send_control("toggle_mute")
+
+    @Slot()
+    def toggleMicMute(self) -> None:
+        if self.host and self.host.connected:
+            self.host.client.send_control("toggle_mute")
+
+    @Slot()
+    def toggleSpkMute(self) -> None:
+        if self.host and self.host.connected:
+            self.host.client.send_control("toggle_spk_mute")
+
+    @Slot(bool)
+    def setMirrorEnabled(self, on: bool) -> None:
+        self.host._apply_mirror_request(bool(on))
+        self.sync_screen()
 
     @Slot()
     def installVb(self) -> None:
