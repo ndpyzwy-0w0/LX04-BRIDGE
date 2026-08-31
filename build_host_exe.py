@@ -15,6 +15,119 @@ HOST = ROOT / "host"
 
 from release_git import commit_usable_version, read_version
 
+# PyInstaller's QtQml hook copies every QML plugin; WebEngine alone is ~194MB.
+_QT_DROP_PREFIXES = (
+    "Qt6WebEngine",
+    "Qt6WebView",
+    "Qt6Pdf",
+    "Qt6Quick3D",
+    "Qt63D",
+    "Qt6Charts",
+    "Qt6Graphs",
+    "Qt6Location",
+    "Qt6Multimedia",
+    "Qt6DataVisualization",
+    "Qt6VirtualKeyboard",
+    "Qt6Sensors",
+    "Qt6Scxml",
+    "Qt6StateMachine",
+    "Qt6RemoteObjects",
+    "Qt6TextToSpeech",
+    "Qt6Test",
+    "Qt6Sql",
+    "Qt6Positioning",
+    "Qt6WebChannel",
+    "Qt6WebSockets",
+    "Qt6SpatialAudio",
+    "Qt6ShaderTools",
+    "Qt6Labs",
+    "Qt6QuickControls2Imagine",
+    "Qt6QuickControls2Material",
+    "Qt6QuickControls2Universal",
+    "Qt6QuickControls2Fusion",
+    "Qt6QuickControls2Basic",
+    "Qt6QuickControls2Windows",
+    "Qt6QuickParticles",
+    "Qt6QuickTest",
+    "Qt6QuickVectorImage",
+    "Qt6QuickTimeline",
+    "Qt6QuickDialogs2",
+    "Qt6OpenGLWidgets",
+    "QtOpenGL.",
+    "opengl32sw",
+)
+_QML_DROP = (
+    "Qt",
+    "Qt3D",
+    "Qt5Compat",
+    "QtCharts",
+    "QtDataVisualization",
+    "QtGraphs",
+    "QtLocation",
+    "QtMultimedia",
+    "QtPositioning",
+    "QtQuick3D",
+    "QtRemoteObjects",
+    "QtScxml",
+    "QtSensors",
+    "QtTest",
+    "QtTextToSpeech",
+    "QtWebChannel",
+    "QtWebEngine",
+    "QtWebSockets",
+    "QtWebView",
+)
+_QTQUICK_DROP = (
+    "Dialogs",
+    "LocalStorage",
+    "NativeStyle",
+    "Particles",
+    "Pdf",
+    "Scene2D",
+    "Scene3D",
+    "Timeline",
+    "tooling",
+    "VectorImage",
+    "VirtualKeyboard",
+)
+_CONTROLS_DROP = ("designer", "Imagine", "Material", "Universal", "Fusion", "Windows")
+
+
+def slim_host_dir(root: Path) -> None:
+    """Delete unused Qt/QML payloads from an onedir build."""
+    internal = root / "_internal"
+    pyside = internal / "PySide6"
+    if pyside.is_dir():
+        for item in pyside.iterdir():
+            if item.is_file() and any(item.name.startswith(prefix) for prefix in _QT_DROP_PREFIXES):
+                item.unlink()
+        qml = pyside / "qml"
+        if qml.is_dir():
+            for name in _QML_DROP:
+                target = qml / name
+                if target.is_dir():
+                    shutil.rmtree(target)
+            quick = qml / "QtQuick"
+            for name in _QTQUICK_DROP:
+                target = quick / name
+                if target.is_dir():
+                    shutil.rmtree(target)
+            controls = quick / "Controls"
+            for name in _CONTROLS_DROP:
+                target = controls / name
+                if target.is_dir():
+                    shutil.rmtree(target)
+        tooling = pyside / "plugins" / "qmltooling"
+        if tooling.is_dir():
+            shutil.rmtree(tooling)
+    tests = internal / "comtypes" / "test"
+    if tests.is_dir():
+        shutil.rmtree(tests)
+    if internal.is_dir():
+        for qm in internal.rglob("*.qm"):
+            if "zh_CN" not in qm.name and "zh_Hans" not in qm.name:
+                qm.unlink()
+
 
 def bump_version() -> int:
     version = read_version() + 1
@@ -132,6 +245,16 @@ def main() -> int:
         "PySide6.QtQuickControls2",
         "--hidden-import",
         "comtypes.gen.UIAutomationClient",
+        "--exclude-module",
+        "PySide6.QtWebEngineCore",
+        "--exclude-module",
+        "PySide6.QtWebEngineQuick",
+        "--exclude-module",
+        "PySide6.QtQuick3D",
+        "--exclude-module",
+        "PySide6.QtPdf",
+        "--exclude-module",
+        "comtypes.test",
         "--collect-all",
         "psutil",
         "--collect-all",
@@ -140,8 +263,6 @@ def main() -> int:
         "cffi",
         "--collect-all",
         "pycaw",
-        "--collect-all",
-        "comtypes",
         "--add-data",
         f"{HOST / 'qml'};qml",
     ]
@@ -198,6 +319,7 @@ def main() -> int:
     if not built.is_dir():
         print("PyInstaller did not write", built)
         return 1
+    slim_host_dir(built)
     try:
         if old_onefile.is_file():
             old_onefile.unlink()
