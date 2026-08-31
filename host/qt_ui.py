@@ -1,6 +1,7 @@
 """PySide6 QML shell: FluentWinUI3 style + HostApp bindings."""
 from __future__ import annotations
 
+import threading
 from pathlib import Path
 
 from PySide6.QtCore import Property, QObject, QStringListModel, QTimer, Signal, Slot
@@ -26,22 +27,24 @@ class Var:
             self._on_change()
 
 
-class QtLoop:
-    """tk.Misc.after/withdraw subset backed by QTimer."""
+class QtLoop(QObject):
+    """tk.Misc.after/withdraw subset. Timers always arm on the GUI thread."""
+
+    _arm_sig = Signal(int, int, object)
 
     def __init__(self) -> None:
+        super().__init__()
         self.window = None
         self._timers: dict[int, QTimer] = {}
         self._n = 1
+        self._lock = threading.Lock()
+        self._arm_sig.connect(self._arm)
 
     def after(self, ms, fn):
-        tid = self._n
-        self._n += 1
-        timer = QTimer()
-        timer.setSingleShot(True)
-        timer.timeout.connect(lambda: self._fire(tid, fn))
-        timer.start(max(0, int(ms)))
-        self._timers[tid] = timer
+        with self._lock:
+            tid = self._n
+            self._n += 1
+        self._arm_sig.emit(tid, max(0, int(ms)), fn)
         return tid
 
     def after_idle(self, fn):
@@ -51,6 +54,13 @@ class QtLoop:
         timer = self._timers.pop(tid, None)
         if timer is not None:
             timer.stop()
+
+    def _arm(self, tid: int, ms: int, fn) -> None:
+        timer = QTimer(self)
+        timer.setSingleShot(True)
+        timer.timeout.connect(lambda: self._fire(tid, fn))
+        self._timers[tid] = timer
+        timer.start(ms)
 
     def _fire(self, tid: int, fn) -> None:
         self._timers.pop(tid, None)

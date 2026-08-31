@@ -676,6 +676,13 @@ class HostApp:
         self._log("adb: " + (self.adb or "未找到内置 adb"))
         if not self.sink.available():
             self._log("音频库未安装：在 host 目录执行  pip install -r requirements.txt")
+        try:
+            self.refresh_audio_devices(log=True, tidy=False)
+            self._refresh_disks()
+            self._refresh_monitors()
+            self._routes_ready = True
+        except Exception as exc:
+            self._log("启动扫描: " + str(exc))
         self._boot()
 
     def _ui(self, fn) -> None:
