@@ -2380,6 +2380,7 @@ def main() -> None:
 
     apply_fluent_style()
     qapp = QApplication(sys.argv)
+    apply_fluent_style()
     qapp.setQuitOnLastWindowClosed(False)
     qapp.setApplicationName("LX04 PC Bridge")
     loop = QtLoop()

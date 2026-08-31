@@ -10,6 +10,8 @@ ApplicationWindow {
     height: 640
     minimumWidth: 560
     minimumHeight: 420
+    font.family: "Microsoft YaHei"
+    property bool navOpen: true
 
     onClosing: (event) => { event.accepted = host.onWindowClosing() }
 
@@ -18,6 +20,7 @@ ApplicationWindow {
         required property int hostIndex
         property string emptyText: ""
         Layout.fillWidth: true
+        font.family: "Microsoft YaHei"
         model: hostModel
         textRole: "display"
         currentIndex: hostIndex
@@ -31,19 +34,44 @@ ApplicationWindow {
         }
     }
 
-    header: TabBar {
-        id: tabs
-        TabButton { text: "连接" }
-        TabButton { text: "音频" }
-        TabButton { text: "屏幕" }
-        TabButton { text: "设置" }
-        TabButton { text: "日志" }
-    }
-
-    ColumnLayout {
+    RowLayout {
         anchors.fill: parent
-        anchors.margins: 16
-        spacing: 8
+        spacing: 0
+
+        Frame {
+            id: nav
+            objectName: "navPane"
+            Layout.fillHeight: true
+            Layout.preferredWidth: win.navOpen ? 176 : 52
+            clip: true
+            ColumnLayout {
+                anchors.fill: parent
+                spacing: 2
+                ToolButton {
+                    objectName: "navToggle"
+                    Layout.fillWidth: true
+                    text: win.navOpen ? "收回" : "☰"
+                    onClicked: win.navOpen = !win.navOpen
+                }
+                Repeater {
+                    model: ["连接", "音频", "屏幕", "设置", "日志"]
+                    ItemDelegate {
+                        Layout.fillWidth: true
+                        text: win.navOpen ? modelData : modelData[0]
+                        highlighted: pages.currentIndex === index
+                        onClicked: pages.currentIndex = index
+                    }
+                }
+                Item { Layout.fillHeight: true }
+            }
+        }
+
+        ColumnLayout {
+            id: content
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            Layout.margins: 16
+            spacing: 8
 
         Label {
             text: "LX04 PC Bridge"
@@ -63,16 +91,16 @@ ApplicationWindow {
         }
 
         StackLayout {
+            id: pages
             Layout.fillWidth: true
             Layout.fillHeight: true
-            currentIndex: tabs.currentIndex
 
             ScrollView {
                 visible: StackLayout.isCurrentItem
                 enabled: StackLayout.isCurrentItem
                 clip: true
                 ColumnLayout {
-                    width: win.width - 48
+                    width: Math.max(240, content.width - 32)
                     spacing: 12
 
                     RowLayout {
@@ -106,7 +134,7 @@ ApplicationWindow {
                 enabled: StackLayout.isCurrentItem
                 clip: true
                 ColumnLayout {
-                    width: win.width - 48
+                    width: Math.max(240, content.width - 32)
                     spacing: 12
 
                     RowLayout {
@@ -188,7 +216,7 @@ ApplicationWindow {
                 enabled: StackLayout.isCurrentItem
                 clip: true
                 ColumnLayout {
-                    width: win.width - 48
+                    width: Math.max(240, content.width - 32)
                     spacing: 12
 
                     RowLayout {
@@ -269,7 +297,7 @@ ApplicationWindow {
                 enabled: StackLayout.isCurrentItem
                 clip: true
                 ColumnLayout {
-                    width: win.width - 48
+                    width: Math.max(240, content.width - 32)
                     spacing: 12
 
                     Switch {
@@ -301,8 +329,9 @@ ApplicationWindow {
                 id: logArea
                 readOnly: true
                 wrapMode: TextEdit.Wrap
-                font.family: "Consolas"
+                font.family: "Microsoft YaHei"
             }
+        }
         }
     }
 

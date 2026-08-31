@@ -20,8 +20,11 @@ from qt_ui import HostBridge, QtLoop, apply_fluent_style, qml_dir
 
 
 def main() -> None:
+    pack = (HERE.parent / "build_host_exe.py").read_text(encoding="utf-8")
+    assert '"--onedir"' in pack and '"--onefile"' not in pack
     apply_fluent_style()
     app = QApplication.instance() or QApplication([])
+    apply_fluent_style()
     assert QQuickStyle.name() == "FluentWinUI3", QQuickStyle.name()
     loop = QtLoop()
     hit: list[int] = []
@@ -39,7 +42,14 @@ def main() -> None:
     engine.load(str(qml))
     roots = engine.rootObjects()
     assert roots, qml
-    box = roots[0].findChild(QObject, "usbBox")
+    win = roots[0]
+    font = win.property("font")
+    assert font is not None and ("YaHei" in font.family() or "雅黑" in font.family()), font.family() if font else None
+    assert bool(win.property("navOpen")) is True
+    win.setProperty("navOpen", False)
+    app.processEvents()
+    assert bool(win.property("navOpen")) is False
+    box = win.findChild(QObject, "usbBox")
     assert box is not None
     app.processEvents()
     assert int(box.property("count") or 0) == 0
@@ -47,7 +57,7 @@ def main() -> None:
     app.processEvents()
     assert list(bridge.deviceModel.stringList()) == ["SERIAL-1", "SERIAL-2"]
     assert int(box.property("count") or 0) == 2, box.property("count")
-    roots[0].close()
+    win.close()
     print("ok", QQuickStyle.name(), qml)
 
 
