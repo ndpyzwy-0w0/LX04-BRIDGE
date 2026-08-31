@@ -5,33 +5,93 @@ import QtQuick.Layouts
 ApplicationWindow {
     id: win
     visible: true
-    title: "LX04 上位机"
-    width: 920
-    height: 640
+    title: "LX04 PC Bridge"
+    width: 800
+    height: 600
     minimumWidth: 560
     minimumHeight: 420
     font.family: "Microsoft YaHei"
-    color: "#F3F3F3"
+    color: chrome
     property bool navOpen: true
+    property int uptimeSec: 0
+    property var logLines: []
+    property int logFilterIndex: 0
+    readonly property bool dark: palette.window.hslLightness < 0.5
+    readonly property color chrome: dark ? "#202020" : "#F3F3F3"
+    readonly property color surface: dark ? "#2C2C2C" : "#FFFFFF"
+    readonly property color stroke: dark ? "#3F3F3F" : "#E6E6E6"
+    readonly property color muted: dark ? "#9A9A9A" : "#6B6B6B"
+    readonly property color ink: dark ? "#F0F0F0" : "#1A1A1A"
+    readonly property color accent: "#0078D4"
+    readonly property color ok: "#107C10"
+    readonly property color warn: "#9D5D00"
+    readonly property color err: "#C42B1C"
+    readonly property color sel: dark ? "#3B3B3B" : "#E6E6E6"
+    readonly property color hover: dark ? "#333333" : "#EEEEEE"
     readonly property var navPages: [
         { title: "总览", sub: "连接状态与诊断", glyph: "\uf015" },
         { title: "音频", sub: "麦克风与扬声器", glyph: "\uf001" },
-        { title: "屏幕", sub: "音箱显示与镜像", glyph: "\uf108" },
-        { title: "设置", sub: "启动与托盘", glyph: "\uf013" },
+        { title: "屏幕", sub: "800 × 480", glyph: "\uf108" },
+        { title: "设置", sub: "监控与系统", glyph: "\uf013" },
         { title: "日志", sub: "调试信息", glyph: "\uf15c" },
         { title: "关于", sub: "LX04 PC Bridge", glyph: "\uf05a" }
     ]
 
+    function toneColor(tone) {
+        if (tone === "ok") return win.ok
+        if (tone === "warn") return win.warn
+        if (tone === "error") return win.err
+        return win.muted
+    }
+    function toneGlyph(tone) {
+        if (tone === "ok") return "\uf00c"
+        if (tone === "warn") return "\uf071"
+        if (tone === "error") return "\uf00d"
+        return "\uf111"
+    }
+    function fmtUptime(sec) {
+        const h = Math.floor(sec / 3600)
+        const m = Math.floor((sec % 3600) / 60)
+        const s = sec % 60
+        const z = (n) => (n < 10 ? "0" : "") + n
+        return z(h) + ":" + z(m) + ":" + z(s)
+    }
+    function applyLog() {
+        const keys = ["", "INFO", "WARN", "ERROR"]
+        const key = keys[logFilterIndex]
+        const out = []
+        for (let i = 0; i < logLines.length; i++) {
+            const line = logLines[i]
+            if (!key || line.indexOf("  " + key + "  ") >= 0)
+                out.push(line)
+        }
+        logArea.text = out.join("\n")
+    }
+
     onClosing: (event) => { event.accepted = host.onWindowClosing() }
 
     FontLoader { id: faSolid; source: faFontUrl }
+
+    Timer {
+        interval: 1000
+        running: host.connected
+        repeat: true
+        onTriggered: win.uptimeSec += 1
+    }
+    Timer {
+        interval: 2000
+        running: pages.currentIndex === 2
+        repeat: true
+        triggeredOnStart: true
+        onTriggered: host.refreshStats()
+    }
 
     component FaText: Text {
         property string glyph: ""
         font.family: faSolid.name
         font.pixelSize: 15
         text: glyph
-        color: "#1A1A1A"
+        color: win.ink
         horizontalAlignment: Text.AlignHCenter
         verticalAlignment: Text.AlignVCenter
     }
@@ -75,13 +135,64 @@ ApplicationWindow {
         spacing: 2
         Label {
             text: title
+            color: win.ink
             font.pixelSize: 26
             font.bold: true
         }
         Label {
             text: subtitle
-            color: "#6B6B6B"
+            color: win.muted
             font.pixelSize: 13
+        }
+    }
+
+    component SectionLabel: Label {
+        color: win.ink
+        font.bold: true
+        font.pixelSize: 15
+    }
+
+    component DiagRow: RowLayout {
+        property string tone: "off"
+        property string label: ""
+        property string note: ""
+        spacing: 8
+        Layout.fillWidth: true
+        FaText {
+            glyph: win.toneGlyph(tone)
+            color: win.toneColor(tone)
+            Layout.preferredWidth: 18
+        }
+        Label {
+            text: label
+            color: win.ink
+            Layout.fillWidth: true
+        }
+        Label {
+            text: note
+            color: win.toneColor(tone)
+            visible: note.length > 0
+            font.pixelSize: 12
+        }
+    }
+
+    component StatTile: Rectangle {
+        property string title: ""
+        property string value: ""
+        property string sub: ""
+        visible: value.length > 0
+        Layout.fillWidth: true
+        implicitHeight: 72
+        radius: 6
+        color: win.dark ? "#252525" : "#FFFFFF"
+        border.color: win.stroke
+        ColumnLayout {
+            anchors.fill: parent
+            anchors.margins: 8
+            spacing: 2
+            Label { text: title; color: win.muted; font.pixelSize: 11 }
+            Label { text: value; color: win.ink; font.pixelSize: 18; font.bold: true }
+            Label { text: sub; color: win.muted; font.pixelSize: 11; visible: sub.length > 0 }
         }
     }
 
@@ -94,7 +205,7 @@ ApplicationWindow {
             objectName: "navPane"
             Layout.fillHeight: true
             Layout.preferredWidth: win.navOpen ? 200 : 52
-            color: "#F3F3F3"
+            color: win.chrome
             clip: true
 
             ColumnLayout {
@@ -121,6 +232,25 @@ ApplicationWindow {
                     }
                 }
 
+                RowLayout {
+                    Layout.fillWidth: true
+                    Layout.leftMargin: 8
+                    Layout.bottomMargin: 8
+                    visible: win.navOpen
+                    spacing: 8
+                    Image {
+                        source: appIconUrl
+                        Layout.preferredWidth: 28
+                        Layout.preferredHeight: 28
+                        fillMode: Image.PreserveAspectFit
+                    }
+                    ColumnLayout {
+                        spacing: 0
+                        Label { text: "LX04"; font.bold: true; color: win.ink }
+                        Label { text: "PC Bridge"; color: win.muted; font.pixelSize: 11 }
+                    }
+                }
+
                 Repeater {
                     model: win.navPages
                     Rectangle {
@@ -128,8 +258,8 @@ ApplicationWindow {
                         required property var modelData
                         Layout.fillWidth: true
                         implicitHeight: 40
-                        radius: 6
-                        color: pages.currentIndex === index ? "#E6E6E6" : (hover.containsMouse ? "#EEEEEE" : "transparent")
+                        radius: 4
+                        color: pages.currentIndex === index ? win.sel : (hover.containsMouse ? win.hover : "transparent")
                         RowLayout {
                             anchors.fill: parent
                             spacing: 8
@@ -139,7 +269,7 @@ ApplicationWindow {
                                 Layout.topMargin: 8
                                 Layout.bottomMargin: 8
                                 radius: 1
-                                color: pages.currentIndex === index ? "#0078D4" : "transparent"
+                                color: pages.currentIndex === index ? win.accent : "transparent"
                             }
                             FaText {
                                 glyph: modelData.glyph
@@ -147,6 +277,7 @@ ApplicationWindow {
                             }
                             Label {
                                 text: modelData.title
+                                color: win.ink
                                 visible: win.navOpen
                                 Layout.fillWidth: true
                                 elide: Text.ElideRight
@@ -167,7 +298,7 @@ ApplicationWindow {
                 Rectangle {
                     Layout.fillWidth: true
                     height: 1
-                    color: "#E0E0E0"
+                    color: win.stroke
                     visible: win.navOpen
                 }
 
@@ -177,16 +308,16 @@ ApplicationWindow {
                     spacing: 8
                     FaText {
                         glyph: host.connected ? "\uf058" : "\uf111"
-                        color: host.connected ? "#107C10" : "#8A8A8A"
+                        color: host.connected ? win.ok : win.muted
                         Layout.preferredWidth: 22
                     }
                     ColumnLayout {
                         spacing: 0
                         visible: win.navOpen
-                        Label { text: host.connected ? "已连接" : "未连接" }
+                        Label { text: host.connected ? "已连接" : "未连接"; color: win.ink }
                         Label {
-                            text: host.connected ? host.headline : "请连接 LX04"
-                            color: "#8A8A8A"
+                            text: host.connected ? "LX04 · USB / ADB" : "请连接 LX04"
+                            color: win.muted
                             font.pixelSize: 11
                             wrapMode: Text.NoWrap
                             elide: Text.ElideRight
@@ -207,9 +338,9 @@ ApplicationWindow {
             Rectangle {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
-                radius: 10
-                color: "#FFFFFF"
-                border.color: "#E6E6E6"
+                radius: 6
+                color: win.surface
+                border.color: win.stroke
                 clip: true
 
                 ColumnLayout {
@@ -235,56 +366,155 @@ ApplicationWindow {
                                 width: Math.max(240, content.width - 72)
                                 spacing: 16
 
+                                SectionLabel { text: "连接状态" }
                                 Rectangle {
+                                    objectName: "overviewStatus"
                                     Layout.fillWidth: true
-                                    radius: 8
-                                    color: "#FFF4D6"
-                                    implicitHeight: bannerCol.implicitHeight + 20
+                                    radius: 6
+                                    color: host.connected ? (win.dark ? "#1C3B2A" : "#E6F4EA") : (host.headline === "连接失败" ? (win.dark ? "#3B1C1F" : "#FDE7E9") : (win.dark ? "#3A3416" : "#FFF4D6"))
+                                    implicitHeight: statusCol.implicitHeight + 20
                                     ColumnLayout {
-                                        id: bannerCol
+                                        id: statusCol
                                         anchors.left: parent.left
                                         anchors.right: parent.right
                                         anchors.verticalCenter: parent.verticalCenter
                                         anchors.margins: 12
                                         spacing: 4
                                         RowLayout {
-                                            FaText { glyph: "\uf05a"; color: "#8A5A00" }
+                                            FaText {
+                                                glyph: host.connected ? "\uf058" : "\uf111"
+                                                color: host.connected ? win.ok : (host.headline === "连接失败" ? win.err : win.warn)
+                                            }
                                             Label {
-                                                text: host.headline
+                                                text: host.connected ? "已连接" : (host.headline === "连接失败" ? "连接失败" : "未连接")
                                                 font.bold: true
-                                                wrapMode: Text.Wrap
-                                                Layout.fillWidth: true
+                                                font.pixelSize: 18
+                                                color: win.ink
                                             }
                                         }
                                         Label {
+                                            text: host.connected ? "LX04 · USB / ADB" : (host.headline === "连接失败" ? "无法连接到 LX04。" : "请连接 LX04 设备后开始使用")
+                                            wrapMode: Text.Wrap
+                                            color: win.ink
+                                            Layout.fillWidth: true
+                                            Layout.leftMargin: 26
+                                        }
+                                        Label {
+                                            visible: host.connected
+                                            text: "连接时间：" + win.fmtUptime(win.uptimeSec)
+                                            color: win.muted
+                                            Layout.leftMargin: 26
+                                        }
+                                        Label {
+                                            visible: host.connected && host.detail.length > 0
                                             text: host.detail
                                             wrapMode: Text.Wrap
-                                            color: "#5C4A1F"
+                                            color: win.muted
                                             Layout.fillWidth: true
                                             Layout.leftMargin: 26
                                         }
                                     }
                                 }
 
-                                Label { text: "设备"; font.bold: true; font.pixelSize: 15 }
-                                RowLayout {
-                                    HostCombo {
-                                        objectName: "usbBox"
-                                        hostModel: host.deviceModel
-                                        hostIndex: host.deviceIndex
-                                        emptyText: "正在扫描…"
-                                        onActivated: (i) => host.setDeviceIndex(i)
+                                SectionLabel { text: "设备" }
+                                Rectangle {
+                                    Layout.fillWidth: true
+                                    radius: 6
+                                    border.color: win.stroke
+                                    color: "transparent"
+                                    implicitHeight: deviceCol.implicitHeight + 20
+                                    ColumnLayout {
+                                        id: deviceCol
+                                        anchors.left: parent.left
+                                        anchors.right: parent.right
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        anchors.margins: 12
+                                        spacing: 8
+                                        Label {
+                                            text: host.connected ? (host.hasDevice ? usbBox.displayText : "LX04") : (host.hasDevice ? usbBox.displayText : "未检测到 LX04")
+                                            font.bold: true
+                                            color: win.ink
+                                        }
+                                        Label {
+                                            text: host.connected ? "ADB 已连接\nUSB 数据通道正常" : (host.hasDevice ? "ADB · USB" : "")
+                                            visible: host.connected || host.hasDevice
+                                            color: win.muted
+                                            wrapMode: Text.Wrap
+                                            Layout.fillWidth: true
+                                        }
+                                        HostCombo {
+                                            id: usbBox
+                                            objectName: "usbBox"
+                                            visible: !host.connected
+                                            hostModel: host.deviceModel
+                                            hostIndex: host.deviceIndex
+                                            emptyText: "未检测到 LX04"
+                                            onActivated: (i) => host.setDeviceIndex(i)
+                                        }
                                     }
+                                }
+                                RowLayout {
                                     Button { text: "刷新设备"; onClicked: host.refreshDevices() }
-                                    Button { text: "连接"; onClicked: host.connectDevice() }
-                                    Button { text: "断开"; onClicked: host.disconnectDevice() }
+                                    Item { Layout.fillWidth: true }
+                                    Button {
+                                        text: "重试"
+                                        highlighted: true
+                                        visible: !host.connected && host.headline === "连接失败"
+                                        onClicked: host.connectDevice()
+                                    }
+                                    Button {
+                                        text: "连接"
+                                        highlighted: true
+                                        visible: !host.connected && host.hasDevice && host.headline !== "连接失败"
+                                        onClicked: host.connectDevice()
+                                    }
+                                    Button {
+                                        text: "断开连接"
+                                        highlighted: true
+                                        visible: host.connected
+                                        onClicked: host.disconnectDevice()
+                                    }
                                 }
 
-                                Label { text: "电平"; font.bold: true; font.pixelSize: 15 }
-                                Label { text: "麦克风"; opacity: 0.7 }
-                                LevelMeter { level: host.micLevel }
-                                Label { text: "扬声器"; opacity: 0.7 }
-                                LevelMeter { level: host.spkLevel }
+                                SectionLabel { text: "连接诊断" }
+                                ColumnLayout {
+                                    id: diagBox
+                                    objectName: "diagBox"
+                                    spacing: 6
+                                    Layout.fillWidth: true
+                                    DiagRow { tone: host.diagAdb; label: "LX04 ADB"; note: host.diagAdb === "warn" ? "未检测到" : (host.diagAdb === "error" ? "未找到 adb" : "") }
+                                    DiagRow { tone: host.diagUsb; label: "USB 数据通道"; note: host.diagUsb === "error" ? "已断开" : (host.diagUsb === "off" ? "未检测" : "") }
+                                    DiagRow { tone: host.diagAudio; label: "音频通道"; note: host.diagAudio === "warn" ? "已关闭" : (host.diagAudio === "off" ? "未检测" : "") }
+                                    DiagRow { tone: host.diagVb; label: "VB-CABLE"; note: host.diagVb === "warn" ? "未安装" : (host.diagVb === "off" ? "未检测" : "") }
+                                    DiagRow { tone: host.diagHifi; label: "Hi-Fi Cable"; note: host.diagHifi === "warn" ? "未安装" : (host.diagHifi === "off" ? "未检测" : "") }
+                                    DiagRow { tone: host.diagMirror; label: "镜像通道"; note: host.diagMirror === "warn" ? "未打开" : (host.diagMirror === "off" ? "未检测" : "") }
+                                    DiagRow { tone: host.diagToast; label: "系统弹窗通道"; note: host.diagToast === "warn" ? "走 17890" : (host.diagToast === "off" ? "未检测" : "") }
+                                }
+                                Label {
+                                    text: host.diagHint
+                                    visible: host.diagHint.length > 0
+                                    wrapMode: Text.Wrap
+                                    color: win.warn
+                                    Layout.fillWidth: true
+                                }
+                                RowLayout {
+                                    Button { text: "重新检测"; onClicked: host.redetect() }
+                                    Item { Layout.fillWidth: true }
+                                    Button {
+                                        text: "查看帮助"
+                                        visible: host.diagHifi === "warn" || host.diagVb === "warn"
+                                        onClicked: host.diagHifi === "warn" ? host.installHifi() : host.installVb()
+                                    }
+                                }
+
+                                SectionLabel { text: "音频状态" }
+                                Label { text: "麦克风 · LX04 → Windows"; opacity: 0.7; color: win.ink }
+                                LevelMeter { objectName: "micMeter"; level: host.micLevel }
+                                Label { text: "扬声器 · Windows → LX04"; opacity: 0.7; color: win.ink }
+                                LevelMeter { objectName: "spkMeter"; level: host.spkLevel }
+
+                                SectionLabel { text: "屏幕状态" }
+                                Label { text: host.screenMode; color: win.ink }
                             }
                         }
 
@@ -296,37 +526,134 @@ ApplicationWindow {
                                 width: Math.max(240, content.width - 72)
                                 spacing: 12
 
-                                RowLayout {
-                                    Switch {
-                                        text: "麦克风 → 电脑"
-                                        checked: host.micEnabled
-                                        onClicked: host.setMicEnabled(checked)
-                                    }
-                                    HostCombo {
-                                        hostModel: host.injectModel
-                                        hostIndex: host.injectIndex
-                                        emptyText: "暂无设备"
-                                        onActivated: (i) => host.setInjectIndex(i)
+                                Rectangle {
+                                    Layout.fillWidth: true
+                                    radius: 6
+                                    border.color: win.stroke
+                                    color: "transparent"
+                                    implicitHeight: micCard.implicitHeight + 20
+                                    ColumnLayout {
+                                        id: micCard
+                                        anchors.left: parent.left
+                                        anchors.right: parent.right
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        anchors.margins: 12
+                                        spacing: 8
+                                        RowLayout {
+                                            Label { text: "麦克风"; font.bold: true; font.pixelSize: 16; color: win.ink }
+                                            Item { Layout.fillWidth: true }
+                                            Label {
+                                                text: host.micEnabled ? (host.micMuted ? "静音" : "正常") : "关闭"
+                                                color: host.micEnabled && !host.micMuted ? win.ok : win.muted
+                                            }
+                                        }
+                                        Label { text: "LX04 双麦阵列 → Windows"; color: win.muted }
+                                        LevelMeter { level: host.micLevel }
+                                        RowLayout {
+                                            Switch {
+                                                text: "麦克风 → 电脑"
+                                                checked: host.micEnabled
+                                                onClicked: host.setMicEnabled(checked)
+                                            }
+                                            HostCombo {
+                                                hostModel: host.injectModel
+                                                hostIndex: host.injectIndex
+                                                emptyText: "暂无设备"
+                                                onActivated: (i) => host.setInjectIndex(i)
+                                            }
+                                        }
+                                        Label {
+                                            text: "输出到  " + (host.injectLabel || "—")
+                                            color: win.muted
+                                            wrapMode: Text.Wrap
+                                            Layout.fillWidth: true
+                                        }
+                                        RowLayout {
+                                            Label { text: "微信请选麦克风"; color: win.ink }
+                                            Label { text: host.wechatMic; color: win.muted }
+                                            Item { Layout.fillWidth: true }
+                                            Button {
+                                                text: host.micMuted ? "取消静音" : "静音麦克风"
+                                                enabled: host.connected
+                                                onClicked: host.toggleMicMute()
+                                                ToolTip.visible: hovered && !enabled
+                                                ToolTip.text: "请先连接 LX04"
+                                            }
+                                        }
+                                        RowLayout {
+                                            Label { text: "麦克风增益"; color: win.ink }
+                                            Slider {
+                                                Layout.fillWidth: true
+                                                from: 0
+                                                to: 300
+                                                value: host.gainPercent
+                                                onMoved: host.setGain(value)
+                                            }
+                                            Label { text: host.gainLabel; color: win.muted }
+                                        }
                                     }
                                 }
-                                RowLayout {
-                                    Switch {
-                                        text: "电脑 → 音箱"
-                                        checked: host.spkEnabled
-                                        onClicked: host.setSpkEnabled(checked)
-                                    }
-                                    HostCombo {
-                                        hostModel: host.spkModel
-                                        hostIndex: host.spkIndex
-                                        emptyText: "暂无设备"
-                                        onActivated: (i) => host.setSpkIndex(i)
-                                    }
-                                    Switch {
-                                        text: "设为默认播放"
-                                        checked: host.setDefaultSpk
-                                        onClicked: host.setSetDefaultSpk(checked)
+
+                                Rectangle {
+                                    Layout.fillWidth: true
+                                    radius: 6
+                                    border.color: win.stroke
+                                    color: "transparent"
+                                    implicitHeight: spkCard.implicitHeight + 20
+                                    ColumnLayout {
+                                        id: spkCard
+                                        anchors.left: parent.left
+                                        anchors.right: parent.right
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        anchors.margins: 12
+                                        spacing: 8
+                                        RowLayout {
+                                            Label { text: "扬声器"; font.bold: true; font.pixelSize: 16; color: win.ink }
+                                            Item { Layout.fillWidth: true }
+                                            Label {
+                                                text: host.spkEnabled ? (host.spkMuted ? "静音" : "正常") : "关闭"
+                                                color: host.spkEnabled && !host.spkMuted ? win.ok : win.muted
+                                            }
+                                        }
+                                        Label { text: "Windows → LX04"; color: win.muted }
+                                        LevelMeter { level: host.spkLevel }
+                                        RowLayout {
+                                            Switch {
+                                                text: "电脑 → 音箱"
+                                                checked: host.spkEnabled
+                                                onClicked: host.setSpkEnabled(checked)
+                                            }
+                                            HostCombo {
+                                                hostModel: host.spkModel
+                                                hostIndex: host.spkIndex
+                                                emptyText: "暂无设备"
+                                                onActivated: (i) => host.setSpkIndex(i)
+                                            }
+                                        }
+                                        Label {
+                                            text: "来源  " + (host.spkLabel || "—")
+                                            color: win.muted
+                                            wrapMode: Text.Wrap
+                                            Layout.fillWidth: true
+                                        }
+                                        RowLayout {
+                                            Switch {
+                                                text: "设为默认播放"
+                                                checked: host.setDefaultSpk
+                                                onClicked: host.setSetDefaultSpk(checked)
+                                            }
+                                            Item { Layout.fillWidth: true }
+                                            Button {
+                                                text: host.spkMuted ? "取消静音" : "静音扬声器"
+                                                enabled: host.connected
+                                                onClicked: host.toggleSpkMute()
+                                                ToolTip.visible: hovered && !enabled
+                                                ToolTip.text: "请先连接 LX04"
+                                            }
+                                        }
                                     }
                                 }
+
                                 Switch {
                                     text: "同步系统音量"
                                     checked: host.volumeSync
@@ -334,36 +661,20 @@ ApplicationWindow {
                                 }
                                 Label {
                                     text: "开了后电脑和音箱音量一起变；关掉则各自调节、互不影响。"
-                                    opacity: 0.7
+                                    color: win.muted
                                     wrapMode: Text.Wrap
                                     Layout.fillWidth: true
                                 }
                                 RowLayout {
-                                    Label { text: "微信请选麦克风" }
-                                    Label { text: host.wechatMic }
-                                }
-                                RowLayout {
-                                    Label { text: "麦克风增益" }
-                                    Slider {
-                                        Layout.fillWidth: true
-                                        from: 0
-                                        to: 300
-                                        value: host.gainPercent
-                                        onMoved: host.setGain(value)
-                                    }
-                                    Label { text: host.gainLabel }
-                                }
-                                RowLayout {
                                     Button { text: "试音"; onClicked: host.testTone() }
                                     Button { text: "音箱试音"; onClicked: host.speakerTest() }
-                                    Button { text: "静音切换"; onClicked: host.toggleMute() }
                                     Item { Layout.fillWidth: true }
                                     Button { text: "安装 Hi-Fi Cable"; onClicked: host.installHifi() }
                                     Button { text: "安装 VB-CABLE"; onClicked: host.installVb() }
                                 }
                                 Label {
                                     text: "CABLE Input 已从系统播放列表隐藏，上位机仍会把麦克风灌进去。微信选 CABLE Output。扬声器选 Hi-Fi Cable Input。"
-                                    opacity: 0.7
+                                    color: win.muted
                                     wrapMode: Text.Wrap
                                     Layout.fillWidth: true
                                 }
@@ -377,6 +688,104 @@ ApplicationWindow {
                             ColumnLayout {
                                 width: Math.max(240, content.width - 72)
                                 spacing: 12
+
+                                Item {
+                                    id: previewBox
+                                    objectName: "previewBox"
+                                    Layout.fillWidth: true
+                                    implicitHeight: Math.max(120, width * 480 / 800)
+                                    Rectangle {
+                                        anchors.fill: parent
+                                        radius: 6
+                                        color: win.dark ? "#1A1A1A" : "#F7F7F7"
+                                        border.color: win.stroke
+                                        ColumnLayout {
+                                            anchors.fill: parent
+                                            anchors.margins: 12
+                                            spacing: 8
+                                            Label {
+                                                text: "800 × 480  ·  " + host.screenMode
+                                                color: win.muted
+                                                font.pixelSize: 12
+                                                Layout.alignment: Qt.AlignHCenter
+                                            }
+                                            GridLayout {
+                                                Layout.fillWidth: true
+                                                Layout.fillHeight: true
+                                                columns: 5
+                                                rowSpacing: 8
+                                                columnSpacing: 8
+                                                visible: host.statCpu.length > 0
+                                                StatTile { title: "CPU"; value: host.statCpu; sub: host.statCpuTemp }
+                                                StatTile { title: "GPU"; value: host.statGpu; sub: host.statGpuTemp }
+                                                StatTile { title: "内存"; value: host.statRam; sub: host.statRamSub }
+                                                StatTile { title: "磁盘"; value: host.statDisk; sub: host.statDiskSub }
+                                                StatTile { title: "网络"; value: host.statNetDown.length > 0 ? ("↓ " + host.statNetDown) : ""; sub: host.statNetUp.length > 0 ? ("↑ " + host.statNetUp) : "" }
+                                            }
+                                            Label {
+                                                visible: host.statCpu.length === 0
+                                                text: "点击下方预览屏幕，查看音箱画面"
+                                                color: win.muted
+                                                Layout.alignment: Qt.AlignHCenter
+                                                Layout.fillHeight: true
+                                                verticalAlignment: Text.AlignVCenter
+                                            }
+                                        }
+                                    }
+                                }
+
+                                RowLayout {
+                                    Button {
+                                        text: "状态监视"
+                                        highlighted: host.pcStatsEnabled && !host.mirrorRunning
+                                        onClicked: host.setPcStatsEnabled(true)
+                                    }
+                                    Button {
+                                        text: host.mirrorRunning ? "停止镜像" : "屏幕镜像"
+                                        highlighted: host.mirrorRunning
+                                        enabled: host.connected
+                                        onClicked: host.setMirrorEnabled(!host.mirrorRunning)
+                                        ToolTip.visible: hovered && !enabled
+                                        ToolTip.text: "请先连接 LX04"
+                                    }
+                                    Button {
+                                        text: "系统弹窗"
+                                        highlighted: host.toastMirror
+                                        onClicked: host.setToastMirror(!host.toastMirror)
+                                    }
+                                }
+                                RowLayout {
+                                    Button { text: "编辑样式"; onClicked: host.openHudPreview() }
+                                    Button { text: "上传背景"; onClicked: host.uploadHudBg() }
+                                    Button { text: "预览屏幕"; onClicked: host.openHudPreview() }
+                                }
+
+                                SectionLabel { text: "屏幕镜像" }
+                                RowLayout {
+                                    Label { text: "显示器"; color: win.ink }
+                                    HostCombo {
+                                        hostModel: host.monitorModel
+                                        hostIndex: host.monitorIndex
+                                        onActivated: (i) => host.setMonitorIndex(i)
+                                    }
+                                }
+                                Label { text: "画质"; color: win.ink }
+                                RowLayout {
+                                    Repeater {
+                                        model: host.qualityModel
+                                        RadioButton {
+                                            text: model.display
+                                            checked: host.qualityIndex === index
+                                            onClicked: host.setQualityIndex(index)
+                                        }
+                                    }
+                                }
+                                Label {
+                                    text: "码率越高越清晰，USB 忙时可能更卡。"
+                                    color: win.muted
+                                    wrapMode: Text.Wrap
+                                    Layout.fillWidth: true
+                                }
 
                                 RowLayout {
                                     Switch {
@@ -389,62 +798,17 @@ ApplicationWindow {
                                         checked: host.upsideDown
                                         onClicked: host.setUpsideDown(checked)
                                     }
-                                    Label { text: "倒转音箱屏幕"; opacity: 0.7 }
-                                }
-                                RowLayout {
-                                    Switch {
-                                        text: "音箱显示电脑状态"
-                                        checked: host.pcStatsEnabled
-                                        onClicked: host.setPcStatsEnabled(checked)
-                                    }
-                                    Label { text: "磁盘" }
-                                    HostCombo {
-                                        hostModel: host.diskModel
-                                        hostIndex: host.diskIndex
-                                        onActivated: (i) => host.setDiskIndex(i)
-                                    }
-                                }
-                                RowLayout {
-                                    Button { text: "预览屏幕"; onClicked: host.openHudPreview() }
-                                    Button { text: "上传背景"; onClicked: host.uploadHudBg() }
-                                    Button { text: "CPU 温度 / Afterburner"; onClicked: host.afterburner() }
+                                    Label { text: "倒转音箱屏幕"; color: win.muted }
                                 }
                                 Label {
                                     text: host.pcLine
-                                    opacity: 0.7
+                                    color: win.muted
                                     wrapMode: Text.Wrap
                                     Layout.fillWidth: true
                                 }
-                                RowLayout {
-                                    Label { text: "同步屏幕" }
-                                    HostCombo {
-                                        hostModel: host.monitorModel
-                                        hostIndex: host.monitorIndex
-                                        onActivated: (i) => host.setMonitorIndex(i)
-                                    }
-                                    Label { text: "码率" }
-                                    HostCombo {
-                                        hostModel: host.qualityModel
-                                        hostIndex: host.qualityIndex
-                                        Layout.fillWidth: false
-                                        Layout.preferredWidth: 120
-                                        onActivated: (i) => host.setQualityIndex(i)
-                                    }
-                                }
                                 Label {
-                                    text: "码率越高越清晰，USB 忙时可能更卡。"
-                                    opacity: 0.7
-                                    wrapMode: Text.Wrap
-                                    Layout.fillWidth: true
-                                }
-                                Switch {
-                                    text: "同步系统弹窗"
-                                    checked: host.toastMirror
-                                    onClicked: host.setToastMirror(checked)
-                                }
-                                Label {
-                                    text: "开了后系统通知的标题、正文、按钮会显示到音箱，点按钮即点系统通知。"
-                                    opacity: 0.7
+                                    text: "开了系统弹窗后，通知的标题、正文、按钮会显示到音箱，点按钮即点系统通知。"
+                                    color: win.muted
                                     wrapMode: Text.Wrap
                                     Layout.fillWidth: true
                                 }
@@ -459,6 +823,25 @@ ApplicationWindow {
                                 width: Math.max(240, content.width - 72)
                                 spacing: 12
 
+                                SectionLabel { text: "监控" }
+                                Rectangle { Layout.fillWidth: true; height: 1; color: win.stroke }
+                                RowLayout {
+                                    Label { text: "监测磁盘"; color: win.ink }
+                                    HostCombo {
+                                        hostModel: host.diskModel
+                                        hostIndex: host.diskIndex
+                                        onActivated: (i) => host.setDiskIndex(i)
+                                    }
+                                }
+                                Button { text: "CPU 温度 / Afterburner"; onClicked: host.afterburner() }
+
+                                SectionLabel { text: "系统" }
+                                Rectangle { Layout.fillWidth: true; height: 1; color: win.stroke }
+                                Switch {
+                                    text: "同步系统弹窗"
+                                    checked: host.toastMirror
+                                    onClicked: host.setToastMirror(checked)
+                                }
                                 Switch {
                                     text: "开机自启动"
                                     checked: host.autostart
@@ -466,7 +849,7 @@ ApplicationWindow {
                                 }
                                 Label {
                                     text: "登录 Windows 后自动打开上位机。"
-                                    opacity: 0.7
+                                    color: win.muted
                                     wrapMode: Text.Wrap
                                     Layout.fillWidth: true
                                 }
@@ -477,7 +860,7 @@ ApplicationWindow {
                                 }
                                 Label {
                                     text: "开了后点窗口关闭会藏到托盘继续跑。左键图标恢复窗口，右键可选退出。"
-                                    opacity: 0.7
+                                    color: win.muted
                                     wrapMode: Text.Wrap
                                     Layout.fillWidth: true
                                 }
@@ -490,22 +873,29 @@ ApplicationWindow {
                             spacing: 10
 
                             RowLayout {
+                                ComboBox {
+                                    id: logFilter
+                                    objectName: "logFilter"
+                                    model: ["全部", "INFO", "WARN", "ERROR"]
+                                    Layout.preferredWidth: 120
+                                    onActivated: (i) => { win.logFilterIndex = i; win.applyLog() }
+                                }
                                 Item { Layout.fillWidth: true }
                                 Button {
                                     text: "复制"
-                                    onClicked: host.copyText(logArea.text)
+                                    onClicked: host.copyText(win.logLines.join("\n"))
                                 }
                                 Button {
                                     text: "清空"
-                                    onClicked: logArea.clear()
+                                    onClicked: { win.logLines = []; win.applyLog() }
                                 }
                             }
                             Rectangle {
                                 Layout.fillWidth: true
                                 Layout.fillHeight: true
-                                radius: 8
-                                border.color: "#E0E0E0"
-                                color: "#FFFFFF"
+                                radius: 6
+                                border.color: win.stroke
+                                color: win.surface
                                 TextArea {
                                     id: logArea
                                     anchors.fill: parent
@@ -513,6 +903,7 @@ ApplicationWindow {
                                     readOnly: true
                                     wrapMode: TextEdit.Wrap
                                     font.family: "Microsoft YaHei"
+                                    color: win.ink
                                     background: null
                                 }
                             }
@@ -538,14 +929,16 @@ ApplicationWindow {
                                     text: "LX04 PC Bridge"
                                     font.pixelSize: 20
                                     font.bold: true
+                                    color: win.ink
                                 }
                                 Label {
                                     text: "版本 v" + host.appVersion
-                                    color: "#6B6B6B"
+                                    color: win.muted
                                 }
                                 Label {
                                     text: "用 USB 把小爱触屏音箱 LX04 接到电脑：麦克风、扬声器和屏幕都可以走这条线。"
                                     wrapMode: Text.Wrap
+                                    color: win.ink
                                     Layout.fillWidth: true
                                 }
                             }
@@ -558,27 +951,36 @@ ApplicationWindow {
                 Layout.fillWidth: true
                 spacing: 16
                 Label {
-                    text: (host.micEnabled || host.spkEnabled ? "●" : "○") + "  音频: " + (host.micEnabled || host.spkEnabled ? "开" : "—")
-                    color: "#5C5C5C"
+                    text: (host.micEnabled || host.spkEnabled ? "●" : "○") + "  音频：" + (host.micEnabled || host.spkEnabled ? "正常" : "—")
+                    color: win.muted
                     font.pixelSize: 12
                 }
                 Label {
-                    text: (host.pcStatsEnabled ? "●" : "○") + "  屏幕: " + (host.pcStatsEnabled ? "状态监视" : "关")
-                    color: "#5C5C5C"
+                    text: "●  屏幕：" + host.screenMode
+                    color: win.muted
                     font.pixelSize: 12
                 }
                 Label {
-                    text: (host.toastMirror ? "●" : "○") + "  弹窗同步: " + (host.toastMirror ? "开" : "关")
-                    color: "#5C5C5C"
+                    text: (host.toastMirror ? "●" : "○") + "  弹窗同步：" + (host.toastMirror ? "已开启" : "关")
+                    color: win.muted
                     font.pixelSize: 12
                 }
                 Item { Layout.fillWidth: true }
+                Label {
+                    text: win.logLines.length ? ("最近日志 " + String(win.logLines[win.logLines.length - 1]).slice(0, 5)) : ""
+                    color: win.muted
+                    font.pixelSize: 12
+                }
             }
         }
     }
 
     Connections {
         target: host
-        function onLogLine(line) { logArea.append(line) }
+        function onLogLine(line) {
+            win.logLines = win.logLines.concat([line])
+            win.applyLog()
+        }
+        function onConnectedChanged() { win.uptimeSec = 0 }
     }
 }

@@ -36,6 +36,13 @@ def main() -> None:
     assert hit, "QtLoop.after from a worker thread must run on the GUI loop"
     bridge = HostBridge()
     assert bridge.deviceModel.rowCount() == 0
+    assert bridge.diagUsb == "off" and bridge.diagAdb == "off"
+    from pc_host import _log_level
+    from qt_ui import _fmt_rate
+    assert _log_level("连接失败: boom") == "ERROR"
+    assert _log_level("警告：串音") == "WARN"
+    assert _log_level("USB 设备: 无") == "INFO"
+    assert _fmt_rate(2048).endswith("KB/s")
     engine = QQmlApplicationEngine()
     engine.rootContext().setContextProperty("host", bridge)
     bind_qml_assets(engine)
@@ -52,6 +59,14 @@ def main() -> None:
     assert bool(win.property("navOpen")) is False
     assert win.findChild(QObject, "navToggle") is not None
     assert win.findChild(QObject, "aboutPage") is not None
+    assert win.findChild(QObject, "diagBox") is not None
+    assert win.findChild(QObject, "previewBox") is not None
+    assert win.findChild(QObject, "logFilter") is not None
+    assert win.findChild(QObject, "micMeter") is not None
+    assert bridge.diagUsb == "off"
+    assert bridge.diagVb == "off"
+    assert bridge.diagHifi == "off"
+    assert bridge.statCpu == ""
     box = win.findChild(QObject, "usbBox")
     assert box is not None
     app.processEvents()
