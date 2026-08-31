@@ -97,6 +97,8 @@ def main() -> None:
     app.processEvents()
     assert hudwin.findChild(QObject, "hudView") is not None
     assert hudwin.findChild(QObject, "hudEditor") is not None
+    view = hudwin.findChild(QObject, "hudView")
+    assert view.property("editor") is not None
     hudwin.close()
     editor.closePreview()
     print("ok", QQuickStyle.name(), qml)

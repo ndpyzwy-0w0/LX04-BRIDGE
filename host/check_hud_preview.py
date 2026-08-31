@@ -36,7 +36,8 @@ def main() -> None:
     painter = QPainter(img)
     hud_preview.draw_hud(PainterCanvas(painter, 800, 480), session.state)
     painter.end()
-    assert img.pixelColor(20, 20).alpha() > 0
+    dot = img.pixelColor(33, 33)
+    assert dot.green() > 150 and dot.red() < 120, (dot.red(), dot.green(), dot.blue())
     hud_preview.close_session()
     hud_preview.shutdown_tk()
     print("ok")

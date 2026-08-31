@@ -9,6 +9,7 @@ from PySide6.QtCore import (
     QObject,
     QPointF,
     QRectF,
+    QSize,
     QStringListModel,
     Qt,
     QTimer,
@@ -250,39 +251,57 @@ class PainterCanvas:
 
 
 class HudView(QQuickPaintedItem):
-    hudChanged = Signal()
+    editorChanged = Signal()
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
-        self._hud = None
+        self._editor = None
         self.setAntialiasing(True)
         self.setOpaquePainting(True)
+        self.setFillColor(QColor("#0B1220"))
+        self.setImplicitWidth(800)
+        self.setImplicitHeight(480)
 
-    def getHud(self):
-        return self._hud
+    def getEditor(self):
+        return self._editor
 
-    def setHud(self, value) -> None:
-        if self._hud is value:
+    def setEditor(self, value) -> None:
+        if self._editor is value:
             return
-        if self._hud is not None:
+        if self._editor is not None:
             try:
-                self._hud.viewTick.disconnect(self.update)
+                self._editor.viewTick.disconnect(self._redraw)
             except Exception:
                 pass
-        self._hud = value
+        self._editor = value
         if value is not None:
-            value.viewTick.connect(self.update)
-        self.hudChanged.emit()
+            value.viewTick.connect(self._redraw)
+        self.editorChanged.emit()
+        self._redraw()
+
+    editor = Property(QObject, getEditor, setEditor, notify=editorChanged)
+
+    @Slot()
+    def _redraw(self) -> None:
         self.update()
 
-    hud = Property(QObject, getHud, setHud, notify=hudChanged)
+    def geometryChange(self, new_geo, old) -> None:
+        super().geometryChange(new_geo, old)
+        win = self.window()
+        dpr = float(win.effectiveDevicePixelRatio()) if win is not None else 1.0
+        self.setTextureSize(QSize(max(1, int(self.width() * dpr)), max(1, int(self.height() * dpr))))
+        self.update()
 
     def paint(self, painter: QPainter) -> None:
-        editor = self._hud
-        if editor is None or editor.session is None:
-            painter.fillRect(self.boundingRect(), QColor("#0B1220"))
+        editor = self._editor
+        w, h = int(self.width()), int(self.height())
+        if editor is None or editor.session is None or w < 4 or h < 4:
+            painter.fillRect(0, 0, max(1, w), max(1, h), QColor("#0B1220"))
             return
-        hud_preview.draw_hud(PainterCanvas(painter, int(self.width()), int(self.height())), editor.session.state)
+        try:
+            hud_preview.draw_hud(PainterCanvas(painter, w, h), editor.session.state)
+        except Exception:
+            painter.fillRect(0, 0, w, h, QColor("#0B1220"))
 
 
 def register_hud_types() -> None:
