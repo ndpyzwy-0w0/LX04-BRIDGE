@@ -160,28 +160,29 @@ ApplicationWindow {
         radius: 4
         readonly property var page: win.navPages[pageIndex]
         color: pages.currentIndex === pageIndex ? win.sel : (navHover.containsMouse ? win.hover : "transparent")
-        RowLayout {
-            anchors.fill: parent
-            spacing: 8
-            Rectangle {
-                width: 3
-                Layout.fillHeight: true
-                Layout.topMargin: 8
-                Layout.bottomMargin: 8
-                radius: 1
-                color: pages.currentIndex === pageIndex ? win.accent : "transparent"
-            }
-            FaText {
-                glyph: page.glyph
-                Layout.preferredWidth: 22
-            }
-            Label {
-                text: page.title
-                color: win.ink
-                visible: win.navOpen
-                Layout.fillWidth: true
-                elide: Text.ElideRight
-            }
+        Rectangle {
+            width: 3
+            height: parent.height - 16
+            x: 0
+            y: 8
+            radius: 1
+            color: pages.currentIndex === pageIndex ? win.accent : "transparent"
+        }
+        FaText {
+            x: 11
+            width: 22
+            height: parent.height
+            glyph: page.glyph
+        }
+        Label {
+            x: 37
+            width: Math.max(0, parent.width - 45)
+            height: parent.height
+            verticalAlignment: Text.AlignVCenter
+            text: page.title
+            color: win.ink
+            visible: win.navOpen
+            elide: Text.ElideRight
         }
         MouseArea {
             id: navHover
@@ -318,11 +319,12 @@ ApplicationWindow {
 
                 Item {
                     objectName: "navToggle"
-                    Layout.alignment: Qt.AlignLeft
-                    implicitWidth: 36
-                    implicitHeight: 36
+                    Layout.fillWidth: true
+                    implicitHeight: 40
                     FaText {
-                        anchors.centerIn: parent
+                        x: 11
+                        width: 22
+                        height: parent.height
                         glyph: "\uf0c9"
                         font.pixelSize: 16
                     }
@@ -349,16 +351,20 @@ ApplicationWindow {
                     visible: win.navOpen
                 }
 
-                RowLayout {
+                Item {
                     Layout.fillWidth: true
                     Layout.topMargin: 8
-                    spacing: 8
+                    implicitHeight: 40
                     FaText {
+                        x: 11
+                        width: 22
+                        height: parent.height
                         glyph: host.connected ? "\uf058" : "\uf111"
                         color: host.connected ? win.ok : win.muted
-                        Layout.preferredWidth: 22
                     }
                     ColumnLayout {
+                        x: 37
+                        width: Math.max(0, parent.width - 45)
                         spacing: 0
                         visible: win.navOpen
                         Label { text: host.connected ? "已连接" : "未连接"; color: win.ink }
@@ -532,16 +538,7 @@ ApplicationWindow {
                                             color: win.warn
                                             Layout.fillWidth: true
                                         }
-                                        RowLayout {
-                                            Layout.fillWidth: true
-                                            Button { text: "重新检测"; onClicked: host.redetect() }
-                                            Item { Layout.fillWidth: true }
-                                            Button {
-                                                text: "查看帮助"
-                                                visible: host.diagHifi === "warn" || host.diagVb === "warn"
-                                                onClicked: host.diagHifi === "warn" ? host.installHifi() : host.installVb()
-                                            }
-                                        }
+                                        Button { text: "重新检测"; onClicked: host.redetect() }
                                     }
                                     GroupCard {
                                         title: "音频"
@@ -573,6 +570,41 @@ ApplicationWindow {
                                         }
                                         LevelMeter { objectName: "spkMeter"; level: host.spkLevel }
                                     }
+                                }
+
+                                GroupCard {
+                                    objectName: "installPanel"
+                                    title: "安装"
+                                    Label {
+                                        text: "这些会打开官方安装程序或下载页，不是本软件自带的驱动。"
+                                        wrapMode: Text.Wrap
+                                        color: win.muted
+                                        Layout.fillWidth: true
+                                    }
+                                    Label { text: "VB-CABLE"; font.bold: true; color: win.ink }
+                                    Label {
+                                        text: "给微信 / QQ 当麦克风。装完官方虚拟声卡后需要重启电脑。"
+                                        wrapMode: Text.Wrap
+                                        color: win.muted
+                                        Layout.fillWidth: true
+                                    }
+                                    Button { text: "安装 VB-CABLE"; onClicked: host.installVb() }
+                                    Label { text: "Hi-Fi Cable"; font.bold: true; color: win.ink }
+                                    Label {
+                                        text: "把电脑正在播放的声音送到音箱喇叭。和 VB-CABLE 不是同一根线，装完也要重启。"
+                                        wrapMode: Text.Wrap
+                                        color: win.muted
+                                        Layout.fillWidth: true
+                                    }
+                                    Button { text: "安装 Hi-Fi Cable"; onClicked: host.installHifi() }
+                                    Label { text: "MSI Afterburner"; font.bold: true; color: win.ink }
+                                    Label {
+                                        text: "可选。音箱上的 CPU 封装温度要靠它。本程序不能内置，将启动已安装的程序或打开 MSI 官网。"
+                                        wrapMode: Text.Wrap
+                                        color: win.muted
+                                        Layout.fillWidth: true
+                                    }
+                                    Button { text: "CPU 温度 / Afterburner"; onClicked: host.afterburner() }
                                 }
                             }
                         }
@@ -686,9 +718,6 @@ ApplicationWindow {
                                         Layout.fillWidth: true
                                         Button { text: "试音"; onClicked: host.testTone() }
                                         Button { text: "音箱试音"; onClicked: host.speakerTest() }
-                                        Item { Layout.fillWidth: true }
-                                        Button { text: "安装 Hi-Fi Cable"; onClicked: host.installHifi() }
-                                        Button { text: "安装 VB-CABLE"; onClicked: host.installVb() }
                                     }
                                 }
                             }
@@ -842,7 +871,6 @@ ApplicationWindow {
                                             onActivated: (i) => host.setDiskIndex(i)
                                         }
                                     }
-                                    Button { text: "CPU 温度 / Afterburner"; onClicked: host.afterburner() }
                                 }
 
                                 GroupCard {
@@ -936,6 +964,26 @@ ApplicationWindow {
                                     wrapMode: Text.Wrap
                                     color: win.ink
                                     Layout.fillWidth: true
+                                }
+                                Text {
+                                    objectName: "aboutLicense"
+                                    Layout.fillWidth: true
+                                    wrapMode: Text.Wrap
+                                    color: win.muted
+                                    font.pixelSize: 12
+                                    font.family: "Microsoft YaHei"
+                                    linkColor: win.accent
+                                    textFormat: Text.RichText
+                                    text: "Copyright © 2026 LX04 PC Bridge<br/>" +
+                                          "作者 <a href=\"https://github.com/ndpyzwy-0w0\">ndpyzwy-0w0</a><br/><br/>" +
+                                          "本软件使用：Python、" +
+                                          "<a href=\"https://www.qt.io/\">Qt / PySide6</a>（The Qt Company，FluentWinUI3）、" +
+                                          "<a href=\"https://fontawesome.com/license/free\">Font Awesome Free</a>（Fonticons, SIL OFL 1.1）、" +
+                                          "Android platform-tools adb（Apache 2.0）、psutil、sounddevice、pycaw、tkinter。<br/><br/>" +
+                                          "<a href=\"https://www.vb-cable.com/\">VB-CABLE</a> 与 " +
+                                          "<a href=\"https://vb-audio.com/Cable/\">Hi-Fi Cable</a> 是 VB-Audio（Vincent Burel）的捐赠软件，本程序只启动官方安装包，不修改驱动。<br/>" +
+                                          "<a href=\"https://www.msi.com/Landing/afterburner\">MSI Afterburner</a> 未随本软件分发，仅在需要 CPU 温度时打开官网或已安装的程序。"
+                                    onLinkActivated: (link) => Qt.openUrlExternally(link)
                                 }
                             }
                         }

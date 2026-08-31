@@ -59,6 +59,8 @@ def main() -> None:
     assert bool(win.property("navOpen")) is False
     assert win.findChild(QObject, "navToggle") is not None
     assert win.findChild(QObject, "aboutPage") is not None
+    assert win.findChild(QObject, "aboutLicense") is not None
+    assert win.findChild(QObject, "installPanel") is not None
     assert win.findChild(QObject, "diagBox") is not None
     assert win.findChild(QObject, "previewBox") is not None
     assert win.findChild(QObject, "logFilter") is not None
