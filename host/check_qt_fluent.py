@@ -16,7 +16,7 @@ from PySide6.QtQml import QQmlApplicationEngine
 from PySide6.QtQuickControls2 import QQuickStyle
 from PySide6.QtWidgets import QApplication
 
-from qt_ui import HostBridge, QtLoop, apply_fluent_style, qml_dir
+from qt_ui import HostBridge, QtLoop, apply_fluent_style, bind_qml_assets, qml_dir
 
 
 def main() -> None:
@@ -38,6 +38,7 @@ def main() -> None:
     assert bridge.deviceModel.rowCount() == 0
     engine = QQmlApplicationEngine()
     engine.rootContext().setContextProperty("host", bridge)
+    bind_qml_assets(engine)
     qml = qml_dir() / "Main.qml"
     engine.load(str(qml))
     roots = engine.rootObjects()
@@ -49,6 +50,8 @@ def main() -> None:
     win.setProperty("navOpen", False)
     app.processEvents()
     assert bool(win.property("navOpen")) is False
+    assert win.findChild(QObject, "navToggle") is not None
+    assert win.findChild(QObject, "aboutPage") is not None
     box = win.findChild(QObject, "usbBox")
     assert box is not None
     app.processEvents()

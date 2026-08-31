@@ -4,7 +4,7 @@ from __future__ import annotations
 import threading
 from pathlib import Path
 
-from PySide6.QtCore import Property, QObject, QStringListModel, QTimer, Signal, Slot
+from PySide6.QtCore import Property, QObject, QStringListModel, QTimer, QUrl, Signal, Slot
 from PySide6.QtGui import QFont
 from PySide6.QtQuickControls2 import QQuickStyle
 from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox
@@ -142,6 +142,7 @@ class HostBridge(QObject):
     toastMirrorChanged = Signal()
     autostartChanged = Signal()
     minimizeToTrayChanged = Signal()
+    connectedChanged = Signal()
 
     def __init__(self) -> None:
         super().__init__()
@@ -199,6 +200,7 @@ class HostBridge(QObject):
         for kind in ("device", "inject", "spk", "disk", "monitor", "quality"):
             self._sync_combo(kind)
         self.sync_toggles()
+        self.connectedChanged.emit()
 
     def set_headline(self, text: str) -> None:
         text = str(text)
@@ -206,6 +208,7 @@ class HostBridge(QObject):
             return
         self._headline = text
         self.headlineChanged.emit()
+        self.connectedChanged.emit()
 
     def set_detail(self, text: str) -> None:
         text = str(text)
@@ -318,6 +321,7 @@ class HostBridge(QObject):
         self.autostartChanged.emit()
         self.minimizeToTrayChanged.emit()
         self.gainPercentChanged.emit()
+        self.connectedChanged.emit()
 
     def parent_widget(self):
         return None
@@ -476,6 +480,18 @@ class HostBridge(QObject):
     def minimizeToTray(self) -> bool:
         return bool(self.host.minimize_to_tray.get()) if self.host else False
 
+    @Property(bool, notify=connectedChanged)
+    def connected(self) -> bool:
+        return bool(getattr(self.host, "connected", False))
+
+    @Property(str, constant=True)
+    def appVersion(self) -> str:
+        return app_version()
+
+    @Slot(str)
+    def copyText(self, text: str) -> None:
+        QApplication.clipboard().setText(text)
+
     @Slot()
     def refreshDevices(self) -> None:
         self.host.refresh_devices()
@@ -619,6 +635,34 @@ def qml_dir() -> Path:
     if getattr(sys, "frozen", False):
         return Path(sys._MEIPASS) / "qml"
     return Path(__file__).resolve().parent / "qml"
+
+
+def assets_dir() -> Path:
+    import sys
+
+    if getattr(sys, "frozen", False):
+        return Path(sys._MEIPASS) / "assets"
+    return Path(__file__).resolve().parent / "assets"
+
+
+def app_version() -> str:
+    import sys
+
+    candidates = []
+    if getattr(sys, "frozen", False):
+        candidates.append(Path(sys._MEIPASS) / "VERSION.txt")
+    candidates.append(Path(__file__).resolve().parents[1] / "VERSION.txt")
+    for path in candidates:
+        if path.is_file():
+            return path.read_text(encoding="utf-8").strip()
+    return "0"
+
+
+def bind_qml_assets(engine) -> None:
+    assets = assets_dir()
+    ctx = engine.rootContext()
+    ctx.setContextProperty("faFontUrl", QUrl.fromLocalFile(str(assets / "fa-solid-900.ttf")))
+    ctx.setContextProperty("appIconUrl", QUrl.fromLocalFile(str(assets / "app-icon.png")))
 
 
 def apply_fluent_style() -> None:
