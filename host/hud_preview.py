@@ -62,7 +62,17 @@ def metric_label(key: str) -> str:
     return METRIC_LABEL.get(key) or METRIC_LABEL["cpu"]
 
 
+_LIVE: dict[str, str] = {}
+
+
+def set_live_samples(samples: dict | None) -> None:
+    global _LIVE
+    _LIVE = {str(k): str(v) for k, v in (samples or {}).items()}
+
+
 def metric_sample(key: str) -> str:
+    if _LIVE:
+        return str(_LIVE.get(key) or "—")
     return METRIC_SAMPLE.get(key) or "—"
 
 
@@ -652,10 +662,12 @@ def _draw_hud_body(canvas, colors: dict[str, str], cards: list, w: float, h: flo
 
     net_font = _font(12)
     meter_top = mute_top - meter_h
+    down = metric_sample("netD")
+    up = metric_sample("netU")
     canvas.create_text(
         dp(18),
         meter_top + dp(14),
-        text="↓ —    ↑ —",
+        text=f"↓ {down}    ↑ {up}",
         fill=colors["dim"],
         font=net_font,
         anchor="sw",

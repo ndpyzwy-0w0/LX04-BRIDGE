@@ -46,6 +46,7 @@ def main() -> None:
     engine = QQmlApplicationEngine()
     engine.rootContext().setContextProperty("host", bridge)
     bind_qml_assets(engine)
+    register_hud_types()
     qml = qml_dir() / "Main.qml"
     engine.load(str(qml))
     roots = engine.rootObjects()

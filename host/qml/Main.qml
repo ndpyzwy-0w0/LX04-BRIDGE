@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import Lx04 1.0
 
 ApplicationWindow {
     id: win
@@ -84,7 +85,7 @@ ApplicationWindow {
         running: pages.currentIndex === 2
         repeat: true
         triggeredOnStart: true
-        onTriggered: host.refreshStats()
+        onTriggered: { host.refreshStats(); previewBox.tick() }
     }
 
     component FaText: Text {
@@ -276,25 +277,6 @@ ApplicationWindow {
             color: win.toneColor(tone)
             visible: note.length > 0
             font.pixelSize: 12
-        }
-    }
-
-    component StatTile: Rectangle {
-        property string title: ""
-        property string value: ""
-        property string sub: ""
-        Layout.fillWidth: true
-        implicitHeight: 72
-        radius: 6
-        color: win.dark ? "#252525" : "#FFFFFF"
-        border.color: win.stroke
-        ColumnLayout {
-            anchors.fill: parent
-            anchors.margins: 8
-            spacing: 2
-            Label { text: title; color: win.muted; font.pixelSize: 11 }
-            Label { text: value; color: win.ink; font.pixelSize: 18; font.bold: true }
-            Label { text: sub; color: win.muted; font.pixelSize: 11; visible: sub.length > 0 }
         }
     }
 
@@ -729,45 +711,13 @@ ApplicationWindow {
                                 width: Math.max(240, content.width - 72)
                                 spacing: 12
 
-                                Item {
+                                HudView {
                                     id: previewBox
                                     objectName: "previewBox"
                                     Layout.fillWidth: true
                                     implicitHeight: Math.max(120, width * 480 / 800)
-                                    Rectangle {
-                                        anchors.fill: parent
-                                        radius: 6
-                                        color: win.dark ? "#1A1A1A" : "#F7F7F7"
-                                        border.color: win.stroke
-                                        ColumnLayout {
-                                            anchors.fill: parent
-                                            anchors.margins: 12
-                                            spacing: 8
-                                            Label {
-                                                text: "800 × 480  ·  状态监视"
-                                                color: win.muted
-                                                font.pixelSize: 12
-                                                Layout.alignment: Qt.AlignHCenter
-                                            }
-                                            GridLayout {
-                                                Layout.fillWidth: true
-                                                Layout.fillHeight: true
-                                                columns: 5
-                                                rowSpacing: 8
-                                                columnSpacing: 8
-                                                StatTile { title: "CPU"; value: host.statCpu || "—"; sub: host.statCpuTemp }
-                                                StatTile { title: "GPU"; value: host.statGpu || "—"; sub: host.statGpuTemp }
-                                                StatTile { title: "内存"; value: host.statRam || "—"; sub: host.statRamSub }
-                                                StatTile { title: "磁盘"; value: host.statDisk || "—"; sub: host.statDiskSub }
-                                                StatTile { title: "网络"; value: host.statNetDown.length > 0 ? ("↓ " + host.statNetDown) : "↓ —"; sub: host.statNetUp.length > 0 ? ("↑ " + host.statNetUp) : "↑ —" }
-                                            }
-                                        }
-                                    }
-                                }
-
-                                Button {
-                                    text: "删除预览屏幕"
-                                    onClicked: host.setPcStatsEnabled(false)
+                                    samples: host.hudSamples
+                                    light: host.lightTheme
                                 }
 
                                 RowLayout {
@@ -807,7 +757,6 @@ ApplicationWindow {
                                         Layout.fillWidth: true
                                         Button { text: "编辑样式"; onClicked: host.openHudPreview() }
                                         Button { text: "上传背景"; onClicked: host.uploadHudBg() }
-                                        Button { text: "预览屏幕"; onClicked: host.openHudPreview() }
                                     }
                                 }
 
