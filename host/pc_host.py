@@ -14,7 +14,7 @@ import winreg
 from ctypes import wintypes
 from pathlib import Path
 
-from qt_ui import HostBridge, QtLoop, Var, apply_fluent_style, qml_dir
+from qt_ui import HostBridge, QtLoop, Var, apply_fluent_style, assets_dir, bind_qml_assets, qml_dir
 
 
 def _host_dir() -> Path:
@@ -176,8 +176,12 @@ _shell32.ExtractIconExW.argtypes = [
 ]
 _shell32.Shell_NotifyIconW.restype = wintypes.BOOL
 _shell32.Shell_NotifyIconW.argtypes = [wintypes.DWORD, ctypes.POINTER(_NOTIFYICONDATAW)]
-_user32.LoadIconW.restype = wintypes.HICON
-_user32.LoadIconW.argtypes = [wintypes.HINSTANCE, ctypes.c_void_p]
+_IMAGE_ICON = 1
+_LR_LOADFROMFILE = 0x0010
+_user32.LoadImageW.restype = wintypes.HANDLE
+_user32.LoadImageW.argtypes = [
+    wintypes.HINSTANCE, wintypes.LPCWSTR, wintypes.UINT, ctypes.c_int, ctypes.c_int, wintypes.UINT
+]
 _user32.DestroyIcon.restype = wintypes.BOOL
 _user32.DestroyIcon.argtypes = [wintypes.HICON]
 _user32.RegisterWindowMessageW.restype = wintypes.UINT
@@ -1829,6 +1833,13 @@ class HostApp:
     def _tray_load_icon(self) -> int:
         if self._tray_icon:
             return self._tray_icon
+        ico = assets_dir() / "app-icon.ico"
+        if ico.is_file():
+            handle = _user32.LoadImageW(None, str(ico), _IMAGE_ICON, 16, 16, _LR_LOADFROMFILE)
+            if handle:
+                self._tray_icon = int(handle)
+                self._tray_icon_owned = True
+                return self._tray_icon
         small = (wintypes.HICON * 1)()
         n = _shell32.ExtractIconExW(str(Path(sys.executable).resolve()), 0, None, small, 1)
         if n:
@@ -2389,6 +2400,7 @@ def main() -> None:
     bridge.bind(host)
     engine = QQmlApplicationEngine()
     engine.rootContext().setContextProperty("host", bridge)
+    bind_qml_assets(engine)
     qml = qml_dir() / "Main.qml"
     engine.load(str(qml))
     if not engine.rootObjects():
@@ -2396,6 +2408,12 @@ def main() -> None:
         QMessageBox.critical(None, "LX04", f"界面加载失败:\n{qml}")
         return
     window = engine.rootObjects()[0]
+    from PySide6.QtGui import QIcon
+    ico = assets_dir() / "app-icon.ico"
+    if ico.is_file():
+        icon = QIcon(str(ico))
+        qapp.setWindowIcon(icon)
+        window.setIcon(icon)
     loop.window = window
     # HostApp._on_close is wired from QML onClosing via HostBridge.onWindowClosing
     screen = qapp.primaryScreen()

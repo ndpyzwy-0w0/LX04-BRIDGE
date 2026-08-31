@@ -176,6 +176,8 @@ def main() -> int:
         "--onedir",
         "--name",
         name,
+        "--icon",
+        str(HOST / "assets" / "app-icon.ico"),
         "--distpath",
         str(staging),
         "--workpath",
@@ -264,6 +266,10 @@ def main() -> int:
         "pycaw",
         "--add-data",
         f"{HOST / 'qml'};qml",
+        "--add-data",
+        f"{HOST / 'assets'};assets",
+        "--add-data",
+        f"{VERSION_FILE};.",
     ]
     vbcable_pack = HOST / "vbcable" / "pack"
     if vbcable_pack.is_dir():
