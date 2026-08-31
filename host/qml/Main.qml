@@ -153,6 +153,45 @@ ApplicationWindow {
         }
     }
 
+    component NavBtn: Rectangle {
+        required property int pageIndex
+        Layout.fillWidth: true
+        implicitHeight: 40
+        radius: 4
+        readonly property var page: win.navPages[pageIndex]
+        color: pages.currentIndex === pageIndex ? win.sel : (navHover.containsMouse ? win.hover : "transparent")
+        RowLayout {
+            anchors.fill: parent
+            spacing: 8
+            Rectangle {
+                width: 3
+                Layout.fillHeight: true
+                Layout.topMargin: 8
+                Layout.bottomMargin: 8
+                radius: 1
+                color: pages.currentIndex === pageIndex ? win.accent : "transparent"
+            }
+            FaText {
+                glyph: page.glyph
+                Layout.preferredWidth: 22
+            }
+            Label {
+                text: page.title
+                color: win.ink
+                visible: win.navOpen
+                Layout.fillWidth: true
+                elide: Text.ElideRight
+            }
+        }
+        MouseArea {
+            id: navHover
+            anchors.fill: parent
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            onClicked: pages.currentIndex = pageIndex
+        }
+    }
+
     component PageHead: ColumnLayout {
         required property string title
         required property string subtitle
@@ -283,7 +322,7 @@ ApplicationWindow {
                     implicitHeight: 36
                     FaText {
                         anchors.centerIn: parent
-                        glyph: win.navOpen ? "\uf053" : "\uf0c9"
+                        glyph: "\uf0c9"
                         font.pixelSize: 16
                     }
                     MouseArea {
@@ -293,66 +332,17 @@ ApplicationWindow {
                     }
                 }
 
+                NavBtn { pageIndex: 0 }
                 RowLayout {
                     Layout.fillWidth: true
-                    Layout.leftMargin: 8
-                    Layout.bottomMargin: 8
-                    visible: win.navOpen
-                    spacing: 8
-                    Image {
-                        source: appIconUrl
-                        Layout.preferredWidth: 28
-                        Layout.preferredHeight: 28
-                        fillMode: Image.PreserveAspectFit
-                    }
-                    ColumnLayout {
-                        spacing: 0
-                        Label { text: "LX04"; font.bold: true; color: win.ink }
-                        Label { text: "PC Bridge"; color: win.muted; font.pixelSize: 11 }
-                    }
+                    spacing: 2
+                    NavBtn { pageIndex: 1 }
+                    NavBtn { pageIndex: 2; visible: win.navOpen }
                 }
-
-                Repeater {
-                    model: win.navPages
-                    Rectangle {
-                        required property int index
-                        required property var modelData
-                        Layout.fillWidth: true
-                        implicitHeight: 40
-                        radius: 4
-                        color: pages.currentIndex === index ? win.sel : (hover.containsMouse ? win.hover : "transparent")
-                        RowLayout {
-                            anchors.fill: parent
-                            spacing: 8
-                            Rectangle {
-                                width: 3
-                                Layout.fillHeight: true
-                                Layout.topMargin: 8
-                                Layout.bottomMargin: 8
-                                radius: 1
-                                color: pages.currentIndex === index ? win.accent : "transparent"
-                            }
-                            FaText {
-                                glyph: modelData.glyph
-                                Layout.preferredWidth: 22
-                            }
-                            Label {
-                                text: modelData.title
-                                color: win.ink
-                                visible: win.navOpen
-                                Layout.fillWidth: true
-                                elide: Text.ElideRight
-                            }
-                        }
-                        MouseArea {
-                            id: hover
-                            anchors.fill: parent
-                            hoverEnabled: true
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: pages.currentIndex = index
-                        }
-                    }
-                }
+                NavBtn { pageIndex: 2; visible: !win.navOpen }
+                NavBtn { pageIndex: 3 }
+                NavBtn { pageIndex: 4 }
+                NavBtn { pageIndex: 5 }
 
                 Item { Layout.fillHeight: true }
 
@@ -474,8 +464,14 @@ ApplicationWindow {
                                     }
                                 }
 
-                                GroupCard {
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    spacing: 12
+                                    GroupCard {
                                     title: "设备"
+                                    Layout.fillWidth: true
+                                    Layout.fillHeight: true
+                                    Layout.preferredWidth: 1
                                     Label {
                                         text: host.connected ? (host.hasDevice ? usbBox.displayText : "LX04") : (host.hasDevice ? usbBox.displayText : "未检测到 LX04")
                                         font.bold: true
@@ -521,11 +517,13 @@ ApplicationWindow {
                                             onClicked: host.disconnectDevice()
                                         }
                                     }
-                                }
-
-                                GroupCard {
-                                    objectName: "diagBox"
-                                    title: "连接诊断"
+                                    }
+                                    GroupCard {
+                                        objectName: "diagBox"
+                                        title: "连接诊断"
+                                        Layout.fillWidth: true
+                                        Layout.fillHeight: true
+                                        Layout.preferredWidth: 1
                                     DiagRow { tone: host.diagAdb; label: "LX04 ADB"; note: host.diagAdb === "warn" ? "未检测到" : (host.diagAdb === "error" ? "未找到 adb" : "") }
                                     DiagRow { tone: host.diagUsb; label: "USB 数据通道"; note: host.diagUsb === "error" ? "已断开" : (host.diagUsb === "off" ? "未检测" : "") }
                                     DiagRow { tone: host.diagAudio; label: "音频通道"; note: host.diagAudio === "warn" ? "已关闭" : (host.diagAudio === "off" ? "未检测" : "") }
@@ -550,19 +548,29 @@ ApplicationWindow {
                                             onClicked: host.diagHifi === "warn" ? host.installHifi() : host.installVb()
                                         }
                                     }
+                                    }
                                 }
 
-                                GroupCard {
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    spacing: 12
+                                    GroupCard {
                                     title: "音频"
+                                    Layout.fillWidth: true
+                                    Layout.fillHeight: true
+                                    Layout.preferredWidth: 1
                                     Label { text: "麦克风"; color: win.muted; font.pixelSize: 12 }
                                     LevelMeter { objectName: "micMeter"; level: host.micLevel }
                                     Label { text: "扬声器"; color: win.muted; font.pixelSize: 12 }
                                     LevelMeter { objectName: "spkMeter"; level: host.spkLevel }
-                                }
-
-                                GroupCard {
-                                    title: "屏幕"
-                                    Label { text: host.screenMode; color: win.ink }
+                                    }
+                                    GroupCard {
+                                        title: "屏幕"
+                                        Layout.fillWidth: true
+                                        Layout.fillHeight: true
+                                        Layout.preferredWidth: 1
+                                        Label { text: host.screenMode; color: win.ink }
+                                    }
                                 }
                             }
                         }
