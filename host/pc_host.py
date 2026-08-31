@@ -2392,7 +2392,8 @@ def main() -> None:
     qml = qml_dir() / "Main.qml"
     engine.load(str(qml))
     if not engine.rootObjects():
-        print("QML load failed:", qml)
+        from PySide6.QtWidgets import QMessageBox
+        QMessageBox.critical(None, "LX04", f"界面加载失败:\n{qml}")
         return
     window = engine.rootObjects()[0]
     loop.window = window

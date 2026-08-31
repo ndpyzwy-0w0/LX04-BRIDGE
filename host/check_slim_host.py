@@ -20,10 +20,14 @@ def main() -> None:
         qml = pyside / "qml" / "QtWebEngine"
         controls = pyside / "qml" / "QtQuick" / "Controls" / "Imagine"
         fluent = pyside / "qml" / "QtQuick" / "Controls" / "FluentWinUI3"
+        fusion = pyside / "qml" / "QtQuick" / "Controls" / "Fusion"
+        basic = pyside / "qml" / "QtQuick" / "Controls" / "Basic"
         tests = root / "_internal" / "comtypes" / "test"
         trans = root / "_internal" / "PySide6" / "translations"
-        for folder in (qml, controls, fluent, tests, trans):
+        for folder in (qml, controls, fluent, fusion, basic, tests, trans):
             folder.mkdir(parents=True)
+        (fusion / "keep.qml").write_text("x", encoding="utf-8")
+        (basic / "keep.qml").write_text("x", encoding="utf-8")
         (pyside / "Qt6WebEngineCore.dll").write_bytes(b"x")
         (pyside / "Qt6Core.dll").write_bytes(b"x")
         (pyside / "QtOpenGL.pyd").write_bytes(b"x")
@@ -42,6 +46,8 @@ def main() -> None:
         assert (pyside / "Qt6Core.dll").exists()
         assert (pyside / "QtOpenGL.pyd").exists()
         assert (fluent / "keep.qml").exists()
+        assert (fusion / "keep.qml").exists()
+        assert (basic / "keep.qml").exists()
         assert (trans / "qt_zh_CN.qm").exists()
     print("ok")
 

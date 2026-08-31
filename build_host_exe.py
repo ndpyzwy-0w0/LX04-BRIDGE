@@ -44,8 +44,6 @@ _QT_DROP_PREFIXES = (
     "Qt6QuickControls2Imagine",
     "Qt6QuickControls2Material",
     "Qt6QuickControls2Universal",
-    "Qt6QuickControls2Fusion",
-    "Qt6QuickControls2Basic",
     "Qt6QuickControls2Windows",
     "Qt6QuickParticles",
     "Qt6QuickTest",
@@ -89,7 +87,7 @@ _QTQUICK_DROP = (
     "VectorImage",
     "VirtualKeyboard",
 )
-_CONTROLS_DROP = ("designer", "Imagine", "Material", "Universal", "Fusion", "Windows")
+_CONTROLS_DROP = ("designer", "Imagine", "Material", "Universal", "Windows")
 
 
 def slim_host_dir(root: Path) -> None:
