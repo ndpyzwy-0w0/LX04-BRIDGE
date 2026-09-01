@@ -39,6 +39,11 @@ ApplicationWindow {
         { title: "关于", sub: "LX04 PC Bridge", glyph: "\uf05a" }
     ]
 
+    function installNote(tone) {
+        if (tone === "ok") return "已安装"
+        if (tone === "off") return "未检测"
+        return "未安装"
+    }
     function toneColor(tone) {
         if (tone === "ok") return win.ok
         if (tone === "warn") return win.warn
@@ -558,13 +563,24 @@ ApplicationWindow {
                                 GroupCard {
                                     objectName: "installPanel"
                                     title: "安装"
+                                    status: host.diagVb === "off" ? "未检测" : (host.installOkCount === 3 ? "已全部安装" : host.installOkCount + "/3 已安装")
+                                    statusColor: host.diagVb === "off" ? win.muted : (host.installOkCount === 3 ? win.ok : win.warn)
                                     Label {
                                         text: "这些会打开官方安装程序或下载页，不是本软件自带的驱动。"
                                         wrapMode: Text.Wrap
                                         color: win.muted
                                         Layout.fillWidth: true
                                     }
-                                    Label { text: "VB-CABLE"; font.bold: true; color: win.ink }
+                                    RowLayout {
+                                        Layout.fillWidth: true
+                                        Label { text: "VB-CABLE"; font.bold: true; color: win.ink; Layout.fillWidth: true }
+                                        Label {
+                                            objectName: "installVbStatus"
+                                            text: win.installNote(host.diagVb)
+                                            color: win.toneColor(host.diagVb)
+                                            font.pixelSize: 12
+                                        }
+                                    }
                                     Label {
                                         text: "给微信 / QQ 当麦克风。装完官方虚拟声卡后需要重启电脑。"
                                         wrapMode: Text.Wrap
@@ -572,7 +588,16 @@ ApplicationWindow {
                                         Layout.fillWidth: true
                                     }
                                     Button { text: "安装 VB-CABLE"; onClicked: host.installVb() }
-                                    Label { text: "Hi-Fi Cable"; font.bold: true; color: win.ink }
+                                    RowLayout {
+                                        Layout.fillWidth: true
+                                        Label { text: "Hi-Fi Cable"; font.bold: true; color: win.ink; Layout.fillWidth: true }
+                                        Label {
+                                            objectName: "installHifiStatus"
+                                            text: win.installNote(host.diagHifi)
+                                            color: win.toneColor(host.diagHifi)
+                                            font.pixelSize: 12
+                                        }
+                                    }
                                     Label {
                                         text: "把电脑正在播放的声音送到音箱喇叭。和 VB-CABLE 不是同一根线，装完也要重启。"
                                         wrapMode: Text.Wrap
@@ -580,7 +605,16 @@ ApplicationWindow {
                                         Layout.fillWidth: true
                                     }
                                     Button { text: "安装 Hi-Fi Cable"; onClicked: host.installHifi() }
-                                    Label { text: "MSI Afterburner"; font.bold: true; color: win.ink }
+                                    RowLayout {
+                                        Layout.fillWidth: true
+                                        Label { text: "MSI Afterburner"; font.bold: true; color: win.ink; Layout.fillWidth: true }
+                                        Label {
+                                            objectName: "installAfterStatus"
+                                            text: win.installNote(host.diagAfter)
+                                            color: win.toneColor(host.diagAfter)
+                                            font.pixelSize: 12
+                                        }
+                                    }
                                     Label {
                                         text: "可选。音箱上的 CPU 封装温度要靠它。本程序不能内置，将启动已安装的程序或打开 MSI 官网。"
                                         wrapMode: Text.Wrap
@@ -588,6 +622,7 @@ ApplicationWindow {
                                         Layout.fillWidth: true
                                     }
                                     Button { text: "CPU 温度 / Afterburner"; onClicked: host.afterburner() }
+                                    Button { text: "重新检测"; onClicked: host.redetect() }
                                 }
                             }
                         }

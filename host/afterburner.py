@@ -33,6 +33,10 @@ RUNNING_TEXT = (
 )
 
 
+def present() -> bool:
+    return find_exe() is not None
+
+
 def sensors_live() -> bool:
     try:
         import pc_stats

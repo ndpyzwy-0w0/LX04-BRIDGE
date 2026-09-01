@@ -62,6 +62,9 @@ def main() -> None:
     assert win.findChild(QObject, "aboutPage") is not None
     assert win.findChild(QObject, "aboutLicense") is not None
     assert win.findChild(QObject, "installPanel") is not None
+    assert win.findChild(QObject, "installVbStatus") is not None
+    assert win.findChild(QObject, "installHifiStatus") is not None
+    assert win.findChild(QObject, "installAfterStatus") is not None
     assert win.findChild(QObject, "diagBox") is not None
     assert win.findChild(QObject, "previewBox") is not None
     assert win.findChild(QObject, "logFilter") is not None
@@ -69,6 +72,17 @@ def main() -> None:
     assert bridge.diagUsb == "off"
     assert bridge.diagVb == "off"
     assert bridge.diagHifi == "off"
+    assert bridge.diagAfter == "off"
+    assert bridge.installOkCount == 0
+    assert win.findChild(QObject, "installVbStatus").property("text") == "未检测"
+    bridge.refresh_diag()
+    app.processEvents()
+    assert bridge.diagVb in ("ok", "warn")
+    assert bridge.diagHifi in ("ok", "warn")
+    assert bridge.diagAfter in ("ok", "warn")
+    assert 0 <= bridge.installOkCount <= 3
+    note = "已安装" if bridge.diagVb == "ok" else "未安装"
+    assert win.findChild(QObject, "installVbStatus").property("text") == note
     assert bridge.statCpu == ""
     assert win.findChild(QObject, "usbBox") is not None
     assert win.property("scrollTick") == 0

@@ -594,6 +594,7 @@ class HostBridge(QObject):
         self._quality_index = 0
         self._vb = False
         self._hifi = False
+        self._after = False
         self._diag_scanned = False
         self._screen_state = None
         self._stat_cpu = ""
@@ -792,6 +793,12 @@ class HostBridge(QObject):
             self._hifi = bool(hifi_cable.present())
         except Exception:
             self._hifi = False
+        try:
+            import afterburner
+
+            self._after = bool(afterburner.present())
+        except Exception:
+            self._after = False
         self._diag_scanned = True
         self.diagChanged.emit()
 
@@ -879,6 +886,10 @@ class HostBridge(QObject):
             if not self._diag_scanned:
                 return "off"
             return "ok" if self._hifi else "warn"
+        if kind == "after":
+            if not self._diag_scanned:
+                return "off"
+            return "ok" if self._after else "warn"
         if kind == "mirror":
             if not connected:
                 return "off"
@@ -1075,6 +1086,16 @@ class HostBridge(QObject):
         return self._tone("hifi")
 
     @Property(str, notify=diagChanged)
+    def diagAfter(self) -> str:
+        return self._tone("after")
+
+    @Property(int, notify=diagChanged)
+    def installOkCount(self) -> int:
+        if not self._diag_scanned:
+            return 0
+        return int(self._vb) + int(self._hifi) + int(self._after)
+
+    @Property(str, notify=diagChanged)
     def diagMirror(self) -> str:
         return self._tone("mirror")
 
@@ -1263,10 +1284,12 @@ class HostBridge(QObject):
     @Slot()
     def installVb(self) -> None:
         self.host._install_vb()
+        self.refresh_diag()
 
     @Slot()
     def installHifi(self) -> None:
         self.host._install_hifi()
+        self.refresh_diag()
 
     @Slot()
     def openHudPreview(self) -> None:
@@ -1319,6 +1342,7 @@ class HostBridge(QObject):
     @Slot()
     def afterburner(self) -> None:
         self.host._on_afterburner()
+        self.refresh_diag()
 
     @Slot(int)
     def setDeviceIndex(self, index: int) -> None:
