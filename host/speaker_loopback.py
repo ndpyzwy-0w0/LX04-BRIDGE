@@ -302,6 +302,11 @@ if __name__ == "__main__":
     assert _mix_to_s16(raw, 4, 2, 16, False) == raw
     pcm = b"\x00\x10" * 48
     assert resample_int16(pcm, 48000, 48000, 1) == pcm
-    assert audio_out.BLOCK_SEC == 0.01
-    assert audio_out.QUEUE_PACKETS <= 8
+    assert audio_out.BLOCK_SEC == 0.02
+    assert audio_out.QUEUE_PACKETS >= 12
+    pending = bytearray(b"\x01\x00\x02\x00")
+    data, short = audio_out._take_frames(pending, 8, b"\x03\x00\x04\x00", 4)
+    assert short and len(data) == 8 and data[:4] == b"\x01\x00\x02\x00" and data[4:] == b"\x03\x00\x04\x00"
+    attempts = audio_out._open_attempts(2, 48000, 48000, "conv", "raw")
+    assert attempts[0][:3] == ("float32", 2, 48000)
     print("ok")

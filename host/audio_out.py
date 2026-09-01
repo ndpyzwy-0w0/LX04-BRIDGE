@@ -16,8 +16,9 @@ except ImportError:  # pragma: no cover
 PREFERRED_OUTPUTS = (
     "cable input",
 )
-BLOCK_SEC = 0.01
-QUEUE_PACKETS = 6
+BLOCK_SEC = 0.02
+QUEUE_PACKETS = 16
+PREBUFFER_PACKETS = 4
 
 
 class AudioSink:
@@ -29,6 +30,7 @@ class AudioSink:
         self.device: int | None = None
         self._queue: queue.Queue[bytes] = queue.Queue(maxsize=QUEUE_PACKETS)
         self._pending = bytearray()
+        self._last_frame = b""
         self._stream = None
         self._lock = threading.Lock()
         self.underruns = 0
@@ -36,6 +38,7 @@ class AudioSink:
         self.gain = 1.0
         self.callback_error = ""
         self.device_name = ""
+        self.hostapi = ""
         self._endpoint = None
         self._dtype = "int16"
         self._started = False
@@ -128,34 +131,26 @@ class AudioSink:
         extra_raw = None
         if "WASAPI" in api:
             try:
-                extra_raw = sd.WasapiSettings(exclusive=False, auto_convert=False)
-            except Exception:
-                extra_raw = None
-            try:
                 extra = sd.WasapiSettings(exclusive=False, auto_convert=True)
             except Exception:
                 extra = None
-        channels = 2 if max_out >= 2 else 1
+            try:
+                extra_raw = sd.WasapiSettings(exclusive=False, auto_convert=False)
+            except Exception:
+                extra_raw = None
+        channels = 2 if max_out >= 2 and max_out != 16 else min(2, max(1, max_out))
         if cable:
             rate = 48000
         else:
             rate = native_rate or 48000
-        attempts: list[tuple[str, int, int, object]] = []
-        if extra_raw is not None:
-            attempts.append(("int16", channels, rate, extra_raw))
-        if extra is not None:
-            attempts.append(("int16", channels, rate, extra))
-            attempts.append(("float32", channels, rate, extra))
-        attempts.append(("int16", channels, rate, None))
-        if rate != native_rate and native_rate > 0:
-            attempts.append(("int16", channels, native_rate, extra if extra is not None else extra_raw))
-        if channels > 1:
-            attempts.append(("int16", 1, rate, None))
+        attempts = _open_attempts(channels, rate, native_rate, extra, extra_raw)
         last_error: Exception | None = None
         self._queue = queue.Queue(maxsize=QUEUE_PACKETS)
         self._pending = bytearray()
+        self._last_frame = b""
         self.underruns = 0
         self.callback_error = ""
+        self.hostapi = api
         for dtype, ch, sr, settings in attempts:
             kwargs = dict(
                 samplerate=sr,
@@ -207,7 +202,7 @@ class AudioSink:
         stream = self._stream
         if stream is None or self._started:
             return
-        if not force and self._queue.empty():
+        if not force and self._queue.qsize() < PREBUFFER_PACKETS:
             return
         try:
             stream.start()
@@ -269,18 +264,19 @@ class AudioSink:
             if status:
                 self.callback_error = str(status)
             need_i16 = frames * self.out_channels * 2
+            frame = max(2, self.out_channels * 2)
             while len(self._pending) < need_i16:
                 try:
                     self._pending.extend(self._queue.get_nowait())
                 except queue.Empty:
                     break
-            if len(self._pending) < need_i16:
+            data, short = _take_frames(self._pending, need_i16, self._last_frame, frame)
+            if short:
                 self.underruns += 1
-                data = bytes(self._pending) + b"\x00" * (need_i16 - len(self._pending))
-                self._pending.clear()
-            else:
-                data = bytes(self._pending[:need_i16])
-                del self._pending[:need_i16]
+                if self.underruns == 1 or self.underruns % 25 == 0:
+                    self.callback_error = f"灌麦欠载 {self.underruns}"
+            if data:
+                self._last_frame = data[-frame:]
             if self._dtype == "float32":
                 converted = _i16_to_f32_bytes(data)
                 memoryview(outdata)[: len(converted)] = converted
@@ -288,6 +284,44 @@ class AudioSink:
                 memoryview(outdata)[:need_i16] = data
         except Exception as exc:
             self.callback_error = repr(exc)
+
+
+def _open_attempts(channels: int, rate: int, native_rate: int, extra, extra_raw) -> list[tuple[str, int, int, object]]:
+    """WASAPI shared float32 first. int16 without convert is last — it hashes on 24-bit CABLE."""
+    out: list[tuple[str, int, int, object]] = []
+    if extra is not None:
+        out.append(("float32", channels, rate, extra))
+        out.append(("int16", channels, rate, extra))
+    if extra_raw is not None:
+        out.append(("float32", channels, rate, extra_raw))
+        out.append(("int16", channels, rate, extra_raw))
+    out.append(("float32", channels, rate, None))
+    out.append(("int16", channels, rate, None))
+    if rate != native_rate and native_rate > 0:
+        settings = extra if extra is not None else extra_raw
+        out.append(("float32", channels, native_rate, settings))
+        out.append(("int16", channels, native_rate, settings))
+    if channels > 1:
+        out.append(("int16", 1, rate, extra if extra is not None else extra_raw))
+        out.append(("int16", 1, rate, None))
+    return out
+
+
+def _take_frames(pending: bytearray, need: int, last: bytes, frame: int) -> tuple[bytes, bool]:
+    if need <= 0:
+        return b"", False
+    if len(pending) >= need:
+        data = bytes(pending[:need])
+        del pending[:need]
+        return data, False
+    have = bytes(pending)
+    pending.clear()
+    pad = need - len(have)
+    if frame <= 0:
+        return have + b"\x00" * pad, True
+    hold = last[-frame:] if last and len(last) >= frame else b"\x00" * frame
+    extra = (hold * ((pad + frame - 1) // frame))[:pad]
+    return have + extra, True
 
 
 def _is_cable_ks_output(name: str, api: str, max_out: int) -> bool:

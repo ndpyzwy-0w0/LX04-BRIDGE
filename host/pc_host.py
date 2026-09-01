@@ -853,13 +853,17 @@ class HostApp:
         inject_items: list[tuple[str, str | int, str]] = []
         ks = find_hidden_cable_ks_output()
         cable = win_endpoint.find_cable_render()
+        other_sd: list[tuple[str, str | int, str]] = []
+        for index, name in self.sink.list_playback_devices():
+            item = ("sd", index, name)
+            if win_endpoint.is_cable_render(name):
+                inject_items.append(item)
+            else:
+                other_sd.append(item)
         if ks is not None:
             label = (cable.FriendlyName if cable is not None else "CABLE Input") + "  [隐藏]"
             inject_items.append(("hidden", ks[0], label))
-        for index, name in self.sink.list_playback_devices():
-            if win_endpoint.is_cable_render(name):
-                continue
-            inject_items.append(("sd", index, name))
+        inject_items.extend(other_sd)
         self._inject_devices = inject_items
         inject_labels = [label for _kind, _handle, label in inject_items]
         self.inject_drop.set_labels(inject_labels)
@@ -1523,6 +1527,7 @@ class HostApp:
         self._log("麦克风已送入: " + self.sink.device_name + "  /  " + label)
         self._log(
             f"注入格式: {self.sink.out_rate}Hz / {self.sink._dtype} / {self.sink.out_channels}ch"
+            + (("  " + self.sink.hostapi) if self.sink.hostapi else "")
         )
         self._log("语音软件请选择: " + rec_name)
 
