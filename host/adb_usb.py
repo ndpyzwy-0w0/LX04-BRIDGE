@@ -117,15 +117,19 @@ def restore_adb_only(adb: str, serial: str | None = None) -> None:
 
 
 def take_speaker_mic(adb: str, serial: str | None = None) -> str:
-    """Stop XiaoAi always-on VPM so AudioRecord can use the dual digital mics."""
+    """Stop XiaoAi always-on VPM so tinycap can use the dual digital mics."""
     args = ["-s", serial] if serial else []
-    result = _run(adb, [*args, "shell", "stop mivpm; getprop init.svc.mivpm"], timeout=8)
-    text = ((result.stdout or "") + " " + (result.stderr or "")).strip()
-    status = (result.stdout or "").strip().splitlines()
-    last = status[-1].strip() if status else ""
-    if last not in {"stopped", "stopping"}:
-        return "小爱唤醒麦未能释放（mivpm=" + (last or text or "unknown") + "）"
-    return "已暂停小爱唤醒麦，音箱麦克风交给桥接"
+    last = ""
+    text = ""
+    for _ in range(8):
+        result = _run(adb, [*args, "shell", "stop mivpm; getprop init.svc.mivpm"], timeout=8)
+        text = ((result.stdout or "") + " " + (result.stderr or "")).strip()
+        status = (result.stdout or "").strip().splitlines()
+        last = status[-1].strip() if status else ""
+        if last == "stopped":
+            return "已暂停小爱唤醒麦，音箱麦克风交给桥接"
+        time.sleep(0.15)
+    return "小爱唤醒麦未能释放（mivpm=" + (last or text or "unknown") + "）"
 
 
 def release_speaker_mic(adb: str, serial: str | None = None) -> str:

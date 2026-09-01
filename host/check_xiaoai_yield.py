@@ -36,6 +36,7 @@ def main() -> None:
     assert "_yield_xiaoai_mic" in apply
     assert "_grab_xiaoai_mic" in apply
     assert "xiaoai_yield" in apply
+    assert "out_rate != 48000" in apply
     connect = inspect.getsource(pc_host.HostApp.connect)
     assert "take_speaker_mic" not in connect
     revive = inspect.getsource(pc_host.HostApp._revive_worker)
@@ -44,7 +45,14 @@ def main() -> None:
     assert "start_mic" not in revived
     assert "_apply_mic_route" in revived
     hello = inspect.getsource(pc_host.HostApp._handle_event)
-    assert "xiaoai_idle" in hello
+    assert "_apk_mic" in hello
+    assert "音箱采样率变为" in hello
+    grab = inspect.getsource(pc_host.HostApp._grab_xiaoai_mic)
+    assert "_apk_mic" in grab
+    import adb_usb
+    take = inspect.getsource(adb_usb.take_speaker_mic)
+    assert 'last == "stopped"' in take
+    assert '{"stopped", "stopping"}' not in take
     save = inspect.getsource(pc_host.HostApp._save_routes)
     assert "xiaoai_yield" in save
     qml = (HERE / "qml" / "Main.qml").read_text(encoding="utf-8")

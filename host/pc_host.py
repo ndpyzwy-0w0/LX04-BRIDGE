@@ -618,6 +618,7 @@ class HostApp:
         self.xiaoai_yield = Var(False)
         self._xiaoai_held = False
         self._xiaoai_idle = False
+        self._apk_mic = False
         self._yield_gate = win_endpoint.CaptureYield(idle_needed=3)
         self._xiaoai_watch_stop = threading.Event()
         self._xiaoai_watch_thread = None
@@ -1335,12 +1336,19 @@ class HostApp:
             self._stop_xiaoai_watch()
             self.hw.stop(self.adb, self._serial)
             self.sink.stop()
+            self._apk_mic = False
             self._release_xiaoai_mic(log=True)
             self._set_xiaoai_idle(False)
             self._log("已关闭麦克风通路")
             return
+        need_inject = (
+            grab is None
+            or not self.sink.running()
+            or self.sink.out_rate != 48000
+            or self.sink.sample_rate != 48000
+        )
         self.sink.configure(48000, 1)
-        if grab is None or not self.sink.running():
+        if need_inject:
             self._start_inject(inject)
         if grab is None:
             grab = (not bool(self.xiaoai_yield.get())) or win_endpoint.cable_capture_active()
@@ -1370,21 +1378,28 @@ class HostApp:
         self._ui(notify)
 
     def _grab_xiaoai_mic(self) -> None:
+        self._apk_mic = False
+        self.sink.configure(48000, 1)
         if self.adb and self._serial and not self._xiaoai_held:
             self._log(adb_usb.take_speaker_mic(self.adb, self._serial))
             self._xiaoai_held = True
+            time.sleep(0.2)
         self._yield_gate.reset(True)
         if self.adb and self._serial and not self.hw.running():
             try:
                 self.hw.start(self.adb, self._serial, self.sink)
+                self.sink.configure(48000, 1)
                 self._log("已从音箱数字麦直采：48kHz 单声道（tinycap pcmC0D1c）")
                 self.client.send_control("stop_mic")
             except Exception as exc:
+                self._apk_mic = True
                 self._log("硬件直采失败，回退 APK 麦克风: " + str(exc))
                 self.client.send_control("start_mic")
         self._set_xiaoai_idle(False)
 
     def _yield_xiaoai_mic(self) -> None:
+        self._apk_mic = False
+        self.sink.configure(48000, 1)
         was_held = self._xiaoai_held or self.hw.running()
         was_idle = self._xiaoai_idle
         if self.hw.running():
@@ -2295,7 +2310,11 @@ class HostApp:
     def _handle_event(self, kind: str, data) -> None:
         if kind == "hello":
             rate = int(data.get("sampleRate") or 48000)
-            if not self.hw.running() and self.mic_enabled.get() and not self._xiaoai_idle:
+            if (
+                not self.hw.running()
+                and self.mic_enabled.get()
+                and self._apk_mic
+            ):
                 self.sink.configure(rate, 1)
                 if not self.sink.running():
                     try:
@@ -2323,9 +2342,9 @@ class HostApp:
                     self._log("音箱采集源: " + str(source))
                 self._log(f"按单声道 {rate} Hz 接收音箱 PCM")
         elif kind == "audio":
-            if self._xiaoai_idle:
+            if self._xiaoai_idle or self.hw.running() or not self._apk_mic:
                 return
-            if self.sink.running() and not self.hw.running():
+            if self.sink.running():
                 self.sink.push(data.payload, muted=data.muted)
         elif kind == "status":
             self._on_hud_status(data)
@@ -2346,14 +2365,16 @@ class HostApp:
             if self.loopback.error:
                 self._log("扬声器环回: " + self.loopback.error)
                 self.loopback.error = ""
-            if self.hw.running():
-                self.hw.muted = mic_muted
+            if self.hw.running() or not self._apk_mic:
+                if self.hw.running():
+                    self.hw.muted = mic_muted
                 muted = "麦静音" if mic_muted else "拾音中"
                 if spk_muted:
                     muted += " · 喇叭静音"
                 usb = "USB" if data.get("usbConnected") else "USB断开"
+                extra = "硬件麦 48kHz"
                 self.detail.configure(
-                    text=f"{usb} · {muted} · 硬件麦 48kHz · 电平 {self.sink.peak:.2f} · 扬声器 {float(data.get('playLevel') or self.play_peak):.2f}"
+                    text=f"{usb} · {muted} · {extra} · 电平 {self.sink.peak:.2f} · 扬声器 {float(data.get('playLevel') or self.play_peak):.2f}"
                 )
                 self._apply_mute_headline(mic_muted, spk_muted)
                 if self.sink.callback_error:
