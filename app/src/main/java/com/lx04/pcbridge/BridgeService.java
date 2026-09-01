@@ -64,8 +64,6 @@ public class BridgeService extends Service {
                 STATE.clientConnected = connected;
                 STATE.pcName = helloAckName == null ? "" : helloAckName;
                 if (!connected) {
-                    STATE.pcStatsValid = false;
-                    STATE.sparks.clear();
                     ScreenMirror.INSTANCE.clear();
                     STATE.mirrorTitle = "";
                     STATE.toastOverlay = false;

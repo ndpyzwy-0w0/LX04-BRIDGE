@@ -1251,13 +1251,9 @@ class HostBridge(QObject):
     def refreshStats(self) -> None:
         if self.host is None:
             return
-        try:
-            import pc_stats
-
-            snap = pc_stats.snapshot(str(self.host.disk_var.get() or "C:"))
-        except Exception:
-            return
-        self.set_stats(snap)
+        last = getattr(self.host, "_last_stats", None)
+        if last:
+            self.set_stats(last)
 
     @Slot()
     def connectDevice(self) -> None:

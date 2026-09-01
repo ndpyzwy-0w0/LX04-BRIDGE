@@ -69,8 +69,8 @@ final class BridgeState {
     final SparkHistory sparks = new SparkHistory();
 
     boolean hasPcStats() {
-        return pcStatsValid && clientConnected && pcStatsAt != 0
-                && android.os.SystemClock.elapsedRealtime() - pcStatsAt < 4000;
+        return pcStatsValid && pcStatsAt != 0
+                && android.os.SystemClock.elapsedRealtime() - pcStatsAt < 12_000;
     }
 
     String formatLink() {

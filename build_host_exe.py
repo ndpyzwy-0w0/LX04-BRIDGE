@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import shutil
 import subprocess
 import sys
@@ -142,17 +143,21 @@ def unlock_host_dir(host_dir: Path) -> None:
         )
     except Exception:
         pass
+    script = (
+        "Get-Process -Name adb -ErrorAction SilentlyContinue | "
+        "Where-Object { $_.Path -and ($_.Path -ieq $env:LX04_ADB) } | "
+        "Stop-Process -Force"
+    )
     try:
-        import psutil
-    except ImportError:
-        return
-    for proc in psutil.process_iter(["exe"]):
-        try:
-            exe = proc.info.get("exe") or ""
-            if exe and Path(exe).resolve() == adb:
-                proc.kill()
-        except (psutil.Error, OSError, ValueError):
-            pass
+        subprocess.run(
+            ["powershell", "-NoProfile", "-Command", script],
+            timeout=8,
+            env={**os.environ, "LX04_ADB": str(adb)},
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except Exception:
+        pass
 
 
 def bump_version() -> int:

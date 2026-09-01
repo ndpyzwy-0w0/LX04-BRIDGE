@@ -658,6 +658,8 @@ class HostApp:
         self._vol_ignore_spk_until = 0.0
         self._stats_ticks = 0
         self._stats_logged = False
+        self._stats_busy = False
+        self._last_stats: dict = {}
         self._hud_need_reconcile = False
         self._hud_from_apk = False
         self._hud_bg = {"sel": -1, "used": [False, False, False], "alpha": 100}
@@ -665,7 +667,6 @@ class HostApp:
         self._route_lock = threading.Lock()
         self._route_gen = 0
         self._cable_key = None
-        self._stats_busy = False
         self._closing = False
         self._stop_lock = threading.Lock()
         self._tray_hwnd = 0
@@ -1240,6 +1241,7 @@ class HostApp:
                 pass
             return
         if self._stats_busy:
+            self._send_stats_keepalive()
             return
         self._stats_busy = True
         disk = self._selected_disk()
@@ -1258,6 +1260,7 @@ class HostApp:
                 return
             snap = pc_stats.snapshot(disk or "C:")
             payload = {key: value for key, value in snap.items() if value is not None and value != ""}
+            self._last_stats = payload
             self.client.send_control("pc_stats", **payload)
             line = pc_stats.format_line(snap)
             payload_ui = dict(payload)
@@ -1275,6 +1278,21 @@ class HostApp:
                 self._log("电脑状态: " + err)
         finally:
             self._stats_busy = False
+
+    def _send_stats_keepalive(self) -> None:
+        last = self._last_stats
+        if not last:
+            try:
+                self.client.send_control("pc_stats", **pc_stats.clock_fields())
+            except Exception:
+                pass
+            return
+        payload = dict(last)
+        payload.update(pc_stats.clock_fields())
+        try:
+            self.client.send_control("pc_stats", **payload)
+        except Exception:
+            pass
 
     def _on_volume_sync_change(self) -> None:
         if not self._routes_ready:
