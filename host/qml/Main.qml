@@ -764,7 +764,7 @@ ApplicationWindow {
                                         onActivated: (i) => host.setDiskIndex(i)
                                     }
                                     Switch {
-                                        text: "同步系统弹窗"
+                                        text: "同步系统弹窗 实验性"
                                         checked: host.toastMirror
                                         onClicked: host.setToastMirror(checked)
                                     }
