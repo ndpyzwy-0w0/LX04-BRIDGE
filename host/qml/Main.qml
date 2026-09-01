@@ -16,6 +16,7 @@ ApplicationWindow {
     property bool navOpen: true
     property int uptimeSec: 0
     property var logLines: []
+    property int logFilterIndex: 0
     property int scrollTick: 0
     function noteScroll() { scrollTick++ }
     readonly property bool dark: palette.window.hslLightness < 0.5
@@ -65,10 +66,10 @@ ApplicationWindow {
     }
     function applyLog() {
         const keys = ["", "INFO", "WARN", "ERROR"]
-        const key = keys[logFilterIndex]
+        const key = keys[win.logFilterIndex] || ""
         const out = []
-        for (let i = 0; i < logLines.length; i++) {
-            const line = logLines[i]
+        for (let i = 0; i < win.logLines.length; i++) {
+            const line = win.logLines[i]
             if (!key || line.indexOf("  " + key + "  ") >= 0)
                 out.push(line)
         }
@@ -868,9 +869,12 @@ ApplicationWindow {
                         }
 
                         ColumnLayout {
+                            Layout.fillWidth: true
+                            Layout.fillHeight: true
                             visible: StackLayout.isCurrentItem
                             enabled: StackLayout.isCurrentItem
                             spacing: 10
+                            onVisibleChanged: if (visible) win.applyLog()
 
                             RowLayout {
                                 ComboBox {
@@ -899,6 +903,7 @@ ApplicationWindow {
                                 color: win.surface
                                 TextArea {
                                     id: logArea
+                                    objectName: "logArea"
                                     anchors.fill: parent
                                     anchors.margins: 4
                                     readOnly: true

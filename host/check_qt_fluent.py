@@ -68,6 +68,11 @@ def main() -> None:
     assert win.findChild(QObject, "diagBox") is not None
     assert win.findChild(QObject, "previewBox") is not None
     assert win.findChild(QObject, "logFilter") is not None
+    area = win.findChild(QObject, "logArea")
+    assert area is not None
+    bridge.logLine.emit("12:00:00  INFO  hello-log")
+    app.processEvents()
+    assert "hello-log" in str(area.property("text") or "")
     assert win.findChild(QObject, "micMeter") is not None
     assert bridge.diagUsb == "off"
     assert bridge.diagVb == "off"
