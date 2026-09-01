@@ -1929,6 +1929,11 @@ class HostApp:
                             self._log("恢复小爱麦失败: " + str(exc))
             except Exception:
                 pass
+            if self._closing and self.adb:
+                try:
+                    adb_usb.kill_server(self.adb)
+                except Exception:
+                    pass
 
     def _on_close(self, force: bool = False) -> None:
         if _close_goes_to_tray(self._closing, force, bool(self.minimize_to_tray.get())):

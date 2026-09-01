@@ -34,6 +34,7 @@ def main() -> None:
     close = inspect.getsource(pc_host.HostApp._on_close)
     assert "withdraw" in close
     assert "_close_goes_to_tray" in close
+    assert "kill_server" in inspect.getsource(pc_host.HostApp._shutdown_work)
     assert "minimize_to_tray" in inspect.getsource(pc_host.HostApp._save_routes)
     assert pc_host._close_goes_to_tray(False, False, True)
     assert not pc_host._close_goes_to_tray(False, True, True)

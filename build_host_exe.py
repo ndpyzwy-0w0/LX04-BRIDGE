@@ -126,6 +126,35 @@ def slim_host_dir(root: Path) -> None:
                 qm.unlink()
 
 
+def unlock_host_dir(host_dir: Path) -> None:
+    """Stop leftover bundled adb so dist copy is not blocked after the GUI exits."""
+    adb = (host_dir / "_internal" / "adb" / "adb.exe").resolve()
+    if not adb.is_file():
+        return
+    flags = 0x08000000 if sys.platform == "win32" else 0
+    try:
+        subprocess.run(
+            [str(adb), "kill-server"],
+            timeout=8,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            creationflags=flags,
+        )
+    except Exception:
+        pass
+    try:
+        import psutil
+    except ImportError:
+        return
+    for proc in psutil.process_iter(["exe"]):
+        try:
+            exe = proc.info.get("exe") or ""
+            if exe and Path(exe).resolve() == adb:
+                proc.kill()
+        except (psutil.Error, OSError, ValueError):
+            pass
+
+
 def bump_version() -> int:
     version = read_version() + 1
     VERSION_FILE.write_text(f"{version}\n", encoding="utf-8")
@@ -325,6 +354,7 @@ def main() -> int:
         print("PyInstaller did not write", built)
         return 1
     slim_host_dir(built)
+    unlock_host_dir(latest)
     try:
         if old_onefile.is_file():
             old_onefile.unlink()
@@ -334,7 +364,7 @@ def main() -> int:
         print("Wrote", latest / f"{name}.exe")
     except OSError as exc:
         print("Current host folder is in use, left", built, ":", exc)
-        print("请先退出上位机，再把该目录复制到", latest)
+        print("多半是残留 adb.exe。已退出上位机的话再打包一次即可。目标目录:", latest)
         return 1
     if not args.no_commit:
         commit_usable_version(version, args.message or "host EXE snapshot")

@@ -65,6 +65,12 @@ def _run(adb: str, args: list[str], timeout: float = 8.0) -> subprocess.Complete
     )
 
 
+def kill_server(adb: str) -> None:
+    if not adb:
+        return
+    _run(adb, ["kill-server"], timeout=5)
+
+
 def list_devices(adb: str) -> list[str]:
     result = _run(adb, ["devices"])
     devices: list[str] = []
