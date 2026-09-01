@@ -562,3 +562,50 @@ def prepare_vb_cable() -> dict[str, Any]:
     if capture is None or render is None:
         logs.append("未找全 CABLE Input / CABLE Output。请确认已安装 VB-CABLE 并重启过电脑。")
     return result
+
+
+def cable_capture_active() -> bool:
+    """True if any WASAPI client is capturing CABLE Output (WeChat/QQ recording)."""
+    device = find_cable_capture()
+    if device is None:
+        return False
+    try:
+        mgr = device.AudioSessionManager
+        enum = mgr.GetSessionEnumerator()
+        count = int(enum.GetCount())
+        for i in range(count):
+            ctl = enum.GetSession(i)
+            if int(ctl.GetState()) == 1:
+                return True
+    except Exception:
+        return False
+    return False
+
+
+class CaptureYield:
+    """Grab mics on first busy poll; give them back after idle_needed quiet polls.
+
+    ponytail: WASAPI sessions only. MME-only apps may not show; upgrade = endpoint client list.
+    """
+
+    def __init__(self, idle_needed: int = 3) -> None:
+        self.idle_needed = max(1, int(idle_needed))
+        self.idle_streak = 0
+        self.held = True
+
+    def reset(self, held: bool) -> None:
+        self.held = bool(held)
+        self.idle_streak = 0
+
+    def on_busy(self, busy: bool) -> str | None:
+        if busy:
+            self.idle_streak = 0
+            if not self.held:
+                self.held = True
+                return "grab"
+            return None
+        self.idle_streak += 1
+        if self.held and self.idle_streak >= self.idle_needed:
+            self.held = False
+            return "yield"
+        return None

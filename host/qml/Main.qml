@@ -635,8 +635,8 @@ ApplicationWindow {
 
                                 GroupCard {
                                     title: "麦克风"
-                                    status: host.micEnabled ? (host.micMuted ? "静音" : "正常") : "关闭"
-                                    statusColor: host.micEnabled && !host.micMuted ? win.ok : win.muted
+                                    status: !host.micEnabled ? "关闭" : (host.xiaoaiIdle ? "交还小爱" : (host.micMuted ? "静音" : "正常"))
+                                    statusColor: host.micEnabled && !host.micMuted && !host.xiaoaiIdle ? win.ok : win.muted
                                     LevelMeter { level: host.micLevel }
                                     RowLayout {
                                         Layout.fillWidth: true
@@ -655,6 +655,26 @@ ApplicationWindow {
                                         text: "输出到  " + (host.injectLabel || "—")
                                         color: win.muted
                                         wrapMode: Text.Wrap
+                                        Layout.fillWidth: true
+                                    }
+                                    RowLayout {
+                                        Layout.fillWidth: true
+                                        Switch {
+                                            objectName: "xiaoaiYieldSwitch"
+                                            checked: host.xiaoaiYield
+                                            onClicked: host.setXiaoaiYield(checked)
+                                        }
+                                        Label {
+                                            text: "空闲时交还小爱麦"
+                                            color: win.ink
+                                            wrapMode: Text.Wrap
+                                            Layout.fillWidth: true
+                                        }
+                                    }
+                                    Label {
+                                        text: "电脑没有软件占用麦克风时，可喊「小爱同学」。微信按住说话会抢回，开头可能空一小段。"
+                                        wrapMode: Text.Wrap
+                                        color: win.muted
                                         Layout.fillWidth: true
                                     }
                                     RowLayout {

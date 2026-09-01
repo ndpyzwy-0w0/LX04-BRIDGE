@@ -74,6 +74,8 @@ def main() -> None:
     app.processEvents()
     assert "hello-log" in str(area.property("text") or "")
     assert win.findChild(QObject, "micMeter") is not None
+    assert win.findChild(QObject, "xiaoaiYieldSwitch") is not None
+    assert bridge.xiaoaiYield is False
     assert bridge.diagUsb == "off"
     assert bridge.diagVb == "off"
     assert bridge.diagHifi == "off"

@@ -615,6 +615,12 @@ class HostApp:
         self.upside_down = Var(False)
         self.light_theme = Var(False)
         self.toast_mirror = Var(False)
+        self.xiaoai_yield = Var(False)
+        self._xiaoai_held = False
+        self._xiaoai_idle = False
+        self._yield_gate = win_endpoint.CaptureYield(idle_needed=3)
+        self._xiaoai_watch_stop = threading.Event()
+        self._xiaoai_watch_thread = None
         self.autostart = Var(False)
         self.minimize_to_tray = Var(False)
         self.disk_var = Var("")
@@ -756,6 +762,7 @@ class HostApp:
         self.upside_down.set(bool(data.get("upside_down", False)))
         self.light_theme.set(bool(data.get("light_theme", False)))
         self.toast_mirror.set(bool(data.get("toast_mirror", False)))
+        self.xiaoai_yield.set(bool(data.get("xiaoai_yield", False)))
         self.minimize_to_tray.set(bool(data.get("minimize_to_tray", False)))
         self._saved_inject = str(data.get("inject") or "")
         self._saved_spk = str(data.get("speaker") or "")
@@ -831,6 +838,7 @@ class HostApp:
             "upside_down": bool(self.upside_down.get()),
             "light_theme": bool(self.light_theme.get()),
             "toast_mirror": bool(self.toast_mirror.get()),
+            "xiaoai_yield": bool(self.xiaoai_yield.get()),
             "minimize_to_tray": bool(self.minimize_to_tray.get()),
             "pc_disk": self._selected_disk(),
             "pc_monitor": self._selected_monitor_key(),
@@ -883,6 +891,17 @@ class HostApp:
                 self._log("麦克风建议：隐藏的 CABLE Input，微信选 CABLE Output。")
             if hifi_cable.present():
                 self._log("扬声器建议：Hi-Fi Cable Input。")
+
+    def _on_xiaoai_yield_change(self) -> None:
+        if not self._routes_ready:
+            return
+        self._after_paint(self._xiaoai_yield_job)
+
+    def _xiaoai_yield_job(self) -> None:
+        self._save_routes()
+        if not self.connected or not self.mic_enabled.get():
+            return
+        self._spawn_route(lambda: self._apply_mic_route())
 
     def _on_mic_route_change(self) -> None:
         if not self._routes_ready:
@@ -1309,16 +1328,52 @@ class HostApp:
         self._vol_ignore_pc_until = now + 0.45
         win_volume.set_scalar(level)
 
-    def _apply_mic_route(self, on: bool | None = None, inject=None) -> None:
+    def _apply_mic_route(self, on: bool | None = None, inject=None, grab: bool | None = None) -> None:
         if on is None:
             on = bool(self.mic_enabled.get())
         if not on:
+            self._stop_xiaoai_watch()
             self.hw.stop(self.adb, self._serial)
             self.sink.stop()
+            self._release_xiaoai_mic(log=True)
+            self._set_xiaoai_idle(False)
             self._log("已关闭麦克风通路")
             return
         self.sink.configure(48000, 1)
-        self._start_inject(inject)
+        if grab is None or not self.sink.running():
+            self._start_inject(inject)
+        if grab is None:
+            grab = (not bool(self.xiaoai_yield.get())) or win_endpoint.cable_capture_active()
+        if grab:
+            self._grab_xiaoai_mic()
+        else:
+            self._yield_xiaoai_mic()
+        if self.xiaoai_yield.get():
+            self._start_xiaoai_watch()
+        else:
+            self._stop_xiaoai_watch()
+
+    def _set_xiaoai_idle(self, idle: bool) -> None:
+        idle = bool(idle)
+        if self._xiaoai_idle == idle:
+            return
+        self._xiaoai_idle = idle
+
+        def notify() -> None:
+            if getattr(self, "bridge", None) is not None:
+                self.bridge.xiaoaiIdleChanged.emit()
+            if self.connected and idle:
+                self.headline.configure(text="空闲中，可呼出小爱")
+            elif self.connected and self.hw.running():
+                self.headline.configure(text="正在把 LX04 硬件麦送给语音软件")
+
+        self._ui(notify)
+
+    def _grab_xiaoai_mic(self) -> None:
+        if self.adb and self._serial and not self._xiaoai_held:
+            self._log(adb_usb.take_speaker_mic(self.adb, self._serial))
+            self._xiaoai_held = True
+        self._yield_gate.reset(True)
         if self.adb and self._serial and not self.hw.running():
             try:
                 self.hw.start(self.adb, self._serial, self.sink)
@@ -1327,6 +1382,70 @@ class HostApp:
             except Exception as exc:
                 self._log("硬件直采失败，回退 APK 麦克风: " + str(exc))
                 self.client.send_control("start_mic")
+        self._set_xiaoai_idle(False)
+
+    def _yield_xiaoai_mic(self) -> None:
+        was_held = self._xiaoai_held or self.hw.running()
+        was_idle = self._xiaoai_idle
+        if self.hw.running():
+            self.hw.stop(self.adb, self._serial)
+        try:
+            self.client.send_control("stop_mic")
+        except Exception:
+            pass
+        self._release_xiaoai_mic(log=was_held)
+        self._yield_gate.reset(False)
+        self._set_xiaoai_idle(True)
+        if was_held:
+            self._log("已交还小爱麦，可喊「小爱同学」")
+        elif not was_idle:
+            self._log("空闲中，小爱麦仍可用。电脑占用麦克风时会自动接管。")
+
+    def _release_xiaoai_mic(self, log: bool = False) -> None:
+        if not self._xiaoai_held:
+            return
+        if self.adb and self._serial:
+            try:
+                msg = adb_usb.release_speaker_mic(self.adb, self._serial)
+                if log:
+                    self._log(msg)
+            except Exception as exc:
+                if log:
+                    self._log("恢复小爱麦失败: " + str(exc))
+        self._xiaoai_held = False
+
+    def _start_xiaoai_watch(self) -> None:
+        t = self._xiaoai_watch_thread
+        if t is not None and t.is_alive():
+            self._xiaoai_watch_stop.clear()
+            return
+        self._xiaoai_watch_stop.clear()
+        t = threading.Thread(target=self._xiaoai_watch_loop, daemon=True, name="lx04-xiaoai")
+        self._xiaoai_watch_thread = t
+        t.start()
+
+    def _stop_xiaoai_watch(self) -> None:
+        self._xiaoai_watch_stop.set()
+
+    def _xiaoai_watch_loop(self) -> None:
+        import comtypes
+
+        comtypes.CoInitialize()
+        try:
+            while not self._xiaoai_watch_stop.wait(0.4) and not self._closing:
+                if not (self.connected and self.xiaoai_yield.get() and self.mic_enabled.get()):
+                    continue
+                busy = win_endpoint.cable_capture_active()
+                action = self._yield_gate.on_busy(busy)
+                if action == "grab":
+                    self._spawn_route(lambda: self._apply_mic_route(grab=True))
+                elif action == "yield":
+                    self._spawn_route(lambda: self._apply_mic_route(grab=False))
+        finally:
+            try:
+                comtypes.CoUninitialize()
+            except Exception:
+                pass
 
     def _apply_speaker_route(
         self,
@@ -1676,14 +1795,14 @@ class HostApp:
             gadget = adb_usb.enable_usb_microphone(self.adb, serial)
             if gadget:
                 self._log("USB 功能: " + " ".join(gadget.split()))
-            mic = adb_usb.take_speaker_mic(self.adb, serial)
-            self._log(mic)
             self._log(adb_usb.ensure_bridge_running(self.adb, serial))
             adb_usb.usb_forward(self.adb, serial)
             self._connect_tcp(serial)
             self._session = True
             self.connected = True
             self._serial = serial
+            self._xiaoai_held = False
+            self._yield_gate.reset(False)
             if self.mic_enabled.get():
                 self._apply_mic_route()
             else:
@@ -1700,7 +1819,9 @@ class HostApp:
             else:
                 self._log("扬声器通路已关闭。可用「音箱试音」检查喇叭。")
             self._sync_toast_mirror()
-            self.headline.configure(text="USB 已连接")
+            self.headline.configure(
+                text="空闲中，可呼出小爱" if self._xiaoai_idle else "USB 已连接"
+            )
         except Exception as exc:
             self._session = False
             self.connected = False
@@ -1755,8 +1876,10 @@ class HostApp:
         raise last_err if last_err else RuntimeError("无法连上音箱后台服务")
 
     def disconnect(self) -> None:
+        self._stop_xiaoai_watch()
         self._session = False
         self.connected = False
+        self._xiaoai_idle = False
         self._usb_link = None
         self._mirror_logged = False
         self._toast_logged = False
@@ -1783,6 +1906,7 @@ class HostApp:
                 if self.adb and self._serial:
                     try:
                         msg = adb_usb.release_speaker_mic(self.adb, self._serial)
+                        self._xiaoai_held = False
                         if not self._closing:
                             self._log(msg)
                     except Exception as exc:
@@ -1796,6 +1920,7 @@ class HostApp:
             self._hide_to_tray()
             return
         self._closing = True
+        self._stop_xiaoai_watch()
         self._session = False
         self.connected = False
         self._tray_remove()
@@ -2045,7 +2170,8 @@ class HostApp:
                     status = adb_usb.ensure_bridge_running(self.adb, serial)
                     self.root.after(0, lambda s=status: self._log(s))
                     try:
-                        adb_usb.take_speaker_mic(self.adb, serial)
+                        if self.mic_enabled.get() and self._xiaoai_held:
+                            adb_usb.take_speaker_mic(self.adb, serial)
                     except Exception:
                         pass
                     adb_usb.usb_forward(self.adb, serial)
@@ -2082,17 +2208,14 @@ class HostApp:
         if not self._session:
             return
         self.connected = True
-        self.headline.configure(text="USB 已连接")
+        self.headline.configure(
+            text="空闲中，可呼出小爱" if self._xiaoai_idle else "USB 已连接"
+        )
         self.detail.configure(text="后台服务已恢复，音箱窗口无需打开。")
         self._log("已重新拉起音箱后台服务（未打开窗口）")
         try:
             if self.mic_enabled.get():
-                if self.hw.running():
-                    self.client.send_control("stop_mic")
-                elif self.sink.running():
-                    self.client.send_control("start_mic")
-                else:
-                    self._apply_mic_route()
+                self._apply_mic_route()
             self._on_gain()
             self.client.send_control("gain", gain=round(self.sink.gain, 3))
             if self.volume_sync.get():
@@ -2106,8 +2229,10 @@ class HostApp:
 
     def _revive_gave_up(self, err: str) -> None:
         self._reviving = False
+        self._stop_xiaoai_watch()
         self._session = False
         self.connected = False
+        self._xiaoai_idle = False
         self.hw.stop(self.adb, self._serial)
         self.sink.stop()
         self._restore_render()
@@ -2120,6 +2245,7 @@ class HostApp:
                 adb_usb.release_speaker_mic(self.adb, self._serial)
             except Exception:
                 pass
+            self._xiaoai_held = False
         self.headline.configure(text="USB 已断开")
         self.detail.configure(text="多次拉起失败。请检查 USB，或在音箱上打开一次应用。")
         self._log("无法拉起后台服务: " + err)
@@ -2134,7 +2260,9 @@ class HostApp:
         elif spk_muted:
             self.headline.configure(text="音箱扬声器已静音")
         elif self.connected:
-            if self.hw.running():
+            if self._xiaoai_idle:
+                self.headline.configure(text="空闲中，可呼出小爱")
+            elif self.hw.running():
                 self.headline.configure(text="正在把 LX04 硬件麦送给语音软件")
             else:
                 self.headline.configure(text="正在把 LX04 麦克风送给语音软件")
@@ -2167,7 +2295,7 @@ class HostApp:
     def _handle_event(self, kind: str, data) -> None:
         if kind == "hello":
             rate = int(data.get("sampleRate") or 48000)
-            if not self.hw.running() and self.mic_enabled.get():
+            if not self.hw.running() and self.mic_enabled.get() and not self._xiaoai_idle:
                 self.sink.configure(rate, 1)
                 if not self.sink.running():
                     try:
@@ -2178,18 +2306,25 @@ class HostApp:
             source = data.get("audioSource") or ""
             apk = str(data.get("apkVersion") or "").strip()
             apk_label = ("v" + apk.lstrip("vV")) if apk else ""
-            self.headline.configure(text=f"已连接 {model}" + (f"  {apk_label}" if apk_label else ""))
+            title = f"已连接 {model}" + (f"  {apk_label}" if apk_label else "")
+            if self._xiaoai_idle:
+                title += "  ·  可呼出小爱"
+            self.headline.configure(text=title)
             self.detail.configure(text=f"Android {data.get('android', '?')} · USB 麦克风 + 状态屏")
             self._log(f"HELLO {data}")
             if apk_label:
                 self._log("音箱 APK: " + apk_label)
             if self.hw.running():
                 self._log("音频来自音箱硬件麦 48 kHz，不走 APK AudioRecord")
+            elif self._xiaoai_idle:
+                self._log("空闲交还小爱麦，未占用音箱收音")
             else:
                 if source:
                     self._log("音箱采集源: " + str(source))
                 self._log(f"按单声道 {rate} Hz 接收音箱 PCM")
         elif kind == "audio":
+            if self._xiaoai_idle:
+                return
             if self.sink.running() and not self.hw.running():
                 self.sink.push(data.payload, muted=data.muted)
         elif kind == "status":

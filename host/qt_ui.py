@@ -556,6 +556,8 @@ class HostBridge(QObject):
     upsideDownChanged = Signal()
     pcStatsEnabledChanged = Signal()
     toastMirrorChanged = Signal()
+    xiaoaiYieldChanged = Signal()
+    xiaoaiIdleChanged = Signal()
     autostartChanged = Signal()
     minimizeToTrayChanged = Signal()
     connectedChanged = Signal()
@@ -625,6 +627,7 @@ class HostBridge(QObject):
         host.upside_down._on_change = self.sync_toggles
         host.pc_stats_enabled._on_change = self.sync_toggles
         host.toast_mirror._on_change = self.sync_toggles
+        host.xiaoai_yield._on_change = self.sync_toggles
         host.autostart._on_change = self.sync_toggles
         host.minimize_to_tray._on_change = self.sync_toggles
         host.device_var._on_change = lambda: self._sync_combo("device")
@@ -760,6 +763,8 @@ class HostBridge(QObject):
         self.upsideDownChanged.emit()
         self.pcStatsEnabledChanged.emit()
         self.toastMirrorChanged.emit()
+        self.xiaoaiYieldChanged.emit()
+        self.xiaoaiIdleChanged.emit()
         self.autostartChanged.emit()
         self.minimizeToTrayChanged.emit()
         self.gainPercentChanged.emit()
@@ -1048,6 +1053,14 @@ class HostBridge(QObject):
     @Property(bool, notify=toastMirrorChanged)
     def toastMirror(self) -> bool:
         return bool(self.host.toast_mirror.get()) if self.host else False
+
+    @Property(bool, notify=xiaoaiYieldChanged)
+    def xiaoaiYield(self) -> bool:
+        return bool(self.host.xiaoai_yield.get()) if self.host else False
+
+    @Property(bool, notify=xiaoaiIdleChanged)
+    def xiaoaiIdle(self) -> bool:
+        return bool(getattr(self.host, "_xiaoai_idle", False)) if self.host else False
 
     @Property(bool, notify=autostartChanged)
     def autostart(self) -> bool:
@@ -1407,6 +1420,11 @@ class HostBridge(QObject):
     def setToastMirror(self, on: bool) -> None:
         self.host.toast_mirror.set(bool(on))
         self.host._on_toast_mirror_change()
+
+    @Slot(bool)
+    def setXiaoaiYield(self, on: bool) -> None:
+        self.host.xiaoai_yield.set(bool(on))
+        self.host._on_xiaoai_yield_change()
 
     @Slot(bool)
     def setAutostart(self, on: bool) -> None:
