@@ -31,6 +31,22 @@ def main() -> None:
     session = hud_preview.HudSession(False)
     session.set_title(0, "CPU")
     assert session.state["cards"][0]["title"] == "CPU"
+    assert hud_preview.lerp_color("#3DDC97", "#FF5C7A", 0) == "#3DDC97"
+    assert hud_preview.lerp_color("#3DDC97", "#FF5C7A", 1) == "#FF5C7A"
+    assert hud_preview.lerp_color("#000000", "#FFFFFF", 0.5) == "#808080"
+    assert hud_preview.card_value_paint({"value_color": "#3DDC97"}, 0.9) == "#3DDC97"
+    shifted = {"value_color": "#3DDC97", "value_shift": True, "value_color_to": "#FF5C7A"}
+    assert hud_preview.card_value_paint(shifted, 0) == "#3DDC97"
+    assert hud_preview.card_value_paint(shifted, 1) == "#FF5C7A"
+    session.set_value_shift(0, True)
+    session.set_color(0, "valueTo", "#FF5C7A")
+    payload = hud_preview.control_payload(session.state)
+    cpu = payload["cards"][0]
+    assert cpu.get("valueShift") is True
+    assert cpu.get("valueColorTo") == "#FF5C7A"
+    back = hud_preview.state_from_payload(payload, False)
+    assert back["cards"][0]["value_shift"] is True
+    assert back["cards"][0]["value_color_to"] == "#FF5C7A"
     from PySide6.QtGui import QImage, QPainter
     from PySide6.QtWidgets import QApplication
     from qt_ui import PainterCanvas, apply_fluent_style

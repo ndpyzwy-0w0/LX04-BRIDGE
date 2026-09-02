@@ -52,7 +52,14 @@ ApplicationWindow {
         width: 28
         height: 28
         radius: 4
-        color: { win.gen; return which === "title" ? hud.titleColor(card) : hud.valueColor(card) }
+        color: {
+            win.gen
+            if (which === "title")
+                return hud.titleColor(card)
+            if (which === "valueTo")
+                return hud.valueColorTo(card)
+            return hud.valueColor(card)
+        }
         border.color: win.stroke
         MouseArea {
             anchors.fill: parent
@@ -172,6 +179,16 @@ ApplicationWindow {
                                 onActivated: (i) => hud.setMetric(cardIndex, i)
                             }
                             Swatch { card: cardIndex; which: "value" }
+                            Switch {
+                                text: "变色"
+                                checked: { win.gen; return hud.valueShift(cardIndex) }
+                                onClicked: hud.setValueShift(cardIndex, checked)
+                            }
+                            Swatch {
+                                card: cardIndex
+                                which: "valueTo"
+                                visible: { win.gen; return hud.valueShift(cardIndex) }
+                            }
                             Repeater {
                                 model: subIdx.length
                                 RowLayout {

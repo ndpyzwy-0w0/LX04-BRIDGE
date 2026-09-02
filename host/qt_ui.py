@@ -418,6 +418,14 @@ class HudEditor(QObject):
     def valueColor(self, index: int) -> str:
         return str(self.session.state["cards"][index].get("value_color") or hud_preview.OK)
 
+    @Slot(int, result=str)
+    def valueColorTo(self, index: int) -> str:
+        return str(self.session.state["cards"][index].get("value_color_to") or hud_preview.BAD)
+
+    @Slot(int, result=bool)
+    def valueShift(self, index: int) -> bool:
+        return bool(self.session.state["cards"][index].get("value_shift"))
+
     @Slot(int, result=int)
     def valueSize(self, index: int) -> int:
         return hud_preview.card_value_size(self.session.state["cards"][index])
@@ -467,11 +475,21 @@ class HudEditor(QObject):
 
     @Slot(int, str)
     def pickColor(self, index: int, which: str) -> None:
-        current = self.titleColor(index) if which == "title" else self.valueColor(index)
+        if which == "title":
+            current = self.titleColor(index)
+        elif which == "valueTo":
+            current = self.valueColorTo(index)
+        else:
+            current = self.valueColor(index)
         picked = QColorDialog.getColor(QColor(current), None, "选择颜色")
         if not picked.isValid():
             return
         self.session.set_color(index, which, picked.name().upper())
+        self._on_editor()
+
+    @Slot(int, bool)
+    def setValueShift(self, index: int, on: bool) -> None:
+        self.session.set_value_shift(index, on)
         self._on_editor()
 
     @Slot(int, int)

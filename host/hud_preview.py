@@ -359,8 +359,11 @@ def default_state(light: bool = False) -> dict:
                 "sub_size": SUB_SIZE_DEFAULT,
                 "title_color": colors["dim"],
                 "value_color": OK,
+                "value_color_to": BAD,
                 "title_color_set": False,
                 "value_color_set": False,
+                "value_color_to_set": False,
+                "value_shift": False,
                 "chart": True,
                 "chart_metric": "",
             }
@@ -407,12 +410,20 @@ def load_state(light: bool = False) -> dict:
             card["title_color"] = _hex(extra.get("title_color"))
         if _hex(extra.get("value_color")):
             card["value_color"] = _hex(extra.get("value_color"))
+        if _hex(extra.get("value_color_to") or extra.get("valueColorTo")):
+            card["value_color_to"] = _hex(extra.get("value_color_to") or extra.get("valueColorTo"))
         card["title_color_set"] = bool(extra.get("title_color_set")) or (
             bool(_hex(extra.get("title_color"))) and card["title_color"] != palette(light)["dim"]
         )
         card["value_color_set"] = bool(extra.get("value_color_set")) or (
             bool(_hex(extra.get("value_color"))) and card["value_color"] != OK
         )
+        card["value_color_to_set"] = bool(extra.get("value_color_to_set")) or (
+            bool(_hex(extra.get("value_color_to") or extra.get("valueColorTo")))
+            and card["value_color_to"] != BAD
+        )
+        if extra.get("value_shift") or extra.get("valueShift"):
+            card["value_shift"] = True
     base["rev"] = int(data.get("rev") or 0)
     if base["rev"] <= 0 and not style_is_default(base):
         base["rev"] = 1
@@ -444,6 +455,11 @@ def style_is_default(state: dict) -> bool:
         title_color = _hex(card.get("title_color")) or default["title_color"]
         value_color = _hex(card.get("value_color")) or default["value_color"]
         if title_color != default["title_color"] or value_color != default["value_color"]:
+            return False
+        if bool(card.get("value_shift")):
+            return False
+        to_color = _hex(card.get("value_color_to")) or default["value_color_to"]
+        if card.get("value_color_to_set") or to_color != default["value_color_to"]:
             return False
     return True
 
@@ -477,6 +493,13 @@ def control_payload(state: dict) -> dict:
             item["valueColor"] = value_color
         elif value_color and value_color != default["value_color"]:
             item["valueColor"] = value_color
+        if card.get("value_shift"):
+            item["valueShift"] = True
+        to_color = _hex(card.get("value_color_to"))
+        if card.get("value_color_to_set") and to_color:
+            item["valueColorTo"] = to_color
+        elif to_color and to_color != default["value_color_to"]:
+            item["valueColorTo"] = to_color
         value_size = card_value_size(card)
         if value_size != VALUE_SIZE_DEFAULT:
             item["valueSize"] = value_size
@@ -528,6 +551,11 @@ def state_from_payload(payload: dict, light: bool) -> dict:
         if _hex(extra.get("valueColor") or extra.get("value_color")):
             card["value_color"] = _hex(extra.get("valueColor") or extra.get("value_color"))
             card["value_color_set"] = card["value_color"] != OK
+        if extra.get("valueShift") or extra.get("value_shift"):
+            card["value_shift"] = True
+        if _hex(extra.get("valueColorTo") or extra.get("value_color_to")):
+            card["value_color_to"] = _hex(extra.get("valueColorTo") or extra.get("value_color_to"))
+            card["value_color_to_set"] = card["value_color_to"] != BAD
     return state
 
 
@@ -555,6 +583,27 @@ def _hex(value: object) -> str:
         except ValueError:
             return ""
     return ""
+
+
+def lerp_color(from_hex: str, to_hex: str, t: float) -> str:
+    t = 0.0 if t <= 0 else 1.0 if t >= 1 else t
+    start = int((_hex(from_hex) or OK)[1:], 16)
+    end = int((_hex(to_hex) or BAD)[1:], 16)
+
+    def ch(shift: int) -> int:
+        a = (start >> shift) & 255
+        b = (end >> shift) & 255
+        return int(math.floor(a + (b - a) * t + 0.5))
+
+    return f"#{ch(16):02X}{ch(8):02X}{ch(0):02X}"
+
+
+def card_value_paint(card: dict, t: float) -> str:
+    from_c = _hex(card.get("value_color")) or OK
+    if not card.get("value_shift"):
+        return from_c
+    to_c = _hex(card.get("value_color_to")) or BAD
+    return lerp_color(from_c, to_c, t)
 
 
 def _round_rect(canvas: tk.Canvas, x1: float, y1: float, x2: float, y2: float, radius: float, fill: str) -> None:
@@ -698,7 +747,8 @@ def _draw_card(canvas: tk.Canvas, x: float, y: float, cw: float, ch: float, card
     value = metric_sample(str(card.get("metric") or "cpu"))
     subs = [sub_metric_sample(key) for key in display_sub_metrics(card)]
     title_color = _hex(card.get("title_color")) or colors["dim"]
-    value_color = _hex(card.get("value_color")) or OK
+    shift_t = 0.0 if not value or value == "—" else _bar_fill(value)
+    value_color = card_value_paint(card, shift_t)
     inner_w = max(dp(24), cw - dp(20))
     title_dp = _fit_size(13, False, title, inner_w, 9)
     value_dp = _fit_size(card_value_size(card), True, value, inner_w, VALUE_SIZE_MIN)
@@ -884,10 +934,21 @@ class HudSession:
         color = _hex(hex_color)
         if not color:
             return
-        key = "title_color" if which == "title" else "value_color"
-        flag = "title_color_set" if which == "title" else "value_color_set"
+        keys = {
+            "title": ("title_color", "title_color_set"),
+            "value": ("value_color", "value_color_set"),
+            "valueTo": ("value_color_to", "value_color_to_set"),
+        }
+        pair = keys.get(which)
+        if pair is None:
+            return
+        key, flag = pair
         self.state["cards"][index][key] = color
         self.state["cards"][index][flag] = True
+        self.touch()
+
+    def set_value_shift(self, index: int, on: bool) -> None:
+        self.state["cards"][index]["value_shift"] = bool(on)
         self.touch()
 
     def set_value_size(self, index: int, size: int) -> None:

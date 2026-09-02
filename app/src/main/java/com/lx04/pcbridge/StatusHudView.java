@@ -658,7 +658,7 @@ public class StatusHudView extends View {
             String title = s.hudStyle.title(i, HudStyle.fallbackTitle(metric, s.pcDiskName));
             drawStatCard(canvas, x, top, cardW, cardH, title,
                     formatMetricValue(s, metric),
-                    formatMetricFoot(s, metric), metricUsage(s, metric), metricTemp(s, metric), i);
+                    formatMetricFoot(s, metric), metricUsage(s, metric), i);
         }
 
         dim.setTextSize(dp(12));
@@ -670,7 +670,7 @@ public class StatusHudView extends View {
     }
 
     private void drawStatCard(Canvas canvas, float x, float y, float cw, float ch,
-            String title, String value, String foot, float usage, float temp, int slot) {
+            String title, String value, String foot, float usage, int slot) {
         tmpRect.set(x, y, x + cw, y + ch);
         canvas.drawRoundRect(tmpRect, dp(12), dp(12), cardPaint);
         HudStyle style = BridgeService.STATE.hudStyle;
@@ -694,8 +694,7 @@ public class StatusHudView extends View {
         float titleTop = y + dp(8);
         float titleBase = titleTop - dim.ascent();
 
-        int customValue = style.valueColor(slot);
-        int valueColor = customValue != 0 ? customValue : meterColor(usage, temp);
+        int valueColor = style.paintValueColor(slot, usage);
         text.setColor(valueColor);
         valueWant = fitText(text, value, innerW, valueWant, dp(HudStyle.MIN_VALUE_SIZE));
         float afterTitle = titleBase + dim.descent() + dp(4);
@@ -1198,17 +1197,6 @@ public class StatusHudView extends View {
         return Float.NaN;
     }
 
-    private static float metricTemp(BridgeState s, String metric) {
-        if ("cpu".equals(metric) || "cpuT".equals(metric)) {
-            return s.pcCpuTemp;
-        }
-        if ("gpu".equals(metric) || "gpuT".equals(metric) || "gpuW".equals(metric)
-                || "gpuFan".equals(metric) || "vram".equals(metric)) {
-            return s.pcGpuTemp;
-        }
-        return Float.NaN;
-    }
-
     private static String formatPct(float value) {
         if (Float.isNaN(value)) {
             return "--";
@@ -1342,18 +1330,6 @@ public class StatusHudView extends View {
             paint.setTextSize(size);
         }
         return size;
-    }
-
-    private static int meterColor(float usage, float temp) {
-        float heat = Float.isNaN(temp) ? 0f : temp;
-        float load = Float.isNaN(usage) ? 0f : usage;
-        if (heat >= 85f || load >= 90f) {
-            return 0xFFFF5C7A;
-        }
-        if (heat >= 70f || load >= 70f) {
-            return 0xFFFFB020;
-        }
-        return 0xFF3DDC97;
     }
 
     float dp(float v) {

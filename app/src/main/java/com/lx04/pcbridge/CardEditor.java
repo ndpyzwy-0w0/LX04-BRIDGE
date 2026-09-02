@@ -46,6 +46,9 @@ final class CardEditor {
     private final RectF subPlus = new RectF();
     private final RectF[] titleSwatches = new RectF[HudStyle.PALETTE.length];
     private final RectF[] valueSwatches = new RectF[HudStyle.PALETTE.length];
+    private final RectF[] valueToSwatches = new RectF[HudStyle.PALETTE.length];
+    private final RectF shiftOffRect = new RectF();
+    private final RectF shiftOnRect = new RectF();
     private int slot = -1;
     private int page = PAGE_MAIN;
     private int subEditIndex;
@@ -75,6 +78,7 @@ final class CardEditor {
         for (int i = 0; i < titleSwatches.length; i++) {
             titleSwatches[i] = new RectF();
             valueSwatches[i] = new RectF();
+            valueToSwatches[i] = new RectF();
         }
         for (int i = 0; i < subRects.length; i++) {
             subRects[i] = new RectF();
@@ -234,9 +238,20 @@ final class CardEditor {
         label.setColor(light ? 0xFF5A6B84 : 0xFF8FA0BE);
         y = drawLabeledRow(canvas, draw, "大字内容", y, metricRect,
                 HudStyle.metricLabel(style.metric(slot)));
-        y = drawLabeledPalette(canvas, draw, "大字颜色", y, valueSwatches,
+        boolean shift = style.valueShift(slot);
+        y = drawLabeledPalette(canvas, draw, shift ? "低占用颜色" : "大字颜色", y, valueSwatches,
                 style.valueColor(slot), 0xFF3DDC97);
         y += dp(10);
+        y = drawTogglePair(canvas, draw, "大字变色", y, shiftOffRect, shiftOnRect, shift);
+        if (shift) {
+            y = drawLabeledPalette(canvas, draw, "高占用颜色", y, valueToSwatches,
+                    style.valueColorTo(slot), 0xFFFF5C7A);
+            y += dp(10);
+        } else {
+            for (int i = 0; i < valueToSwatches.length; i++) {
+                valueToSwatches[i].setEmpty();
+            }
+        }
         y = drawSubSection(canvas, draw, y, style);
         y = drawLabeledPalette(canvas, draw, "字母颜色", y, titleSwatches,
                 style.titleColor(slot), light ? 0xFF5A6B84 : 0xFF8FA0BE);
@@ -588,6 +603,16 @@ final class CardEditor {
                 changed();
                 return true;
             }
+            if (shiftOffRect.contains(x, y)) {
+                style.setValueShift(slot, false);
+                changed();
+                return true;
+            }
+            if (shiftOnRect.contains(x, y)) {
+                style.setValueShift(slot, true);
+                changed();
+                return true;
+            }
             if (valueMinus.contains(x, y)) {
                 style.setValueSize(slot, style.valueSize(slot) - 1);
                 changed();
@@ -611,6 +636,13 @@ final class CardEditor {
             for (int i = 0; i < valueSwatches.length; i++) {
                 if (valueSwatches[i].contains(x, y)) {
                     style.setValueColor(slot, HudStyle.PALETTE[i]);
+                    changed();
+                    return true;
+                }
+            }
+            for (int i = 0; i < valueToSwatches.length; i++) {
+                if (!valueToSwatches[i].isEmpty() && valueToSwatches[i].contains(x, y)) {
+                    style.setValueColorTo(slot, HudStyle.PALETTE[i]);
                     changed();
                     return true;
                 }

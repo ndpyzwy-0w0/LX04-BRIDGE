@@ -40,6 +40,8 @@ final class HudStyle {
 
     private final int[] titleColors = new int[4];
     private final int[] valueColors = new int[4];
+    private final int[] valueColorTos = new int[4];
+    private final boolean[] valueShifts = new boolean[4];
     private final int[] valueSizes = new int[4];
     private final int[] subSizes = new int[4];
     private long rev;
@@ -53,6 +55,8 @@ final class HudStyle {
             chartOn[i] = true;
             titleColors[i] = 0;
             valueColors[i] = 0;
+            valueColorTos[i] = 0;
+            valueShifts[i] = false;
             valueSizes[i] = 0;
             subSizes[i] = 0;
         }
@@ -95,6 +99,8 @@ final class HudStyle {
             chartOn[index] = !card.has("chart") || card.optBoolean("chart", true);
             titleColors[index] = parseColor(card.optString("titleColor", ""));
             valueColors[index] = parseColor(card.optString("valueColor", ""));
+            valueColorTos[index] = parseColor(card.optString("valueColorTo", ""));
+            valueShifts[index] = card.optBoolean("valueShift", false);
             valueSizes[index] = normalizeValueSize(card.optInt("valueSize", 0));
             subSizes[index] = normalizeSubSize(card.optInt("subSize", 0));
         }
@@ -125,6 +131,12 @@ final class HudStyle {
                 if (valueColors[i] != 0) {
                     card.put("valueColor", hex(valueColors[i]));
                 }
+                if (valueColorTos[i] != 0) {
+                    card.put("valueColorTo", hex(valueColorTos[i]));
+                }
+                if (valueShifts[i]) {
+                    card.put("valueShift", true);
+                }
                 if (valueSize(i) != DEFAULT_VALUE_SIZE) {
                     card.put("valueSize", valueSize(i));
                 }
@@ -154,6 +166,7 @@ final class HudStyle {
             if (!titles[i].isEmpty() || !metrics[i].isEmpty() || subCounts[i] > 0
                     || !chartMetrics[i].isEmpty() || !chartOn[i]
                     || titleColors[i] != 0 || valueColors[i] != 0
+                    || valueColorTos[i] != 0 || valueShifts[i]
                     || valueSizes[i] != 0 || subSizes[i] != 0) {
                 return false;
             }
@@ -268,6 +281,36 @@ final class HudStyle {
             return 0;
         }
         return valueColors[index];
+    }
+
+    synchronized int valueColorTo(int index) {
+        if (index < 0 || index >= 4) {
+            return 0;
+        }
+        return valueColorTos[index];
+    }
+
+    synchronized boolean valueShift(int index) {
+        if (index < 0 || index >= 4) {
+            return false;
+        }
+        return valueShifts[index];
+    }
+
+    synchronized int paintValueColor(int index, float usage) {
+        int from = valueColor(index);
+        if (from == 0) {
+            from = 0xFF3DDC97;
+        }
+        if (!valueShift(index)) {
+            return from;
+        }
+        int to = valueColorTo(index);
+        if (to == 0) {
+            to = 0xFFFF5C7A;
+        }
+        float t = Float.isNaN(usage) ? 0f : Math.max(0f, Math.min(1f, usage / 100f));
+        return lerpColor(from, to, t);
     }
 
     synchronized int valueSize(int index) {
@@ -391,6 +434,22 @@ final class HudStyle {
         bumpRev();
     }
 
+    synchronized void setValueColorTo(int index, int color) {
+        if (index < 0 || index >= 4) {
+            return;
+        }
+        valueColorTos[index] = color;
+        bumpRev();
+    }
+
+    synchronized void setValueShift(int index, boolean on) {
+        if (index < 0 || index >= 4 || valueShifts[index] == on) {
+            return;
+        }
+        valueShifts[index] = on;
+        bumpRev();
+    }
+
     synchronized void setValueSize(int index, int size) {
         if (index < 0 || index >= 4) {
             return;
@@ -449,6 +508,8 @@ final class HudStyle {
         chartOn[index] = true;
         titleColors[index] = 0;
         valueColors[index] = 0;
+        valueColorTos[index] = 0;
+        valueShifts[index] = false;
         valueSizes[index] = 0;
         subSizes[index] = 0;
         bumpRev();
@@ -690,6 +751,24 @@ final class HudStyle {
             }
         }
         return -1;
+    }
+
+    static int lerpColor(int from, int to, float t) {
+        if (t <= 0f) {
+            return from;
+        }
+        if (t >= 1f) {
+            return to;
+        }
+        int a = channel(from, 24) + Math.round((channel(to, 24) - channel(from, 24)) * t);
+        int r = channel(from, 16) + Math.round((channel(to, 16) - channel(from, 16)) * t);
+        int g = channel(from, 8) + Math.round((channel(to, 8) - channel(from, 8)) * t);
+        int b = channel(from, 0) + Math.round((channel(to, 0) - channel(from, 0)) * t);
+        return (a << 24) | (r << 16) | (g << 8) | b;
+    }
+
+    private static int channel(int color, int shift) {
+        return (color >> shift) & 0xFF;
     }
 
     static int parseColor(String hex) {
