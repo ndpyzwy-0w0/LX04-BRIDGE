@@ -32,18 +32,14 @@ final class AppMenu {
     private final RectF hudRow = new RectF();
     private final RectF mirrorRow = new RectF();
     private final RectF backRect = new RectF();
-    private final RectF darkRect = new RectF();
     private final RectF lightRect = new RectF();
-    private final RectF autoHideOffRect = new RectF();
-    private final RectF autoHideOnRect = new RectF();
+    private final RectF autoHideRect = new RectF();
     private final RectF clockDateRect = new RectF();
     private final RectF clockHourRect = new RectF();
     private final RectF clockMinuteRect = new RectF();
     private final RectF clockSecondRect = new RectF();
-    private final RectF bootOffRect = new RectF();
-    private final RectF bootOnRect = new RectF();
-    private final RectF hudShowRect = new RectF();
-    private final RectF hudHideRect = new RectF();
+    private final RectF bootRect = new RectF();
+    private final RectF hudRect = new RectF();
     private final RectF settingsPanel = new RectF();
     private final RectF settingsViewport = new RectF();
     private final RectF bgRow = new RectF();
@@ -276,92 +272,32 @@ final class AppMenu {
         float start = y;
         float left = settingsPanel.left + dp(18);
         float right = settingsPanel.right - dp(18);
-        float btnH = dp(44);
-        float gap = dp(10);
-        float inner = right - left;
-        float btnW = (inner - gap) / 2f;
+        BridgeState s = BridgeService.STATE;
 
-        if (draw) {
-            dim.setColor(colDim());
-            dim.setTextSize(dp(13));
-            canvas.drawText("外观", left, y + dp(16), dim);
-        }
-        y += dp(22);
+        y = drawSettingLabel(canvas, draw, "外观", y);
+        y = drawSwitchRow(canvas, draw, "浅色", y, lightRect, light);
+        y = drawSettingHint(canvas, draw, "与电脑上位机的「浅色」开关同步。", y);
 
-        darkRect.set(left, y, left + btnW, y + btnH);
-        lightRect.set(darkRect.right + gap, y, right, y + btnH);
-        if (draw) {
-            drawModeButton(canvas, darkRect, "深色", !light);
-            drawModeButton(canvas, lightRect, "浅色", light);
-            dim.setTextSize(dp(12));
-            canvas.drawText("与电脑上位机的「浅色」开关同步。",
-                    left, lightRect.bottom + dp(20), dim);
-            dim.setTextSize(dp(13));
-            canvas.drawText("静音按钮", left, lightRect.bottom + dp(42), dim);
-        }
+        y = drawSettingLabel(canvas, draw, "静音按钮", y);
+        y = drawSwitchRow(canvas, draw, "自动隐藏", y, autoHideRect, s.autoHideMute);
+        y = drawSettingHint(canvas, draw, "开启后空闲会隐藏，点屏幕可再次呼出。", y);
 
-        float hideTop = lightRect.bottom + dp(50);
-        autoHideOffRect.set(left, hideTop, left + btnW, hideTop + btnH);
-        autoHideOnRect.set(autoHideOffRect.right + gap, hideTop, right, hideTop + btnH);
-        if (draw) {
-            boolean autoHide = BridgeService.STATE.autoHideMute;
-            drawModeButton(canvas, autoHideOffRect, "常显", !autoHide);
-            drawModeButton(canvas, autoHideOnRect, "自动隐藏", autoHide);
-            dim.setTextSize(dp(12));
-            canvas.drawText("开启后空闲会隐藏，点屏幕可再次呼出。",
-                    left, autoHideOnRect.bottom + dp(18), dim);
-            dim.setTextSize(dp(13));
-            canvas.drawText("时间", left, autoHideOnRect.bottom + dp(42), dim);
-        }
+        y = drawSettingLabel(canvas, draw, "时间", y);
+        y = drawSwitchRow(canvas, draw, "日期", y, clockDateRect, s.clockDate);
+        y = drawSwitchRow(canvas, draw, "时", y, clockHourRect, s.clockHour);
+        y = drawSwitchRow(canvas, draw, "分", y, clockMinuteRect, s.clockMinute);
+        y = drawSwitchRow(canvas, draw, "秒", y, clockSecondRect, s.clockSecond);
+        y = drawSettingHint(canvas, draw, "右上角逐项开关，全关则不显示。", y);
 
-        float clockTop = autoHideOnRect.bottom + dp(50);
-        float unitW = (inner - gap * 3) / 4f;
-        clockDateRect.set(left, clockTop, left + unitW, clockTop + btnH);
-        clockHourRect.set(clockDateRect.right + gap, clockTop,
-                clockDateRect.right + gap + unitW, clockTop + btnH);
-        clockMinuteRect.set(clockHourRect.right + gap, clockTop,
-                clockHourRect.right + gap + unitW, clockTop + btnH);
-        clockSecondRect.set(clockMinuteRect.right + gap, clockTop, right, clockTop + btnH);
-        if (draw) {
-            BridgeState clock = BridgeService.STATE;
-            drawModeButton(canvas, clockDateRect, "日期", clock.clockDate);
-            drawModeButton(canvas, clockHourRect, "时", clock.clockHour);
-            drawModeButton(canvas, clockMinuteRect, "分", clock.clockMinute);
-            drawModeButton(canvas, clockSecondRect, "秒", clock.clockSecond);
-            dim.setTextSize(dp(12));
-            canvas.drawText("右上角逐项开关，全关则不显示。",
-                    left, clockSecondRect.bottom + dp(18), dim);
-            dim.setTextSize(dp(13));
-            canvas.drawText("开机自启动", left, clockSecondRect.bottom + dp(42), dim);
-        }
+        y = drawSettingLabel(canvas, draw, "开机自启动", y);
+        y = drawSwitchRow(canvas, draw, "开机进入本应用", y, bootRect, s.bootStart);
+        y = drawSettingHint(canvas, draw, "开启后音箱开机自动进入本应用。", y);
 
-        float bootTop = clockSecondRect.bottom + dp(50);
-        bootOffRect.set(left, bootTop, left + btnW, bootTop + btnH);
-        bootOnRect.set(bootOffRect.right + gap, bootTop, right, bootTop + btnH);
-        if (draw) {
-            boolean boot = BridgeService.STATE.bootStart;
-            drawModeButton(canvas, bootOffRect, "关闭", !boot);
-            drawModeButton(canvas, bootOnRect, "开启", boot);
-            dim.setTextSize(dp(12));
-            canvas.drawText("开启后音箱开机自动进入本应用。",
-                    left, bootOnRect.bottom + dp(18), dim);
-            dim.setTextSize(dp(13));
-            canvas.drawText("桥接画面", left, bootOnRect.bottom + dp(42), dim);
-        }
+        y = drawSettingLabel(canvas, draw, "桥接画面", y);
+        y = drawSwitchRow(canvas, draw, "后台运行", y, hudRect, s.uiHidden);
+        y = drawSettingHint(canvas, draw, "后台后屏幕还给小爱，音频仍在跑。点图标可再打开。", y);
 
-        float hudTop = bootOnRect.bottom + dp(50);
-        hudShowRect.set(left, hudTop, left + btnW, hudTop + btnH);
-        hudHideRect.set(hudShowRect.right + gap, hudTop, right, hudTop + btnH);
-        if (draw) {
-            boolean hidden = BridgeService.STATE.uiHidden;
-            drawModeButton(canvas, hudShowRect, "显示", !hidden);
-            drawModeButton(canvas, hudHideRect, "后台", hidden);
-            dim.setTextSize(dp(12));
-            canvas.drawText("后台后屏幕还给小爱，音频仍在跑。点图标可再打开。",
-                    left, hudHideRect.bottom + dp(18), dim);
-        }
-
-        bgRow.set(left, hudHideRect.bottom + dp(30), right, hudHideRect.bottom + dp(76));
+        bgRow.set(left, y + dp(8), right, y + dp(54));
         if (draw) {
             card.setColor(colCard());
             canvas.drawRoundRect(bgRow, dp(12), dp(12), card);
@@ -374,6 +310,40 @@ final class AppMenu {
             drawChevron(canvas, bgRow.right - dp(18), bgRow.centerY(), dp(8), colDim(), false);
         }
         return bgRow.bottom + dp(16) - start;
+    }
+
+    private float drawSettingLabel(Canvas canvas, boolean draw, String title, float y) {
+        if (draw) {
+            dim.setColor(colDim());
+            dim.setTextSize(dp(13));
+            canvas.drawText(title, settingsPanel.left + dp(18), y + dp(16), dim);
+        }
+        return y + dp(22);
+    }
+
+    private float drawSettingHint(Canvas canvas, boolean draw, String hint, float y) {
+        if (draw) {
+            dim.setColor(colDim());
+            dim.setTextSize(dp(12));
+            canvas.drawText(hint, settingsPanel.left + dp(18), y + dp(14), dim);
+        }
+        return y + dp(24);
+    }
+
+    private float drawSwitchRow(Canvas canvas, boolean draw, String caption, float y,
+            RectF row, boolean on) {
+        float h = dp(40);
+        float left = settingsPanel.left + dp(18);
+        float right = settingsPanel.right - dp(18);
+        row.set(left, y, right, y + h);
+        if (draw) {
+            text.setTextSize(dp(16));
+            text.setColor(colText());
+            canvas.drawText(caption, left, y + h * 0.64f, text);
+            HudSwitch.draw(canvas, row, on, light, dp(1), card, dim);
+            text.setColor(colText());
+        }
+        return y + h + dp(2);
     }
 
     private void drawSettingsScrollBar(Canvas canvas) {
@@ -516,24 +486,6 @@ final class AppMenu {
         float lw = text.measureText(label);
         canvas.drawText(label, rect.centerX() - lw / 2f, rect.bottom - dp(7), text);
         text.setColor(colText());
-    }
-
-    private void drawModeButton(Canvas canvas, RectF rect, String label, boolean selected) {
-        if (selected) {
-            card.setColor(light ? 0xFFD7F6E7 : 0xFF1C3A32);
-            stroke.setStrokeWidth(dp(2));
-            stroke.setColor(0xFF3DDC97);
-        } else {
-            card.setColor(colCard());
-            stroke.setStrokeWidth(dp(1));
-            stroke.setColor(light ? 0xFFD3DCE8 : 0xFF2A3A58);
-        }
-        canvas.drawRoundRect(rect, dp(12), dp(12), card);
-        canvas.drawRoundRect(rect, dp(12), dp(12), stroke);
-        text.setTextSize(dp(16));
-        text.setColor(selected ? 0xFF3DDC97 : colText());
-        float tw = text.measureText(label);
-        canvas.drawText(label, rect.centerX() - tw / 2f, rect.top + rect.height() * 0.64f, text);
     }
 
     private void drawChevron(Canvas canvas, float x, float y, float size, int color, boolean left) {
@@ -708,20 +660,12 @@ final class AppMenu {
                 view.invalidate();
                 return true;
             }
-            if (hitSetting(darkRect, x, y)) {
-                setLight(false);
-                return true;
-            }
             if (hitSetting(lightRect, x, y)) {
-                setLight(true);
+                setLight(!light);
                 return true;
             }
-            if (hitSetting(autoHideOffRect, x, y)) {
-                setAutoHideMute(false);
-                return true;
-            }
-            if (hitSetting(autoHideOnRect, x, y)) {
-                setAutoHideMute(true);
+            if (hitSetting(autoHideRect, x, y)) {
+                setAutoHideMute(!BridgeService.STATE.autoHideMute);
                 return true;
             }
             if (hitSetting(clockDateRect, x, y)) {
@@ -744,21 +688,12 @@ final class AppMenu {
                 view.invalidate();
                 return true;
             }
-            if (hitSetting(bootOffRect, x, y)) {
-                setBootStart(false);
+            if (hitSetting(bootRect, x, y)) {
+                setBootStart(!BridgeService.STATE.bootStart);
                 return true;
             }
-            if (hitSetting(bootOnRect, x, y)) {
-                setBootStart(true);
-                return true;
-            }
-            if (hitSetting(hudShowRect, x, y)) {
-                BridgeService.setUiHidden(view.getContext(), false);
-                view.invalidate();
-                return true;
-            }
-            if (hitSetting(hudHideRect, x, y)) {
-                BridgeService.setUiHidden(view.getContext(), true);
+            if (hitSetting(hudRect, x, y)) {
+                BridgeService.setUiHidden(view.getContext(), !BridgeService.STATE.uiHidden);
                 return true;
             }
             if (hitSetting(bgRow, x, y)) {

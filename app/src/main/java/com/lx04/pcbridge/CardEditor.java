@@ -36,8 +36,7 @@ final class CardEditor {
     private final RectF[] subRemoveRects = new RectF[HudStyle.MAX_SUBS];
     private final RectF addSubRect = new RectF();
     private final RectF chartMetricRect = new RectF();
-    private final RectF chartOffRect = new RectF();
-    private final RectF chartOnRect = new RectF();
+    private final RectF chartRect = new RectF();
     private final RectF resetRect = new RectF();
     private final RectF doneRect = new RectF();
     private final RectF valueMinus = new RectF();
@@ -47,8 +46,7 @@ final class CardEditor {
     private final RectF[] titleSwatches = new RectF[HudStyle.PALETTE.length];
     private final RectF[] valueSwatches = new RectF[HudStyle.PALETTE.length];
     private final RectF[] valueToSwatches = new RectF[HudStyle.PALETTE.length];
-    private final RectF shiftOffRect = new RectF();
-    private final RectF shiftOnRect = new RectF();
+    private final RectF shiftRect = new RectF();
     private int slot = -1;
     private int page = PAGE_MAIN;
     private int subEditIndex;
@@ -251,7 +249,7 @@ final class CardEditor {
                 valueToSwatches[i].setEmpty();
             }
         }
-        y = drawTogglePair(canvas, draw, "大字变色", y, shiftOffRect, shiftOnRect, shift);
+        y = drawSwitchRow(canvas, draw, "大字变色", y, shiftRect, shift);
         y = drawSubSection(canvas, draw, y, style);
         y = drawLabeledPalette(canvas, draw, "字母颜色", y, titleSwatches,
                 style.titleColor(slot), light ? 0xFF5A6B84 : 0xFF8FA0BE);
@@ -259,7 +257,7 @@ final class CardEditor {
         y = drawStepper(canvas, draw, "大字大小", y, valueMinus, valuePlus, style.valueSize(slot));
         y = drawStepper(canvas, draw, "小字大小", y, subMinus, subPlus, style.subSize(slot));
         y += dp(6);
-        y = drawTogglePair(canvas, draw, "折线图", y, chartOffRect, chartOnRect, style.chartOn(slot));
+        y = drawSwitchRow(canvas, draw, "折线图", y, chartRect, style.chartOn(slot));
         String chartLabel = style.rawChartMetric(slot).isEmpty()
                 ? HudStyle.metricLabel(HudStyle.CHART_FOLLOW)
                 : HudStyle.metricLabel(style.rawChartMetric(slot));
@@ -356,35 +354,19 @@ final class CardEditor {
         return y + h + dp(10);
     }
 
-    private float drawTogglePair(Canvas canvas, boolean draw, String caption, float y,
-            RectF offRect, RectF onRect, boolean on) {
-        if (draw) {
-            canvas.drawText(caption, panelRect.left + dp(16), y + dp(12), label);
-        }
-        y += dp(18);
+    private float drawSwitchRow(Canvas canvas, boolean draw, String caption, float y,
+            RectF row, boolean on) {
         float h = dp(40);
-        float gap = dp(8);
         float left = panelRect.left + dp(16);
         float right = panelRect.right - dp(16);
-        float btnW = (right - left - gap) / 2f;
-        offRect.set(left, y, left + btnW, y + h);
-        onRect.set(offRect.right + gap, y, right, y + h);
+        row.set(left, y, right, y + h);
         if (draw) {
-            drawChoice(canvas, offRect, "关闭", !on);
-            drawChoice(canvas, onRect, "开启", on);
+            text.setTextSize(dp(15));
+            text.setColor(light ? 0xFF1A2438 : 0xFFE8EEF8);
+            canvas.drawText(caption, left, y + h * 0.64f, text);
+            HudSwitch.draw(canvas, row, on, light, dp(1), card, dim);
         }
         return y + h + dp(12);
-    }
-
-    private void drawChoice(Canvas canvas, RectF rect, String value, boolean selected) {
-        card.setColor(selected
-                ? (light ? 0xFFD7F6E7 : 0xFF1C3A32)
-                : (light ? 0xFFE8EEF5 : 0xFF1A2438));
-        canvas.drawRoundRect(rect, dp(10), dp(10), card);
-        text.setTextSize(dp(15));
-        text.setColor(selected ? 0xFF3DDC97 : (light ? 0xFF1A2438 : 0xFFE8EEF8));
-        float tw = text.measureText(value);
-        canvas.drawText(value, rect.centerX() - tw / 2f, rect.top + rect.height() * 0.66f, text);
     }
 
     private void drawList(Canvas canvas, boolean includeNone) {
@@ -593,23 +575,13 @@ final class CardEditor {
         }
         if (viewport.contains(x, y)) {
             HudStyle style = BridgeService.STATE.hudStyle;
-            if (chartOffRect.contains(x, y)) {
-                style.setChartOn(slot, false);
+            if (chartRect.contains(x, y)) {
+                style.setChartOn(slot, !style.chartOn(slot));
                 changed();
                 return true;
             }
-            if (chartOnRect.contains(x, y)) {
-                style.setChartOn(slot, true);
-                changed();
-                return true;
-            }
-            if (shiftOffRect.contains(x, y)) {
-                style.setValueShift(slot, false);
-                changed();
-                return true;
-            }
-            if (shiftOnRect.contains(x, y)) {
-                style.setValueShift(slot, true);
+            if (shiftRect.contains(x, y)) {
+                style.setValueShift(slot, !style.valueShift(slot));
                 changed();
                 return true;
             }
