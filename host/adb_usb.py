@@ -172,9 +172,40 @@ def install_apk(adb: str, apk: Path, serial: str | None = None) -> str:
     return text.strip()
 
 
+ROTATION_LABELS = ("0°", "90°", "180°", "270°")
+
+
+def clamp_rotation(value: object) -> int:
+    try:
+        return int(value) % 4
+    except (TypeError, ValueError):
+        return 0
+
+
+def set_user_rotation(adb: str, rotation: int, serial: str | None = None) -> None:
+    """Lock the speaker display to Surface.ROTATION_* via system settings.
+
+    LX04 has no gyro, so accelerometer_rotation stays off. Shell can write
+    Settings.System.USER_ROTATION; `wm user-rotation` is a no-op on 8.1.
+    """
+    rotation = clamp_rotation(rotation)
+    args = ["-s", serial] if serial else []
+    script = (
+        "settings put system accelerometer_rotation 0; "
+        f"settings put system user_rotation {rotation}; "
+        f"wm user-rotation lock {rotation} >/dev/null 2>&1; "
+        "true"
+    )
+    result = _run(adb, [*args, "shell", script], timeout=8)
+    if result.returncode != 0:
+        err = (result.stderr or result.stdout or "user_rotation failed").strip()
+        raise RuntimeError(err)
+
+
 def grant_bridge_permission(adb: str, serial: str | None = None) -> None:
     args = ["-s", serial] if serial else []
     _run(adb, [*args, "shell", "pm", "grant", PKG, "android.permission.RECORD_AUDIO"])
+    _run(adb, [*args, "shell", "appops", "set", PKG, "WRITE_SETTINGS", "allow"])
 
 
 def whitelist_bridge(adb: str, serial: str | None = None) -> None:
@@ -184,6 +215,7 @@ def whitelist_bridge(adb: str, serial: str | None = None) -> None:
         f"am set-inactive {PKG} false >/dev/null 2>&1; "
         f"cmd appops set {PKG} RUN_IN_BACKGROUND allow >/dev/null 2>&1; "
         f"cmd appops set {PKG} RUN_ANY_IN_BACKGROUND allow >/dev/null 2>&1; "
+        f"cmd appops set {PKG} WRITE_SETTINGS allow >/dev/null 2>&1; "
         "true"
     )
     _run(adb, [*args, "shell", script], timeout=10)

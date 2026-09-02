@@ -8,6 +8,7 @@ final class BridgeState {
     volatile boolean micMuted;
     volatile boolean spkMuted;
     volatile boolean upsideDown;
+    volatile int sysRotation;
     volatile boolean lightTheme;
     volatile boolean screenMirror;
     volatile boolean toastOverlay;

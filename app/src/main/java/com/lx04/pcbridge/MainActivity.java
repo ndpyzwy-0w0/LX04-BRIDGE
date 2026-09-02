@@ -3,7 +3,9 @@ package com.lx04.pcbridge;
 import android.Manifest;
 import android.app.Activity;
 import android.content.Intent;
+import android.content.pm.ActivityInfo;
 import android.content.pm.PackageManager;
+import android.content.res.Configuration;
 import android.graphics.drawable.ColorDrawable;
 import android.os.Bundle;
 import android.os.Handler;
@@ -16,6 +18,7 @@ public class MainActivity extends Activity {
     private static volatile MainActivity foreground;
     private StatusHudView hud;
     private boolean appliedUpsideDown;
+    private int appliedSysRotation = Integer.MIN_VALUE;
     private boolean appliedLightTheme;
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final Runnable tick = new Runnable() {
@@ -25,6 +28,10 @@ public class MainActivity extends Activity {
                 boolean want = BridgeService.STATE.upsideDown;
                 if (want != appliedUpsideDown) {
                     applyDisplayRotation(want);
+                }
+                int rot = BridgeService.STATE.sysRotation;
+                if (rot != appliedSysRotation) {
+                    applySysRotation(rot);
                 }
                 boolean light = BridgeService.STATE.lightTheme;
                 if (light != appliedLightTheme) {
@@ -49,6 +56,14 @@ public class MainActivity extends Activity {
         view.postInvalidate();
         activity.handler.removeCallbacks(activity.tick);
         activity.handler.post(activity.tick);
+    }
+
+    static void applySysRotation() {
+        MainActivity activity = foreground;
+        if (activity == null) {
+            return;
+        }
+        activity.handler.post(() -> activity.applySysRotation(BridgeService.STATE.sysRotation));
     }
 
     @Override
@@ -97,6 +112,7 @@ public class MainActivity extends Activity {
         setContentView(hud);
         BridgeService.STATE.upsideDown = DisplayPrefs.isUpsideDown(this);
         BridgeService.STATE.lightTheme = DisplayPrefs.isLightTheme(this);
+        BridgeService.STATE.sysRotation = DisplayPrefs.sysRotation(this);
         BridgeService.STATE.screenMirror = DisplayPrefs.isScreenMirror(this);
         BridgeService.STATE.autoHideMute = DisplayPrefs.isAutoHideMute(this);
         BridgeService.STATE.bootStart = DisplayPrefs.isBootStart(this);
@@ -104,6 +120,7 @@ public class MainActivity extends Activity {
         DisplayPrefs.loadHudStyle(this, BridgeService.STATE.hudStyle);
         HudBackground.INSTANCE.init(this);
         applyDisplayRotation(BridgeService.STATE.upsideDown);
+        applySysRotation(BridgeService.STATE.sysRotation);
         applyChromeColors(BridgeService.STATE.lightTheme);
         hideSystemUi();
         ensurePermissionAndStart();
@@ -131,6 +148,16 @@ public class MainActivity extends Activity {
         super.onWindowFocusChanged(hasFocus);
         if (hasFocus) {
             hideSystemUi();
+        }
+    }
+
+    @Override
+    public void onConfigurationChanged(Configuration newConfig) {
+        super.onConfigurationChanged(newConfig);
+        hideSystemUi();
+        if (hud != null) {
+            hud.requestLayout();
+            hud.invalidate();
         }
     }
 
@@ -195,6 +222,19 @@ public class MainActivity extends Activity {
             hud.setPivotY(hud.getHeight() / 2f);
             hud.setRotation(upsideDown ? 180f : 0f);
         });
+    }
+
+    private static final int[] SYS_ORIENTATIONS = {
+            ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE,
+            ActivityInfo.SCREEN_ORIENTATION_PORTRAIT,
+            ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE,
+            ActivityInfo.SCREEN_ORIENTATION_REVERSE_PORTRAIT
+    };
+
+    private void applySysRotation(int rotation) {
+        rotation = DisplayPrefs.clampRotation(rotation);
+        appliedSysRotation = rotation;
+        setRequestedOrientation(SYS_ORIENTATIONS[rotation]);
     }
 
     private void applyChromeColors(boolean lightTheme) {

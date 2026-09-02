@@ -856,6 +856,25 @@ ApplicationWindow {
                                             onClicked: host.setUpsideDown(checked)
                                         }
                                     }
+                                    Label { text: "系统旋转"; color: win.ink }
+                                    RowLayout {
+                                        objectName: "sysRotationRow"
+                                        Layout.fillWidth: true
+                                        Repeater {
+                                            model: host.rotationModel
+                                            RadioButton {
+                                                text: model.display
+                                                checked: host.rotationIndex === index
+                                                onClicked: host.setRotationIndex(index)
+                                            }
+                                        }
+                                    }
+                                    Label {
+                                        text: "锁定整机界面方向。音箱没有陀螺仪，不会自动转。"
+                                        color: win.muted
+                                        wrapMode: Text.Wrap
+                                        Layout.fillWidth: true
+                                    }
                                     Label {
                                         text: host.pcLine
                                         color: win.muted

@@ -554,6 +554,7 @@ class HostBridge(QObject):
     volumeSyncChanged = Signal()
     lightThemeChanged = Signal()
     upsideDownChanged = Signal()
+    rotationIndexChanged = Signal()
     pcStatsEnabledChanged = Signal()
     toastMirrorChanged = Signal()
     xiaoaiYieldChanged = Signal()
@@ -587,6 +588,7 @@ class HostBridge(QObject):
             "disk": QStringListModel(self),
             "monitor": QStringListModel(self),
             "quality": QStringListModel(self),
+            "rotation": QStringListModel(["0°", "90°", "180°", "270°"], self),
         }
         self._device_index = 0
         self._inject_index = 0
@@ -594,6 +596,7 @@ class HostBridge(QObject):
         self._disk_index = 0
         self._monitor_index = 0
         self._quality_index = 0
+        self._rotation_index = 0
         self._vb = False
         self._hifi = False
         self._after = False
@@ -625,6 +628,7 @@ class HostBridge(QObject):
         host.volume_sync._on_change = self.sync_toggles
         host.light_theme._on_change = self.sync_toggles
         host.upside_down._on_change = self.sync_toggles
+        host.sys_rotation._on_change = self.sync_toggles
         host.pc_stats_enabled._on_change = self.sync_toggles
         host.toast_mirror._on_change = self.sync_toggles
         host.xiaoai_yield._on_change = self.sync_toggles
@@ -761,6 +765,7 @@ class HostBridge(QObject):
         self.volumeSyncChanged.emit()
         self.lightThemeChanged.emit()
         self.upsideDownChanged.emit()
+        self.rotationIndexChanged.emit()
         self.pcStatsEnabledChanged.emit()
         self.toastMirrorChanged.emit()
         self.xiaoaiYieldChanged.emit()
@@ -1018,9 +1023,19 @@ class HostBridge(QObject):
     def qualityModel(self):
         return self._models["quality"]
 
+    @Property(QObject, constant=True)
+    def rotationModel(self):
+        return self._models["rotation"]
+
     @Property(int, notify=qualityIndexChanged)
     def qualityIndex(self) -> int:
         return self._quality_index
+
+    @Property(int, notify=rotationIndexChanged)
+    def rotationIndex(self) -> int:
+        if self.host:
+            return int(self.host.sys_rotation.get() or 0) % 4
+        return self._rotation_index
 
     @Property(bool, notify=micEnabledChanged)
     def micEnabled(self) -> bool:
@@ -1376,6 +1391,14 @@ class HostBridge(QObject):
     @Slot(int)
     def setQualityIndex(self, index: int) -> None:
         self._set_combo_index("quality", index, self.host._on_quality_change)
+
+    @Slot(int)
+    def setRotationIndex(self, index: int) -> None:
+        rot = int(index) % 4
+        self._rotation_index = rot
+        self.host.sys_rotation.set(rot)
+        self.host._on_sys_rotation_change()
+        self.rotationIndexChanged.emit()
 
     @Slot(bool)
     def setMicEnabled(self, on: bool) -> None:

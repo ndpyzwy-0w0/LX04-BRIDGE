@@ -613,6 +613,7 @@ class HostApp:
         self.volume_sync = Var(False)
         self.pc_stats_enabled = Var(True)
         self.upside_down = Var(False)
+        self.sys_rotation = Var(0)
         self.light_theme = Var(False)
         self.toast_mirror = Var(False)
         self.xiaoai_yield = Var(False)
@@ -762,6 +763,7 @@ class HostApp:
         self.volume_sync.set(bool(data.get("volume_sync", False)))
         self.pc_stats_enabled.set(bool(data.get("pc_stats", True)))
         self.upside_down.set(bool(data.get("upside_down", False)))
+        self.sys_rotation.set(adb_usb.clamp_rotation(data.get("sys_rotation", 0)))
         self.light_theme.set(bool(data.get("light_theme", False)))
         self.toast_mirror.set(bool(data.get("toast_mirror", False)))
         self.xiaoai_yield.set(bool(data.get("xiaoai_yield", False)))
@@ -838,6 +840,7 @@ class HostApp:
             "volume_sync": bool(self.volume_sync.get()),
             "pc_stats": bool(self.pc_stats_enabled.get()),
             "upside_down": bool(self.upside_down.get()),
+            "sys_rotation": adb_usb.clamp_rotation(self.sys_rotation.get()),
             "light_theme": bool(self.light_theme.get()),
             "toast_mirror": bool(self.toast_mirror.get()),
             "xiaoai_yield": bool(self.xiaoai_yield.get()),
@@ -957,6 +960,30 @@ class HostApp:
         if not self.connected:
             return
         self.client.send_control("upside_down", on=bool(self.upside_down.get()))
+
+    def _on_sys_rotation_change(self) -> None:
+        if not self._routes_ready:
+            return
+        self._after_paint(self._sys_rotation_job)
+
+    def _sys_rotation_job(self) -> None:
+        self._save_routes()
+        rot = adb_usb.clamp_rotation(self.sys_rotation.get())
+        self._push_sys_rotation()
+        if self.connected:
+            self._log("系统旋转: " + adb_usb.ROTATION_LABELS[rot])
+
+    def _push_sys_rotation(self) -> None:
+        rot = adb_usb.clamp_rotation(self.sys_rotation.get())
+        serial = self._serial or ""
+        if self.adb and serial:
+            try:
+                adb_usb.set_user_rotation(self.adb, rot, serial)
+            except Exception as exc:
+                self._log("系统旋转未写入: " + str(exc))
+        if not self.connected:
+            return
+        self.client.send_control("sys_rotation", rot=rot)
 
     def _on_light_theme_change(self) -> None:
         if not self._routes_ready:
@@ -1846,6 +1873,7 @@ class HostApp:
                 self._push_pc_volume(force=True)
             self._spawn_stats(force=True)
             self._push_upside_down()
+            self._push_sys_rotation()
             self._begin_hud_reconcile()
             if self.spk_enabled.get():
                 self._apply_speaker_route()
@@ -2260,6 +2288,7 @@ class HostApp:
                 self._push_pc_volume(force=True)
             self._spawn_stats(force=True)
             self._push_upside_down()
+            self._push_sys_rotation()
             self._begin_hud_reconcile()
         except Exception as exc:
             self._log("重连后恢复通路失败: " + str(exc))

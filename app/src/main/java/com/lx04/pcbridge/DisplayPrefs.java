@@ -6,6 +6,7 @@ import android.content.SharedPreferences;
 final class DisplayPrefs {
     private static final String PREFS = "lx04_bridge";
     private static final String KEY_UPSIDE_DOWN = "upside_down";
+    private static final String KEY_SYS_ROTATION = "sys_rotation";
     private static final String KEY_LIGHT_THEME = "light_theme";
     private static final String KEY_HUD_STYLE = "hud_style";
     private static final String KEY_SCREEN_MIRROR = "screen_mirror";
@@ -27,6 +28,18 @@ final class DisplayPrefs {
 
     static void setUpsideDown(Context context, boolean upsideDown) {
         prefs(context).edit().putBoolean(KEY_UPSIDE_DOWN, upsideDown).apply();
+    }
+
+    static int clampRotation(int rotation) {
+        return ((rotation % 4) + 4) % 4;
+    }
+
+    static int sysRotation(Context context) {
+        return clampRotation(prefs(context).getInt(KEY_SYS_ROTATION, 0));
+    }
+
+    static void setSysRotation(Context context, int rotation) {
+        prefs(context).edit().putInt(KEY_SYS_ROTATION, clampRotation(rotation)).apply();
     }
 
     static boolean isLightTheme(Context context) {

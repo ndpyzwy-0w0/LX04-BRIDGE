@@ -10,6 +10,7 @@ import android.media.AudioManager;
 import android.os.IBinder;
 import android.os.PowerManager;
 import android.os.SystemClock;
+import android.provider.Settings;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -36,6 +37,7 @@ public class BridgeService extends Service {
         STATE.apkVersion = AppVersion.read(this);
         STATE.upsideDown = DisplayPrefs.isUpsideDown(this);
         STATE.lightTheme = DisplayPrefs.isLightTheme(this);
+        setSysRotation(this, DisplayPrefs.sysRotation(this));
         STATE.screenMirror = DisplayPrefs.isScreenMirror(this);
         STATE.autoHideMute = DisplayPrefs.isAutoHideMute(this);
         STATE.bootStart = DisplayPrefs.isBootStart(this);
@@ -126,6 +128,9 @@ public class BridgeService extends Service {
                 } else if ("upside_down".equals(cmd)) {
                     STATE.upsideDown = json.optBoolean("on", !STATE.upsideDown);
                     DisplayPrefs.setUpsideDown(BridgeService.this, STATE.upsideDown);
+                    return;
+                } else if ("sys_rotation".equals(cmd)) {
+                    setSysRotation(BridgeService.this, json.optInt("rot", STATE.sysRotation));
                     return;
                 } else if ("light_theme".equals(cmd)) {
                     setLightTheme(BridgeService.this, json.optBoolean("on", !STATE.lightTheme));
@@ -348,6 +353,22 @@ public class BridgeService extends Service {
         if (context != null) {
             DisplayPrefs.setLightTheme(context, light);
         }
+    }
+
+    public static void setSysRotation(android.content.Context context, int rotation) {
+        rotation = DisplayPrefs.clampRotation(rotation);
+        STATE.sysRotation = rotation;
+        if (context != null) {
+            DisplayPrefs.setSysRotation(context, rotation);
+            try {
+                Settings.System.putInt(context.getContentResolver(),
+                        Settings.System.ACCELEROMETER_ROTATION, 0);
+                Settings.System.putInt(context.getContentResolver(),
+                        Settings.System.USER_ROTATION, rotation);
+            } catch (Exception ignored) {
+            }
+        }
+        MainActivity.applySysRotation();
     }
 
     public static void setAutoHideMute(android.content.Context context, boolean on) {
