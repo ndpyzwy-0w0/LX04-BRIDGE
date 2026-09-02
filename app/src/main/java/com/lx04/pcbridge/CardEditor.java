@@ -242,7 +242,6 @@ final class CardEditor {
         y = drawLabeledPalette(canvas, draw, shift ? "低占用颜色" : "大字颜色", y, valueSwatches,
                 style.valueColor(slot), 0xFF3DDC97);
         y += dp(10);
-        y = drawTogglePair(canvas, draw, "大字变色", y, shiftOffRect, shiftOnRect, shift);
         if (shift) {
             y = drawLabeledPalette(canvas, draw, "高占用颜色", y, valueToSwatches,
                     style.valueColorTo(slot), 0xFFFF5C7A);
@@ -252,6 +251,7 @@ final class CardEditor {
                 valueToSwatches[i].setEmpty();
             }
         }
+        y = drawTogglePair(canvas, draw, "大字变色", y, shiftOffRect, shiftOnRect, shift);
         y = drawSubSection(canvas, draw, y, style);
         y = drawLabeledPalette(canvas, draw, "字母颜色", y, titleSwatches,
                 style.titleColor(slot), light ? 0xFF5A6B84 : 0xFF8FA0BE);

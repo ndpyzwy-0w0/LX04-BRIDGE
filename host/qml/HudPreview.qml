@@ -179,15 +179,15 @@ ApplicationWindow {
                                 onActivated: (i) => hud.setMetric(cardIndex, i)
                             }
                             Swatch { card: cardIndex; which: "value" }
-                            Switch {
-                                text: "变色"
-                                checked: { win.gen; return hud.valueShift(cardIndex) }
-                                onClicked: hud.setValueShift(cardIndex, checked)
-                            }
                             Swatch {
                                 card: cardIndex
                                 which: "valueTo"
                                 visible: { win.gen; return hud.valueShift(cardIndex) }
+                            }
+                            Switch {
+                                text: "变色"
+                                checked: { win.gen; return hud.valueShift(cardIndex) }
+                                onClicked: hud.setValueShift(cardIndex, checked)
                             }
                             Repeater {
                                 model: subIdx.length
