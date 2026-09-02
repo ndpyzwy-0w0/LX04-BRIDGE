@@ -37,6 +37,7 @@ public class BridgeService extends Service {
         STATE.apkVersion = AppVersion.read(this);
         STATE.upsideDown = DisplayPrefs.isUpsideDown(this);
         STATE.lightTheme = DisplayPrefs.isLightTheme(this);
+        STATE.uiHidden = DisplayPrefs.isUiHidden(this);
         setSysRotation(this, DisplayPrefs.sysRotation(this));
         STATE.screenMirror = DisplayPrefs.isScreenMirror(this);
         STATE.autoHideMute = DisplayPrefs.isAutoHideMute(this);
@@ -131,6 +132,9 @@ public class BridgeService extends Service {
                     return;
                 } else if ("sys_rotation".equals(cmd)) {
                     setSysRotation(BridgeService.this, json.optInt("rot", STATE.sysRotation));
+                    return;
+                } else if ("hide_ui".equals(cmd)) {
+                    setUiHidden(BridgeService.this, json.optBoolean("on", true));
                     return;
                 } else if ("light_theme".equals(cmd)) {
                     setLightTheme(BridgeService.this, json.optBoolean("on", !STATE.lightTheme));
@@ -369,6 +373,33 @@ public class BridgeService extends Service {
             }
         }
         MainActivity.applySysRotation();
+    }
+
+    public static void setUiHidden(android.content.Context context, boolean hidden) {
+        STATE.uiHidden = hidden;
+        if (context != null) {
+            DisplayPrefs.setUiHidden(context, hidden);
+        }
+        STATE.flushStatus = true;
+        if (hidden) {
+            MainActivity.hideUi();
+        } else {
+            showUi(context);
+        }
+    }
+
+    public static void showUi(android.content.Context context) {
+        if (context == null) {
+            return;
+        }
+        Intent launch = new Intent(context, MainActivity.class);
+        launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK
+                | Intent.FLAG_ACTIVITY_REORDER_TO_FRONT
+                | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+        try {
+            context.startActivity(launch);
+        } catch (RuntimeException ignored) {
+        }
     }
 
     public static void setAutoHideMute(android.content.Context context, boolean on) {

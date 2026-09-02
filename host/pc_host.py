@@ -614,6 +614,7 @@ class HostApp:
         self.pc_stats_enabled = Var(True)
         self.upside_down = Var(False)
         self.sys_rotation = Var(0)
+        self.ui_hidden = Var(False)
         self.light_theme = Var(False)
         self.toast_mirror = Var(False)
         self.xiaoai_yield = Var(False)
@@ -764,6 +765,7 @@ class HostApp:
         self.pc_stats_enabled.set(bool(data.get("pc_stats", True)))
         self.upside_down.set(bool(data.get("upside_down", False)))
         self.sys_rotation.set(adb_usb.clamp_rotation(data.get("sys_rotation", 0)))
+        self.ui_hidden.set(bool(data.get("ui_hidden", False)))
         self.light_theme.set(bool(data.get("light_theme", False)))
         self.toast_mirror.set(bool(data.get("toast_mirror", False)))
         self.xiaoai_yield.set(bool(data.get("xiaoai_yield", False)))
@@ -841,6 +843,7 @@ class HostApp:
             "pc_stats": bool(self.pc_stats_enabled.get()),
             "upside_down": bool(self.upside_down.get()),
             "sys_rotation": adb_usb.clamp_rotation(self.sys_rotation.get()),
+            "ui_hidden": bool(self.ui_hidden.get()),
             "light_theme": bool(self.light_theme.get()),
             "toast_mirror": bool(self.toast_mirror.get()),
             "xiaoai_yield": bool(self.xiaoai_yield.get()),
@@ -971,7 +974,7 @@ class HostApp:
         rot = adb_usb.clamp_rotation(self.sys_rotation.get())
         self._push_sys_rotation()
         if self.connected:
-            self._log("系统旋转: " + adb_usb.ROTATION_LABELS[rot])
+            self._log("系统旋转: " + adb_usb.rotation_label(rot))
 
     def _push_sys_rotation(self) -> None:
         rot = adb_usb.clamp_rotation(self.sys_rotation.get())
@@ -984,6 +987,32 @@ class HostApp:
         if not self.connected:
             return
         self.client.send_control("sys_rotation", rot=rot)
+
+    def _on_ui_hidden_change(self) -> None:
+        if not self._routes_ready:
+            return
+        self._after_paint(self._ui_hidden_job)
+
+    def _ui_hidden_job(self) -> None:
+        self._save_routes()
+        self._push_ui_hidden()
+        if self.connected:
+            self._log("桥接画面: " + ("后台（原界面）" if self.ui_hidden.get() else "显示"))
+
+    def _push_ui_hidden(self) -> None:
+        hidden = bool(self.ui_hidden.get())
+        serial = self._serial or ""
+        if self.connected:
+            self.client.send_control("hide_ui", on=hidden)
+        if not (self.adb and serial):
+            return
+        try:
+            if hidden:
+                adb_usb.hide_bridge_ui(self.adb, serial)
+            else:
+                adb_usb.start_bridge_ui(self.adb, serial)
+        except Exception as exc:
+            self._log("桥接画面切换失败: " + str(exc))
 
     def _on_light_theme_change(self) -> None:
         if not self._routes_ready:
@@ -1637,6 +1666,8 @@ class HostApp:
             return
         if "lightTheme" in data:
             self._sync_light_theme_from_apk(bool(data["lightTheme"]))
+        if "uiHidden" in data:
+            self._sync_ui_hidden_from_apk(bool(data["uiHidden"]))
         payload = data.get("hudStyle")
         if not isinstance(payload, dict):
             return
@@ -1656,6 +1687,13 @@ class HostApp:
             hud_preview.set_light(light)
         finally:
             self._hud_from_apk = False
+
+    def _sync_ui_hidden_from_apk(self, hidden: bool) -> None:
+        if bool(self.ui_hidden.get()) == bool(hidden):
+            return
+        self.ui_hidden.set(hidden)
+        if self._routes_ready:
+            self._save_routes()
 
     def _reconcile_hud(self, data: dict) -> None:
         self._hud_need_reconcile = False
@@ -1874,6 +1912,7 @@ class HostApp:
             self._spawn_stats(force=True)
             self._push_upside_down()
             self._push_sys_rotation()
+            self._push_ui_hidden()
             self._begin_hud_reconcile()
             if self.spk_enabled.get():
                 self._apply_speaker_route()
@@ -2289,6 +2328,7 @@ class HostApp:
             self._spawn_stats(force=True)
             self._push_upside_down()
             self._push_sys_rotation()
+            self._push_ui_hidden()
             self._begin_hud_reconcile()
         except Exception as exc:
             self._log("重连后恢复通路失败: " + str(exc))

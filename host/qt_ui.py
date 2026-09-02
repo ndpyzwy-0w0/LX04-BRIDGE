@@ -555,6 +555,7 @@ class HostBridge(QObject):
     lightThemeChanged = Signal()
     upsideDownChanged = Signal()
     rotationIndexChanged = Signal()
+    uiHiddenChanged = Signal()
     pcStatsEnabledChanged = Signal()
     toastMirrorChanged = Signal()
     xiaoaiYieldChanged = Signal()
@@ -588,7 +589,7 @@ class HostBridge(QObject):
             "disk": QStringListModel(self),
             "monitor": QStringListModel(self),
             "quality": QStringListModel(self),
-            "rotation": QStringListModel(["0°", "90°", "180°", "270°"], self),
+            "rotation": QStringListModel(["正向", "倒转"], self),
         }
         self._device_index = 0
         self._inject_index = 0
@@ -629,6 +630,7 @@ class HostBridge(QObject):
         host.light_theme._on_change = self.sync_toggles
         host.upside_down._on_change = self.sync_toggles
         host.sys_rotation._on_change = self.sync_toggles
+        host.ui_hidden._on_change = self.sync_toggles
         host.pc_stats_enabled._on_change = self.sync_toggles
         host.toast_mirror._on_change = self.sync_toggles
         host.xiaoai_yield._on_change = self.sync_toggles
@@ -766,6 +768,7 @@ class HostBridge(QObject):
         self.lightThemeChanged.emit()
         self.upsideDownChanged.emit()
         self.rotationIndexChanged.emit()
+        self.uiHiddenChanged.emit()
         self.pcStatsEnabledChanged.emit()
         self.toastMirrorChanged.emit()
         self.xiaoaiYieldChanged.emit()
@@ -1034,7 +1037,7 @@ class HostBridge(QObject):
     @Property(int, notify=rotationIndexChanged)
     def rotationIndex(self) -> int:
         if self.host:
-            return int(self.host.sys_rotation.get() or 0) % 4
+            return 1 if int(self.host.sys_rotation.get() or 0) == 2 else 0
         return self._rotation_index
 
     @Property(bool, notify=micEnabledChanged)
@@ -1060,6 +1063,10 @@ class HostBridge(QObject):
     @Property(bool, notify=upsideDownChanged)
     def upsideDown(self) -> bool:
         return bool(self.host.upside_down.get()) if self.host else False
+
+    @Property(bool, notify=uiHiddenChanged)
+    def uiHidden(self) -> bool:
+        return bool(self.host.ui_hidden.get()) if self.host else False
 
     @Property(bool, notify=pcStatsEnabledChanged)
     def pcStatsEnabled(self) -> bool:
@@ -1394,11 +1401,17 @@ class HostBridge(QObject):
 
     @Slot(int)
     def setRotationIndex(self, index: int) -> None:
-        rot = int(index) % 4
-        self._rotation_index = rot
+        rot = 2 if int(index) else 0
+        self._rotation_index = 1 if rot == 2 else 0
         self.host.sys_rotation.set(rot)
         self.host._on_sys_rotation_change()
         self.rotationIndexChanged.emit()
+
+    @Slot(bool)
+    def setUiHidden(self, on: bool) -> None:
+        self.host.ui_hidden.set(bool(on))
+        self.host._on_ui_hidden_change()
+        self.uiHiddenChanged.emit()
 
     @Slot(bool)
     def setMicEnabled(self, on: bool) -> None:

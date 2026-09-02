@@ -13,11 +13,13 @@ public class BootReceiver extends BroadcastReceiver {
         if (!DisplayPrefs.isBootStart(context)) {
             return;
         }
-        Intent launch = new Intent(context, MainActivity.class);
-        launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED);
-        try {
-            context.startActivity(launch);
-        } catch (RuntimeException ignored) {
+        if (!DisplayPrefs.isUiHidden(context)) {
+            Intent launch = new Intent(context, MainActivity.class);
+            launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED);
+            try {
+                context.startActivity(launch);
+            } catch (RuntimeException ignored) {
+            }
         }
         if (!AudioCapture.hasMicPermission(context)) {
             return;

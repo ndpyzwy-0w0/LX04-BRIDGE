@@ -172,14 +172,26 @@ def install_apk(adb: str, apk: Path, serial: str | None = None) -> str:
     return text.strip()
 
 
-ROTATION_LABELS = ("0°", "90°", "180°", "270°")
+ROTATION_LABELS = ("正向", "倒转")
 
 
 def clamp_rotation(value: object) -> int:
+    """Only Surface.ROTATION_0 and ROTATION_180."""
     try:
-        return int(value) % 4
+        n = int(value)
     except (TypeError, ValueError):
         return 0
+    n = ((n % 4) + 4) % 4
+    return 2 if n >= 2 else 0
+
+
+def rotation_choice(value: object) -> int:
+    """0 = 正向, 1 = 倒转."""
+    return 1 if clamp_rotation(value) == 2 else 0
+
+
+def rotation_label(value: object) -> str:
+    return ROTATION_LABELS[rotation_choice(value)]
 
 
 def set_user_rotation(adb: str, rotation: int, serial: str | None = None) -> None:
@@ -230,6 +242,16 @@ def start_bridge_service(adb: str, serial: str | None = None) -> None:
     )
     if result.returncode != 0:
         _run(adb, [*args, "shell", "am", "startservice", "-n", SERVICE], timeout=10)
+
+
+def start_bridge_ui(adb: str, serial: str | None = None) -> None:
+    args = ["-s", serial] if serial else []
+    _run(adb, [*args, "shell", "am", "start", "-n", f"{PKG}/.MainActivity"], timeout=8)
+
+
+def hide_bridge_ui(adb: str, serial: str | None = None) -> None:
+    args = ["-s", serial] if serial else []
+    _run(adb, [*args, "shell", "input", "keyevent", "KEYCODE_HOME"], timeout=8)
 
 
 def bridge_pid(adb: str, serial: str | None = None) -> str:

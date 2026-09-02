@@ -9,6 +9,7 @@ final class BridgeState {
     volatile boolean spkMuted;
     volatile boolean upsideDown;
     volatile int sysRotation;
+    volatile boolean uiHidden;
     volatile boolean lightTheme;
     volatile boolean screenMirror;
     volatile boolean toastOverlay;

@@ -870,7 +870,19 @@ ApplicationWindow {
                                         }
                                     }
                                     Label {
-                                        text: "锁定整机界面方向。音箱没有陀螺仪，不会自动转。"
+                                        text: "锁定整机正向或倒转。音箱没有陀螺仪，不会自动转。"
+                                        color: win.muted
+                                        wrapMode: Text.Wrap
+                                        Layout.fillWidth: true
+                                    }
+                                    Switch {
+                                        objectName: "uiHiddenSwitch"
+                                        text: "后台运行"
+                                        checked: host.uiHidden
+                                        onClicked: host.setUiHidden(checked)
+                                    }
+                                    Label {
+                                        text: "隐藏桥接画面，屏幕还给小爱。麦克风和喇叭仍在后台。"
                                         color: win.muted
                                         wrapMode: Text.Wrap
                                         Layout.fillWidth: true

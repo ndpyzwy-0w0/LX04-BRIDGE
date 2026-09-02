@@ -42,6 +42,8 @@ final class AppMenu {
     private final RectF clockSecondRect = new RectF();
     private final RectF bootOffRect = new RectF();
     private final RectF bootOnRect = new RectF();
+    private final RectF hudShowRect = new RectF();
+    private final RectF hudHideRect = new RectF();
     private final RectF settingsPanel = new RectF();
     private final RectF settingsViewport = new RectF();
     private final RectF bgRow = new RectF();
@@ -343,9 +345,23 @@ final class AppMenu {
             dim.setTextSize(dp(12));
             canvas.drawText("开启后音箱开机自动进入本应用。",
                     left, bootOnRect.bottom + dp(18), dim);
+            dim.setTextSize(dp(13));
+            canvas.drawText("桥接画面", left, bootOnRect.bottom + dp(42), dim);
         }
 
-        bgRow.set(left, bootOnRect.bottom + dp(30), right, bootOnRect.bottom + dp(76));
+        float hudTop = bootOnRect.bottom + dp(50);
+        hudShowRect.set(left, hudTop, left + btnW, hudTop + btnH);
+        hudHideRect.set(hudShowRect.right + gap, hudTop, right, hudTop + btnH);
+        if (draw) {
+            boolean hidden = BridgeService.STATE.uiHidden;
+            drawModeButton(canvas, hudShowRect, "显示", !hidden);
+            drawModeButton(canvas, hudHideRect, "后台", hidden);
+            dim.setTextSize(dp(12));
+            canvas.drawText("后台后屏幕还给小爱，音频仍在跑。点图标可再打开。",
+                    left, hudHideRect.bottom + dp(18), dim);
+        }
+
+        bgRow.set(left, hudHideRect.bottom + dp(30), right, hudHideRect.bottom + dp(76));
         if (draw) {
             card.setColor(colCard());
             canvas.drawRoundRect(bgRow, dp(12), dp(12), card);
@@ -734,6 +750,15 @@ final class AppMenu {
             }
             if (hitSetting(bootOnRect, x, y)) {
                 setBootStart(true);
+                return true;
+            }
+            if (hitSetting(hudShowRect, x, y)) {
+                BridgeService.setUiHidden(view.getContext(), false);
+                view.invalidate();
+                return true;
+            }
+            if (hitSetting(hudHideRect, x, y)) {
+                BridgeService.setUiHidden(view.getContext(), true);
                 return true;
             }
             if (hitSetting(bgRow, x, y)) {

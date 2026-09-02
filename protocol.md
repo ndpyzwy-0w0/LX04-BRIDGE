@@ -74,6 +74,7 @@ adb forward tcp:17892 tcp:17892
   "volume": 0.55,
   "lightTheme": false,
   "sysRotation": 0,
+  "uiHidden": false,
   "screenMirror": false,
   "toastOverlay": false,
   "hudBg": {"sel": 0, "used": [true, false, false], "alpha": 85},
@@ -93,6 +94,7 @@ adb forward tcp:17892 tcp:17892
 {"cmd": "toggle_spk_mute"}
 {"cmd": "upside_down", "on": true}
 {"cmd": "sys_rotation", "rot": 2}
+{"cmd": "hide_ui", "on": true}
 {"cmd": "light_theme", "on": true}
 {"cmd": "hud_style", "rev": 1710000000000, "cards": [{"key": "cpu", "metric": "cpuT", "subMetric": "cores", "subMetrics": ["cores", "cpu"], "titleColor": "#8FA0BE", "valueColor": "#3DDC97", "valueSize": 32, "subSize": 12}]}
 {"cmd": "hud_style", "reset": true, "rev": 1710000000001}
@@ -108,7 +110,7 @@ adb forward tcp:17892 tcp:17892
 
 `pc_stats` 由电脑每秒推一次，音箱屏幕画 CPU / GPU / 内存 / 磁盘。`now` 是电脑 Unix 毫秒时间，`tz` 是电脑本地相对 UTC 的分钟偏移（含夏令时）；音箱 HUD 时钟用这两项跟电脑走，未连接时才用音箱自己的时间。占用用打包进 EXE 的采集器 + 系统 API / 显卡驱动，不要求接收方再装 Python 或监控软件。`diskN` / `diskU` / `diskT` 是上位机所选盘符和已用/总量 GB。温度字段在读不到时省略（不要发假的 ACPI 27°C）。GPU 温度优先用本机 NVIDIA NVML；CPU 封装温度仅在本机已开 MSI Afterburner 时补充。上位机可打开 MSI 官网下载页或启动本机已安装的 Afterburner，但不随包分发。
 
-`mute` / `unmute` / `toggle_mute` 只切麦克风。扬声器用 `mute_spk` / `unmute_spk` / `toggle_spk_mute`。STATUS 里 `micMuted` / `spkMuted` 分开报；`muted` 仍表示麦克风静音（兼容旧上位机）。`upside_down` 由上位机切换吊装倒转（只转桥接 HUD）。`sys_rotation` 锁定整机 Android 界面方向：`rot` 为 `Surface.ROTATION_*`（0=0°，1=90°，2=180°，3=270°）。音箱没有陀螺仪，不会自动转；上位机写入 `Settings.System.USER_ROTATION` 并关掉加速度计旋转，APK 再 `setRequestedOrientation` 跟上。STATUS `sysRotation` 回传当前值。`light_theme` 切换浅色/深色底；音箱从右侧滑出菜单进入「系统设置」也可改，两边通过 STATUS `lightTheme` 与 CONTROL `light_theme` 实时同步。`hud_style` 同步各板块标题、大字颜色、大字号（`valueSize`，默认 28）和小字号（`subSize`，默认 11），以及大字（`metric`）和小字。小字默认一条（`subMetric`）；也可发 `subMetrics` 数组，每个板块最多 4 条，从上往下排。可选数据：cpu / cpuT / gpu / gpuT / gpuW / gpuFan / vram / ram / ramGB / disk / diskGB / diskIo / netD / netU / cores / gpuN；小字还可 `none` 不显示。每个板块下半空位可画折线：`chart` 默认开启，`chart: false` 关闭；`chartMetric` 选折线数据，省略则跟随大字。字号超出板块宽高时会自动缩小并裁切，不会画出格子。`rev` 为双方的样式版本，较大的覆盖较小的。音箱长按某一栏目可编辑，改动经 STATUS `hudStyle` 回传电脑；电脑预览的改动经 CONTROL 下发。两边实时同一套样式。音箱显示真实读数，预览只用示意数字。`reset: true` 恢复默认。未连接上位机时，音箱等待页有「重置样式」。
+`mute` / `unmute` / `toggle_mute` 只切麦克风。扬声器用 `mute_spk` / `unmute_spk` / `toggle_spk_mute`。STATUS 里 `micMuted` / `spkMuted` 分开报；`muted` 仍表示麦克风静音（兼容旧上位机）。`upside_down` 由上位机切换吊装倒转（只转桥接 HUD）。`sys_rotation` 锁定整机 Android 界面正向或倒转：`rot` 为 `0`（0°）或 `2`（180°）。音箱没有陀螺仪，不会自动转；上位机写入 `Settings.System.USER_ROTATION` 并关掉加速度计旋转，APK 再 `setRequestedOrientation` 跟上。STATUS `sysRotation` 回传当前值。`hide_ui` 为 true 时关掉桥接 Activity，服务继续跑，屏幕还给小爱原界面；false 再拉起监视屏。STATUS `uiHidden` 与上位机「后台运行」同步；音箱系统设置里也可切「显示 / 后台」。点桌面图标或通知会重新打开监视屏。`light_theme` 切换浅色/深色底；音箱从右侧滑出菜单进入「系统设置」也可改，两边通过 STATUS `lightTheme` 与 CONTROL `light_theme` 实时同步。`hud_style` 同步各板块标题、大字颜色、大字号（`valueSize`，默认 28）和小字号（`subSize`，默认 11），以及大字（`metric`）和小字。小字默认一条（`subMetric`）；也可发 `subMetrics` 数组，每个板块最多 4 条，从上往下排。可选数据：cpu / cpuT / gpu / gpuT / gpuW / gpuFan / vram / ram / ramGB / disk / diskGB / diskIo / netD / netU / cores / gpuN；小字还可 `none` 不显示。每个板块下半空位可画折线：`chart` 默认开启，`chart: false` 关闭；`chartMetric` 选折线数据，省略则跟随大字。字号超出板块宽高时会自动缩小并裁切，不会画出格子。`rev` 为双方的样式版本，较大的覆盖较小的。音箱长按某一栏目可编辑，改动经 STATUS `hudStyle` 回传电脑；电脑预览的改动经 CONTROL 下发。两边实时同一套样式。音箱显示真实读数，预览只用示意数字。`reset: true` 恢复默认。未连接上位机时，音箱等待页有「重置样式」。
 
 `FILE` 把一张 800×480 JPEG 写进音箱监视页背景库（最多 3 张）。`flags` 是槽位 0–2；库满时上位机让用户选替换哪一张。音箱系统设置里可选「默认」或已存背景，长按删除；「元素不透明度」`alpha` 为 20–100（STATUS `hudBg.alpha`，CONTROL `hud_opacity`），只作用于卡片/按钮，背景图保持清晰。`hud_bg` 的 `select`（`slot` -1 为默认纯色）和 `delete` 也可由电脑下发。
 

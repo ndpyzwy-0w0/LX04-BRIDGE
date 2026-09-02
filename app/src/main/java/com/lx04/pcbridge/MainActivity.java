@@ -20,6 +20,7 @@ public class MainActivity extends Activity {
     private boolean appliedUpsideDown;
     private int appliedSysRotation = Integer.MIN_VALUE;
     private boolean appliedLightTheme;
+    private boolean allowLeave;
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final Runnable tick = new Runnable() {
         @Override
@@ -64,6 +65,14 @@ public class MainActivity extends Activity {
             return;
         }
         activity.handler.post(() -> activity.applySysRotation(BridgeService.STATE.sysRotation));
+    }
+
+    static void hideUi() {
+        MainActivity activity = foreground;
+        if (activity == null) {
+            return;
+        }
+        activity.handler.post(activity::leaveToBackground);
     }
 
     @Override
@@ -113,6 +122,11 @@ public class MainActivity extends Activity {
         BridgeService.STATE.upsideDown = DisplayPrefs.isUpsideDown(this);
         BridgeService.STATE.lightTheme = DisplayPrefs.isLightTheme(this);
         BridgeService.STATE.sysRotation = DisplayPrefs.sysRotation(this);
+        if (BridgeService.STATE.uiHidden || DisplayPrefs.isUiHidden(this)) {
+            BridgeService.STATE.uiHidden = false;
+            DisplayPrefs.setUiHidden(this, false);
+            BridgeService.STATE.flushStatus = true;
+        }
         BridgeService.STATE.screenMirror = DisplayPrefs.isScreenMirror(this);
         BridgeService.STATE.autoHideMute = DisplayPrefs.isAutoHideMute(this);
         BridgeService.STATE.bootStart = DisplayPrefs.isBootStart(this);
@@ -180,13 +194,25 @@ public class MainActivity extends Activity {
 
     @Override
     public boolean moveTaskToBack(boolean nonRoot) {
+        if (allowLeave) {
+            return super.moveTaskToBack(nonRoot);
+        }
         consumeSystemExit();
         return true;
     }
 
     @Override
     public void finish() {
+        if (allowLeave) {
+            super.finish();
+            return;
+        }
         consumeSystemExit();
+    }
+
+    private void leaveToBackground() {
+        allowLeave = true;
+        finish();
     }
 
     private void consumeSystemExit() {

@@ -112,6 +112,7 @@ final class TcpBridgeServer {
             o.put("volume", BridgeService.musicVolume());
             o.put("lightTheme", state.lightTheme);
             o.put("sysRotation", state.sysRotation);
+            o.put("uiHidden", state.uiHidden);
             o.put("screenMirror", state.screenMirror);
             o.put("toastOverlay", state.toastOverlay);
             o.put("hudStyle", state.hudStyle.toStatusJson());

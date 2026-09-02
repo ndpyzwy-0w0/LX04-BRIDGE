@@ -7,6 +7,7 @@ final class DisplayPrefs {
     private static final String PREFS = "lx04_bridge";
     private static final String KEY_UPSIDE_DOWN = "upside_down";
     private static final String KEY_SYS_ROTATION = "sys_rotation";
+    private static final String KEY_UI_HIDDEN = "ui_hidden";
     private static final String KEY_LIGHT_THEME = "light_theme";
     private static final String KEY_HUD_STYLE = "hud_style";
     private static final String KEY_SCREEN_MIRROR = "screen_mirror";
@@ -31,7 +32,8 @@ final class DisplayPrefs {
     }
 
     static int clampRotation(int rotation) {
-        return ((rotation % 4) + 4) % 4;
+        rotation = ((rotation % 4) + 4) % 4;
+        return rotation >= 2 ? 2 : 0;
     }
 
     static int sysRotation(Context context) {
@@ -40,6 +42,14 @@ final class DisplayPrefs {
 
     static void setSysRotation(Context context, int rotation) {
         prefs(context).edit().putInt(KEY_SYS_ROTATION, clampRotation(rotation)).apply();
+    }
+
+    static boolean isUiHidden(Context context) {
+        return prefs(context).getBoolean(KEY_UI_HIDDEN, false);
+    }
+
+    static void setUiHidden(Context context, boolean hidden) {
+        prefs(context).edit().putBoolean(KEY_UI_HIDDEN, hidden).apply();
     }
 
     static boolean isLightTheme(Context context) {
