@@ -305,23 +305,12 @@ def main() -> int:
         "--add-data",
         f"{VERSION_FILE};.",
     ]
-    vbcable_pack = HOST / "vbcable" / "pack"
-    if vbcable_pack.is_dir():
-        for item in sorted(vbcable_pack.iterdir()):
-            if item.is_file():
-                cmd.extend(["--add-data", f"{item};vbcable"])
-        dest_cable = DIST / "vbcable"
-        dest_pack = dest_cable / "pack"
-        dest_pack.mkdir(parents=True, exist_ok=True)
-        for item in sorted(vbcable_pack.iterdir()):
-            if item.is_file():
-                (dest_pack / item.name).write_bytes(item.read_bytes())
-        notice = HOST / "vbcable" / "NOTICE.txt"
-        zip_pack = HOST / "vbcable" / "VBCABLE_Driver_Pack45.zip"
-        if notice.is_file():
-            (dest_cable / "NOTICE.txt").write_bytes(notice.read_bytes())
-        if zip_pack.is_file():
-            (dest_cable / zip_pack.name).write_bytes(zip_pack.read_bytes())
+    zip_pack = HOST / "vbcable" / "VBCABLE_Driver_Pack45.zip"
+    notice = HOST / "vbcable" / "NOTICE.txt"
+    if zip_pack.is_file():
+        cmd.extend(["--add-data", f"{zip_pack};vbcable"])
+    if notice.is_file():
+        cmd.extend(["--add-data", f"{notice};vbcable"])
     hifi_pack = HOST / "hificable" / "pack"
     hifi_zip = HOST / "hificable" / "HiFiCableAsioBridgeSetup_v1007.zip"
     if hifi_pack.is_dir() or hifi_zip.is_file():

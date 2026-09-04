@@ -28,8 +28,8 @@
 
 1. Windows 10/11 64 位（可开着安全启动）
 2. 官方 **VB-CABLE** 虚拟声卡（捐赠软件，来源 [www.vb-cable.com](https://www.vb-cable.com/)）
-   - 发行包里带未修改的 `host/vbcable/`（`VBCABLE_Driver_Pack45.zip`）
-   - 或以管理员运行 `host/vbcable/pack/VBCABLE_Setup_x64.exe`，**然后重启**
+   - 发行包里带未修改的 `host/vbcable/VBCABLE_Driver_Pack45.zip`；连接时会解出官方安装程序
+   - 或以管理员运行解出的 `host/vbcable/pack/VBCABLE_Setup_x64.exe`，**然后重启**
 3. 要把电脑音乐/视频接到音箱喇叭，再装官方 **Hi-Fi Cable**（同样来自 VB-Audio，和 VB-CABLE 不是同一根线）
    - 连接时上位机会提示安装；或打开 [vb-audio.com](https://vb-audio.com/Cable/) 下载 `HiFiCableAsioBridgeSetup`
    - **装完后重启**

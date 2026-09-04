@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import ctypes
 import sys
+import zipfile
 from ctypes import wintypes
 from pathlib import Path
 
@@ -47,6 +48,10 @@ DONATE_TEXT = (
     "将以管理员身份打开官方安装包。装完后通常需要重启电脑，再打开本程序。"
 )
 
+ZIP_NAME = "VBCABLE_Driver_Pack45.zip"
+SETUP_X64 = "VBCABLE_Setup_x64.exe"
+SETUP_X86 = "VBCABLE_Setup.exe"
+
 
 def _host_dir() -> Path:
     if getattr(sys, "frozen", False):
@@ -54,17 +59,22 @@ def _host_dir() -> Path:
     return Path(__file__).resolve().parent
 
 
-def package_dir() -> Path | None:
-    candidates = [
+def _candidate_dirs() -> list[Path]:
+    folders = [
         _host_dir() / "vbcable" / "pack",
         _host_dir() / "vbcable",
         _host_dir().parent / "host" / "vbcable" / "pack",
+        _host_dir().parent / "host" / "vbcable",
     ]
     meipass = getattr(sys, "_MEIPASS", None)
     if meipass:
-        candidates.insert(0, Path(meipass) / "vbcable")
-    for folder in candidates:
-        if (folder / "VBCABLE_Setup_x64.exe").is_file() or (folder / "VBCABLE_Setup.exe").is_file():
+        folders.insert(0, Path(meipass) / "vbcable")
+    return folders
+
+
+def package_dir() -> Path | None:
+    for folder in _candidate_dirs():
+        if (folder / SETUP_X64).is_file() or (folder / SETUP_X86).is_file():
             return folder
     return None
 
@@ -73,8 +83,8 @@ def setup_exe() -> Path | None:
     folder = package_dir()
     if folder is None:
         return None
-    x64 = folder / "VBCABLE_Setup_x64.exe"
-    x86 = folder / "VBCABLE_Setup.exe"
+    x64 = folder / SETUP_X64
+    x86 = folder / SETUP_X86
     if sys.maxsize > 2**32 and x64.is_file():
         return x64
     if x86.is_file():
@@ -82,6 +92,42 @@ def setup_exe() -> Path | None:
     if x64.is_file():
         return x64
     return None
+
+
+def zip_path() -> Path | None:
+    for folder in _candidate_dirs():
+        candidate = folder / ZIP_NAME
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def _pack_dir() -> Path:
+    folder = _host_dir() / "vbcable" / "pack"
+    folder.mkdir(parents=True, exist_ok=True)
+    return folder
+
+
+def ensure_installer() -> Path | None:
+    found = setup_exe()
+    if found is not None:
+        return found
+    archive = zip_path()
+    if archive is None:
+        return None
+    want = SETUP_X64 if sys.maxsize > 2**32 else SETUP_X86
+    pack = _pack_dir()
+    try:
+        with zipfile.ZipFile(archive) as zf:
+            infos = {Path(info.filename).name.lower(): info for info in zf.infolist() if not info.is_dir()}
+            info = infos.get(want.lower()) or infos.get(SETUP_X64.lower()) or infos.get(SETUP_X86.lower())
+            if info is None:
+                return None
+            target = pack / Path(info.filename).name
+            target.write_bytes(zf.read(info))
+            return target
+    except Exception:
+        return None
 
 
 def present() -> bool:
@@ -108,7 +154,7 @@ def _is_vb_cable_output(name: str) -> bool:
 
 
 def run_official_setup() -> str:
-    exe = setup_exe()
+    exe = ensure_installer()
     if exe is None:
         return "没有找到官方 VB-CABLE 安装程序。请从 www.vb-cable.com 下载 VBCABLE_Driver_Pack45.zip，解压后运行 VBCABLE_Setup_x64.exe。"
     info = SHELLEXECUTEINFOW()
