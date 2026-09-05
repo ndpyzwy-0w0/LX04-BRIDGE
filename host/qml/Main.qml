@@ -1005,7 +1005,8 @@ ApplicationWindow {
                                     linkColor: win.accent
                                     textFormat: Text.RichText
                                     text: "Copyright © 2026 LX04 PC Bridge<br/>" +
-                                          "作者 <a href=\"https://github.com/ndpyzwy-0w0\">ndpyzwy-0w0</a><br/><br/>" +
+                                          "作者 <a href=\"https://github.com/ndpyzwy-0w0\">ndpyzwy-0w0</a><br/>" +
+                                          "原创源码 <a href=\"https://www.apache.org/licenses/LICENSE-2.0\">Apache License 2.0</a>。<br/><br/>" +
                                           "本软件使用：Python、" +
                                           "<a href=\"https://www.qt.io/\">Qt / PySide6</a>（The Qt Company，FluentWinUI3）、" +
                                           "<a href=\"https://fontawesome.com/license/free\">Font Awesome Free</a>（Fonticons, SIL OFL 1.1）、" +

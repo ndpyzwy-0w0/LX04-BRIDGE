@@ -10,6 +10,8 @@ VERSION_FILE = ROOT / "VERSION.txt"
 
 COMMIT_PATHS = [
     "VERSION.txt",
+    "LICENSE",
+    "NOTICE",
     "README.md",
     "build_host_exe.py",
     "build_apk.py",

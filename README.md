@@ -129,3 +129,7 @@ python build_host_exe.py
 
 - APK 硬限制：≤ 300MB（Gradle 超限会失败）
 - 实际：不引入大型依赖，release + minify 预期 **&lt; 5MB**
+
+## 许可
+
+原创源码以 [Apache License 2.0](LICENSE) 发布。第三方仍走各自协议，见 [NOTICE](NOTICE)。VB-CABLE / Hi-Fi Cable 是 VB-Audio 的捐赠软件，不在 Apache 范围内。

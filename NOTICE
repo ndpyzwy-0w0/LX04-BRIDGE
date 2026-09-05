@@ -1,0 +1,31 @@
+LX04 PC Bridge
+Copyright 2026 LX04 PC Bridge
+
+Apache License 2.0 (see LICENSE) applies to original source in this
+repository (app/, host Python/QML, build scripts, and docs), not to
+third-party components shipped beside it.
+
+Third-party (unchanged upstream licenses):
+
+  VB-CABLE and Hi-Fi Cable
+    VB-Audio (Vincent Burel), donationware. Unmodified official packages only.
+    host/vbcable/NOTICE.txt
+    host/hificable/NOTICE.txt
+    Commercial bulk redistribution: https://vb-audio.com/Services/licensing.htm
+
+  Android SDK Platform-Tools adb
+    Apache License 2.0 and upstream notices in host/adb/NOTICE.txt
+
+  Font Awesome Free 6 (fa-solid-900.ttf)
+    SIL OFL 1.1. host/assets/FONT-AWESOME-LICENSE.txt
+    https://fontawesome.com/license/free
+
+  Qt / PySide6 (FluentWinUI3)
+    LGPLv3 (or a Qt commercial license). https://www.qt.io/licensing/
+
+  sounddevice — MIT (PortAudio in the wheel — MIT)
+  pycaw — MIT
+  comtypes — MIT
+  psutil — BSD-3-Clause
+
+MSI Afterburner, NVIDIA NVML, and AMD ADL are not redistributed.
