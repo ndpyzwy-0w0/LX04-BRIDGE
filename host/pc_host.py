@@ -1555,13 +1555,13 @@ class HostApp:
     def _install_vb(self) -> None:
         if not self.bridge.askokcancel(vb_cable.DONATE_TEXT):
             return
-        self._log(vb_cable.run_official_setup())
+        self._log(vb_cable.open_download())
         self.refresh_audio_devices()
 
     def _install_hifi(self) -> None:
         if not self.bridge.askokcancel(hifi_cable.DONATE_TEXT):
             return
-        self._log(hifi_cable.run_official_setup())
+        self._log(hifi_cable.open_download())
         self.refresh_audio_devices()
 
     def _on_afterburner(self) -> None:

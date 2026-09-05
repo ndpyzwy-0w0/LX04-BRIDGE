@@ -27,12 +27,8 @@
 ## 电脑准备
 
 1. Windows 10/11 64 位（可开着安全启动）
-2. 官方 **VB-CABLE** 虚拟声卡（捐赠软件，来源 [www.vb-cable.com](https://www.vb-cable.com/)）
-   - 发行包里带未修改的 `host/vbcable/VBCABLE_Driver_Pack45.zip`；连接时会解出官方安装程序
-   - 或以管理员运行解出的 `host/vbcable/pack/VBCABLE_Setup_x64.exe`，**然后重启**
-3. 要把电脑音乐/视频接到音箱喇叭，再装官方 **Hi-Fi Cable**（同样来自 VB-Audio，和 VB-CABLE 不是同一根线）
-   - 连接时上位机会提示安装；或打开 [vb-audio.com](https://vb-audio.com/Cable/) 下载 `HiFiCableAsioBridgeSetup`
-   - **装完后重启**
+2. 官方 **VB-CABLE** 虚拟声卡（捐赠软件）。上位机只打开 [www.vb-cable.com](https://www.vb-cable.com/) 下载页，不附带安装包。装完后**重启**
+3. 要把电脑音乐/视频接到音箱喇叭，再装官方 **Hi-Fi Cable**（同样来自 VB-Audio，和 VB-CABLE 不是同一根线）。上位机打开 [vb-audio.com/Cable](https://vb-audio.com/Cable/) 下载页。**装完后重启**
 4. 上位机已内置 adb，不需要再装 Android SDK 也能连音箱
 
 VB-CABLE 装好后，Windows 声音设置里会出现：
@@ -41,7 +37,7 @@ VB-CABLE 装好后，Windows 声音设置里会出现：
 - **CABLE Output**：给微信 / QQ 当麦克风
 - **Hi-Fi Cable Input**：连接后作为系统播放设备，声音进音箱喇叭
 
-觉得 VB-CABLE / Hi-Fi Cable 好用请向作者捐赠。商业批量分发请看 [VB-Audio 授权说明](https://vb-audio.com/Services/licensing.htm)。
+觉得 VB-CABLE / Hi-Fi Cable 好用请向作者捐赠。本仓库和程序都不附带这两份安装包。商业批量分发请看 [VB-Audio 授权说明](https://vb-audio.com/Services/licensing.htm)。
 
 本仓库电脑上如果还没有 Android Studio / SDK，需要先装才能编译出 APK。
 
@@ -90,7 +86,7 @@ python build_host_exe.py
 启动后：
 
 1. 点 **刷新**，应出现 LX04 的 adb 序列号
-2. 若尚未安装 VB-CABLE，点 **连接** 时会打开官方安装程序（需管理员）。装完后重启，再打开上位机
+2. 若尚未安装 VB-CABLE，点 **打开 VB-CABLE 官网**（或连接时的提示）会打开官网下载页。自行安装并重启后再打开上位机
 3. 点 **连接**
 4. 音箱屏幕应变为「电脑扬声器 → 音箱」或「正在拾音」，对音箱说话，电脑麦克风电平条会动
 5. 点 **音箱试音**，音箱喇叭应能听到「嘀」

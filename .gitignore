@@ -42,11 +42,10 @@ host-ui/
 driver/
 host/lx04mic/
 
-# Official VB-Audio installers: zip is source of truth; pack/ is extracted locally.
-host/vbcable/pack/
+# Third-party installers must not land in git if downloaded locally.
+host/vbcable/
+host/hificable/
 host/hificable.zip
-host/hificable/*.zip
-host/hificable/pack/
 host/audio_routes.json
 host/hud_preview.json
 dist/audio_routes.json

@@ -8,9 +8,8 @@ third-party components shipped beside it.
 Third-party (unchanged upstream licenses):
 
   VB-CABLE and Hi-Fi Cable
-    VB-Audio (Vincent Burel), donationware. Unmodified official packages only.
-    host/vbcable/NOTICE.txt
-    host/hificable/NOTICE.txt
+    VB-Audio (Vincent Burel), donationware. Not redistributed.
+    Users download from https://www.vb-cable.com/ and https://vb-audio.com/Cable/
     Commercial bulk redistribution: https://vb-audio.com/Services/licensing.htm
 
   Android SDK Platform-Tools adb

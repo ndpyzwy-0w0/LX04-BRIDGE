@@ -305,30 +305,6 @@ def main() -> int:
         "--add-data",
         f"{VERSION_FILE};.",
     ]
-    zip_pack = HOST / "vbcable" / "VBCABLE_Driver_Pack45.zip"
-    notice = HOST / "vbcable" / "NOTICE.txt"
-    if zip_pack.is_file():
-        cmd.extend(["--add-data", f"{zip_pack};vbcable"])
-    if notice.is_file():
-        cmd.extend(["--add-data", f"{notice};vbcable"])
-    hifi_pack = HOST / "hificable" / "pack"
-    hifi_zip = HOST / "hificable" / "HiFiCableAsioBridgeSetup_v1007.zip"
-    if hifi_pack.is_dir() or hifi_zip.is_file():
-        dest_hifi = DIST / "hificable"
-        dest_hifi_pack = dest_hifi / "pack"
-        dest_hifi_pack.mkdir(parents=True, exist_ok=True)
-        if hifi_pack.is_dir():
-            for item in sorted(hifi_pack.iterdir()):
-                if item.is_file():
-                    cmd.extend(["--add-data", f"{item};hificable"])
-                    (dest_hifi_pack / item.name).write_bytes(item.read_bytes())
-        if hifi_zip.is_file():
-            cmd.extend(["--add-data", f"{hifi_zip};hificable"])
-            (dest_hifi / hifi_zip.name).write_bytes(hifi_zip.read_bytes())
-        hifi_notice = HOST / "hificable" / "NOTICE.txt"
-        if hifi_notice.is_file():
-            cmd.extend(["--add-data", f"{hifi_notice};hificable"])
-            (dest_hifi / "NOTICE.txt").write_bytes(hifi_notice.read_bytes())
     driver_pkg = ROOT / "driver" / "lx04-mic" / "x64" / "Release" / "package"
     if driver_pkg.is_dir():
         for item in sorted(driver_pkg.iterdir()):

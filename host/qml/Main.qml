@@ -567,7 +567,7 @@ ApplicationWindow {
                                     status: host.diagVb === "off" ? "未检测" : (host.installOkCount === 3 ? "已全部安装" : host.installOkCount + "/3 已安装")
                                     statusColor: host.diagVb === "off" ? win.muted : (host.installOkCount === 3 ? win.ok : win.warn)
                                     Label {
-                                        text: "这些会打开官方安装程序或下载页，不是本软件自带的驱动。"
+                                        text: "这些只打开官网下载页，本软件不附带任何安装程序。"
                                         wrapMode: Text.Wrap
                                         color: win.muted
                                         Layout.fillWidth: true
@@ -588,7 +588,7 @@ ApplicationWindow {
                                         color: win.muted
                                         Layout.fillWidth: true
                                     }
-                                    Button { text: "安装 VB-CABLE"; onClicked: host.installVb() }
+                                    Button { text: "打开 VB-CABLE 官网"; onClicked: host.installVb() }
                                     RowLayout {
                                         Layout.fillWidth: true
                                         Label { text: "Hi-Fi Cable"; font.bold: true; color: win.ink; Layout.fillWidth: true }
@@ -605,7 +605,7 @@ ApplicationWindow {
                                         color: win.muted
                                         Layout.fillWidth: true
                                     }
-                                    Button { text: "安装 Hi-Fi Cable"; onClicked: host.installHifi() }
+                                    Button { text: "打开 Hi-Fi Cable 官网"; onClicked: host.installHifi() }
                                     RowLayout {
                                         Layout.fillWidth: true
                                         Label { text: "MSI Afterburner"; font.bold: true; color: win.ink; Layout.fillWidth: true }
@@ -1012,8 +1012,9 @@ ApplicationWindow {
                                           "<a href=\"https://fontawesome.com/license/free\">Font Awesome Free</a>（Fonticons, SIL OFL 1.1）、" +
                                           "Android platform-tools adb（Apache 2.0）、psutil、sounddevice、pycaw、tkinter。<br/><br/>" +
                                           "<a href=\"https://www.vb-cable.com/\">VB-CABLE</a> 与 " +
-                                          "<a href=\"https://vb-audio.com/Cable/\">Hi-Fi Cable</a> 是 VB-Audio（Vincent Burel）的捐赠软件，本程序只启动官方安装包，不修改驱动。<br/>" +
-                                          "<a href=\"https://www.msi.com/Landing/afterburner\">MSI Afterburner</a> 未随本软件分发，仅在需要 CPU 温度时打开官网或已安装的程序。"
+                                          "<a href=\"https://vb-audio.com/Cable/\">Hi-Fi Cable</a> 是 VB-Audio（Vincent Burel）的捐赠软件；" +
+                                          "<a href=\"https://www.msi.com/Landing/afterburner\">MSI Afterburner</a> 是 MSI 的专有软件。" +
+                                          "本程序不附带安装包，只打开官网下载页；已安装 Afterburner 时则启动本机程序。"
                                     onLinkActivated: (link) => Qt.openUrlExternally(link)
                                 }
                             }
