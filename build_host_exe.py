@@ -118,6 +118,11 @@ def slim_host_dir(root: Path) -> None:
         tooling = pyside / "plugins" / "qmltooling"
         if tooling.is_dir():
             shutil.rmtree(tooling)
+    # Qt6Core needs the Windows unversioned ICU exports; a bundled ICU copy can conflict.
+    bundled_icu = internal / "icuuc.dll"
+    if bundled_icu.is_file():
+        bundled_icu.unlink()
+
     tests = internal / "comtypes" / "test"
     if tests.is_dir():
         shutil.rmtree(tests)
