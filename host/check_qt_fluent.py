@@ -52,6 +52,13 @@ def main() -> None:
     roots = engine.rootObjects()
     assert roots, qml
     win = roots[0]
+    icon_font = win.findChild(QObject, "lucideFont")
+    assert icon_font is not None and icon_font.property("name")
+    from PySide6.QtGui import QFont, QRawFont
+    raw_font = QRawFont.fromFont(QFont(icon_font.property("name")))
+    for code in (0xE0F5, 0xE122, 0xE11D, 0xE154, 0xE0CC, 0xE0F9,
+                 0xE06C, 0xE193, 0xE1B2, 0xE076, 0xE115, 0xE226):
+        assert raw_font.supportsCharacter(code), hex(code)
     font = win.property("font")
     assert font is not None and ("YaHei" in font.family() or "雅黑" in font.family()), font.family() if font else None
     assert bool(win.property("navOpen")) is True

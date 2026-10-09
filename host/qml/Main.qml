@@ -32,12 +32,13 @@ ApplicationWindow {
     readonly property color sel: dark ? "#3B3B3B" : "#E6E6E6"
     readonly property color hover: dark ? "#333333" : "#EEEEEE"
     readonly property var navPages: [
-        { title: "总览", sub: "连接状态与诊断", glyph: "\uf015" },
-        { title: "音频", sub: "麦克风与扬声器", glyph: "\uf001" },
-        { title: "屏幕", sub: "800 × 480", glyph: "\uf108" },
-        { title: "设置", sub: "监控与系统", glyph: "\uf013" },
-        { title: "日志", sub: "调试信息", glyph: "\uf15c" },
-        { title: "关于", sub: "LX04 PC Bridge", glyph: "\uf05a" }
+        // lucide-static 1.54.0: house, music, monitor, settings, file-text, info.
+        { title: "总览", sub: "连接状态与诊断", glyph: "\ue0f5" },
+        { title: "音频", sub: "麦克风与扬声器", glyph: "\ue122" },
+        { title: "屏幕", sub: "800 × 480", glyph: "\ue11d" },
+        { title: "设置", sub: "监控与系统", glyph: "\ue154" },
+        { title: "日志", sub: "调试信息", glyph: "\ue0cc" },
+        { title: "关于", sub: "LX04 PC Bridge", glyph: "\ue0f9" }
     ]
 
     function installNote(tone) {
@@ -52,10 +53,10 @@ ApplicationWindow {
         return win.muted
     }
     function toneGlyph(tone) {
-        if (tone === "ok") return "\uf00c"
-        if (tone === "warn") return "\uf071"
-        if (tone === "error") return "\uf00d"
-        return "\uf111"
+        if (tone === "ok") return "\ue06c" // check
+        if (tone === "warn") return "\ue193" // triangle-alert
+        if (tone === "error") return "\ue1b2" // x
+        return "\ue076" // circle
     }
     function fmtUptime(sec) {
         const h = Math.floor(sec / 3600)
@@ -78,7 +79,7 @@ ApplicationWindow {
 
     onClosing: (event) => { event.accepted = host.onWindowClosing() }
 
-    FontLoader { id: faSolid; source: faFontUrl }
+    FontLoader { id: lucideFont; objectName: "lucideFont"; source: "../assets/lucide.ttf" }
 
     Timer {
         interval: 1000
@@ -94,9 +95,9 @@ ApplicationWindow {
         onTriggered: { host.refreshStats(); previewBox.tick() }
     }
 
-    component FaText: Text {
+    component LucideIcon: Text {
         property string glyph: ""
-        font.family: faSolid.name
+        font.family: lucideFont.name
         font.pixelSize: 15
         text: glyph
         color: win.ink
@@ -177,7 +178,7 @@ ApplicationWindow {
             radius: 1
             color: pages.currentIndex === pageIndex ? win.accent : "transparent"
         }
-        FaText {
+        LucideIcon {
             x: 11
             width: 22
             height: parent.height
@@ -268,7 +269,7 @@ ApplicationWindow {
         property string note: ""
         spacing: 8
         Layout.fillWidth: true
-        FaText {
+        LucideIcon {
             glyph: win.toneGlyph(tone)
             color: win.toneColor(tone)
             Layout.preferredWidth: 18
@@ -310,11 +311,11 @@ ApplicationWindow {
                     objectName: "navToggle"
                     Layout.fillWidth: true
                     implicitHeight: 40
-                    FaText {
+                    LucideIcon {
                         x: 11
                         width: 22
                         height: parent.height
-                        glyph: "\uf0c9"
+                        glyph: "\ue115" // menu
                         font.pixelSize: 16
                     }
                     MouseArea {
@@ -344,11 +345,11 @@ ApplicationWindow {
                     Layout.fillWidth: true
                     Layout.topMargin: 8
                     implicitHeight: 40
-                    FaText {
+                    LucideIcon {
                         x: 11
                         width: 22
                         height: parent.height
-                        glyph: host.connected ? "\uf058" : "\uf111"
+                        glyph: host.connected ? "\ue226" : "\ue076" // circle-check / circle
                         color: host.connected ? win.ok : win.muted
                     }
                     ColumnLayout {
@@ -420,8 +421,8 @@ ApplicationWindow {
                                         spacing: 4
                                         Label { text: "连接状态"; font.bold: true; font.pixelSize: 16; color: win.ink }
                                         RowLayout {
-                                            FaText {
-                                                glyph: host.connected ? "\uf058" : "\uf111"
+                                            LucideIcon {
+                                                glyph: host.connected ? "\ue226" : "\ue076"
                                                 color: host.connected ? win.ok : (host.headline === "连接失败" ? win.err : win.warn)
                                             }
                                             Label {
@@ -1131,7 +1132,7 @@ ApplicationWindow {
                                           "原创源码 <a href=\"https://www.apache.org/licenses/LICENSE-2.0\">Apache License 2.0</a>。<br/><br/>" +
                                           "本软件使用：Python、" +
                                           "<a href=\"https://www.qt.io/\">Qt / PySide6</a>（The Qt Company，FluentWinUI3）、" +
-                                          "<a href=\"https://fontawesome.com/license/free\">Font Awesome Free</a>（Fonticons, SIL OFL 1.1）、" +
+                                          "<a href=\"https://lucide.dev/license\">Lucide</a>（ISC，部分图标源自 MIT 许可的 Feather）、" +
                                           "Android platform-tools adb（Apache 2.0）、psutil、sounddevice、pycaw、tkinter。<br/><br/>" +
                                           "<a href=\"https://www.vb-cable.com/\">VB-CABLE</a> 与 " +
                                           "<a href=\"https://vb-audio.com/Cable/\">Hi-Fi Cable</a> 是 VB-Audio（Vincent Burel）的捐赠软件；" +

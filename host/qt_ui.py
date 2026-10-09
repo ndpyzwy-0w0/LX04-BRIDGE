@@ -1855,7 +1855,6 @@ def app_version() -> str:
 def bind_qml_assets(engine) -> None:
     assets = assets_dir()
     ctx = engine.rootContext()
-    ctx.setContextProperty("faFontUrl", QUrl.fromLocalFile(str(assets / "fa-solid-900.ttf")))
     ctx.setContextProperty("appIconUrl", QUrl.fromLocalFile(str(assets / "app-icon.png")))
 
 
