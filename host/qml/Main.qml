@@ -138,6 +138,8 @@ ApplicationWindow {
 
     component PageScroll: ScrollView {
         clip: true
+        Layout.minimumWidth: 0
+        contentWidth: availableWidth
         visible: StackLayout.isCurrentItem
         enabled: StackLayout.isCurrentItem
         property real _bar: ScrollBar.vertical.position
@@ -403,7 +405,7 @@ ApplicationWindow {
 
                         PageScroll {
                             ColumnLayout {
-                                width: Math.max(240, content.width - 72)
+                                width: parent.width
                                 spacing: 16
 
                                 Rectangle {
@@ -726,7 +728,7 @@ ApplicationWindow {
 
                         PageScroll {
                             ColumnLayout {
-                                width: Math.max(240, content.width - 72)
+                                width: parent.width
                                 spacing: 12
 
                                 GroupCard {
@@ -860,7 +862,7 @@ ApplicationWindow {
 
                         PageScroll {
                             ColumnLayout {
-                                width: Math.max(240, content.width - 72)
+                                width: parent.width
                                 spacing: 12
 
                                 HudView {
@@ -1022,7 +1024,7 @@ ApplicationWindow {
 
                         PageScroll {
                             ColumnLayout {
-                                width: Math.max(240, content.width - 72)
+                                width: parent.width
                                 spacing: 12
 
                                 GroupCard {
@@ -1091,7 +1093,7 @@ ApplicationWindow {
                         PageScroll {
                             objectName: "aboutPage"
                             ColumnLayout {
-                                width: Math.max(240, content.width - 72)
+                                width: parent.width
                                 spacing: 12
 
                                 Image {

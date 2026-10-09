@@ -74,6 +74,22 @@ def main() -> None:
     assert win.findChild(QObject, "installAfterStatus") is not None
     assert win.findChild(QObject, "diagBox") is not None
     assert win.findChild(QObject, "previewBox") is not None
+    preview = win.findChild(QObject, "previewBox")
+    screen_scroll = preview.parent().parent()
+    pages = screen_scroll.parent()
+    for nav_open in (True, False):
+        win.setProperty("navOpen", nav_open)
+        for width in (560, 800, 922, 1200):
+            win.setWidth(width)
+            pages.setProperty("currentIndex", 2)
+            app.processEvents()
+            available = screen_scroll.property("availableWidth")
+            assert screen_scroll.property("width") <= pages.property("width") + 1
+            assert screen_scroll.property("contentWidth") <= available + 1
+            assert preview.property("width") <= available + 1
+    win.setWidth(800)
+    pages.setProperty("currentIndex", 0)
+    app.processEvents()
     assert win.findChild(QObject, "logFilter") is not None
     area = win.findChild(QObject, "logArea")
     assert area is not None
