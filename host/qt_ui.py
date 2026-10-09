@@ -1239,6 +1239,10 @@ class HostBridge(QObject):
     def connected(self) -> bool:
         return bool(getattr(self.host, "connected", False))
 
+    @Property(bool, notify=connectedChanged)
+    def connecting(self) -> bool:
+        return bool(getattr(self.host, "_connecting", False))
+
     @Property(bool, notify=diagChanged)
     def hasDevice(self) -> bool:
         return self._device_ready()

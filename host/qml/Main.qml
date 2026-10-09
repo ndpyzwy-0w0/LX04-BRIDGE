@@ -490,19 +490,21 @@ ApplicationWindow {
                                         Button {
                                             text: "重试"
                                             highlighted: true
+                                            enabled: !host.connecting
                                             visible: !host.connected && host.headline === "连接失败"
                                             onClicked: host.connectDevice()
                                         }
                                         Button {
                                             text: "连接"
                                             highlighted: true
+                                            enabled: !host.connecting
                                             visible: !host.connected && (host.transportIndex > 0 ? host.wifiIp.length > 0 : (host.hasDevice && host.headline !== "连接失败"))
                                             onClicked: host.connectDevice()
                                         }
                                         Button {
-                                            text: "断开连接"
+                                            text: host.connecting ? "取消连接" : "断开连接"
                                             highlighted: true
-                                            visible: host.connected
+                                            visible: host.connected || host.connecting
                                             onClicked: host.disconnectDevice()
                                         }
                                     }
@@ -510,6 +512,7 @@ ApplicationWindow {
 
                                 GroupCard {
                                     title: "连接方式"
+                                    enabled: !host.connecting
                                     ComboBox {
                                         id: transportBox
                                         Layout.fillWidth: true

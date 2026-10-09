@@ -85,6 +85,10 @@ def main() -> None:
     assert bridge.installOkCount == 0
     assert win.findChild(QObject, "installVbStatus").property("text") == "未检测"
     bridge.refresh_diag()
+    deadline = time.monotonic() + 5
+    while not bridge._diag_scanned and time.monotonic() < deadline:
+        app.processEvents()
+        time.sleep(0.01)
     app.processEvents()
     assert bridge.diagVb in ("ok", "warn")
     assert bridge.diagHifi in ("ok", "warn")

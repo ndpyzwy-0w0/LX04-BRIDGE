@@ -615,23 +615,27 @@ def _read_exact(sock: socket.socket, size: int) -> bytes:
     return bytes(chunks)
 
 
-def _read_exact_idle(sock: socket.socket, size: int) -> bytes | None:
+def _read_exact_idle(sock: socket.socket, size: int, max_idle: float = 30.0) -> bytes | None:
     """像 _read_exact，但读超时不丢已经读到的字节。
 
     一个字节都没读到就返回 None（调用方决定发心跳还是判掉线）；
-    读到一半超时会继续等，避免半包被丢掉导致后面帧错位。
+    半包保留进度，但连续 max_idle 秒没有新字节就断开，避免无限等待。
     """
     chunks = bytearray()
+    last_received = time.monotonic()
     while len(chunks) < size:
         try:
             piece = sock.recv(size - len(chunks))
         except socket.timeout:
             if not chunks:
                 return None
+            if time.monotonic() - last_received >= max_idle:
+                raise ConnectionError("帧未收完且音箱超过 30 秒无响应")
             continue
         if not piece:
             raise ConnectionError("USB 连接已断开")
         chunks.extend(piece)
+        last_received = time.monotonic()
     return bytes(chunks)
 
 
@@ -734,6 +738,7 @@ class HostApp:
         self._stats_busy = False
         self._refreshing = False
         self._connecting = False
+        self._connect_cancelled = False
         self._last_stats: dict = {}
         self._hud_need_reconcile = False
         self._hud_from_apk = False
@@ -2105,9 +2110,10 @@ class HostApp:
         `usb_forward` 8.1s + `_connect_tcp` 18.2s ≈ 50 秒，放在 GUI 线程上
         就是"点一下连接，窗口假死一分钟"。
         """
-        if self._connecting:
+        if self._connecting or self._closing:
             return
         self._connecting = True
+        self._connect_cancelled = False
         self.headline.configure(text="正在连接…")
         self.detail.configure(text="正在准备 adb / TCP 通道，界面可以继续操作")
         threading.Thread(target=self._connect_worker, daemon=True, name="lx04-connect").start()
@@ -2183,6 +2189,9 @@ class HostApp:
 
     def _connect_done(self, serial: str, detail: str) -> None:
         """握手成功后在 GUI 线程收尾（音频通路初始化 + 界面文案）。"""
+        if self._connect_cancelled or self._closing:
+            self._cancel_connect()
+            return
         self._connecting = False
         self._serial = serial
         self._session = True
@@ -2225,6 +2234,9 @@ class HostApp:
         self._sync_toast_mirror()
 
     def _connect_failed(self, exc: Exception, serial: str = "") -> None:
+        if self._connect_cancelled or self._closing:
+            self._cancel_connect()
+            return
         self._connecting = False
         self._session = False
         self.connected = False
@@ -2250,6 +2262,23 @@ class HostApp:
         self._log("连接失败: " + str(exc))
         self.headline.configure(text="连接失败")
         self.detail.configure(text="无法连接到 LX04。")
+
+    def _cancel_connect(self) -> None:
+        # 保持忙状态直到迟到的连接清理完，避免误关下一次连接。
+        def finished() -> None:
+            self._connecting = False
+            if not self._closing:
+                self.headline.configure(text="已断开")
+                self.detail.configure(text="可以重新点连接。")
+                self.bridge.connectedChanged.emit()
+
+        def cleanup() -> None:
+            try:
+                self._shutdown_work()
+            finally:
+                self._ui(finished)
+
+        threading.Thread(target=cleanup, daemon=True, name="lx04-cancel-connect").start()
 
     def _wifi_open(self, ip: str) -> tuple[bool, str]:
         """连上三条 TCP 通道并完成局域网鉴权，返回 (是否成功, 说明)。"""
@@ -2341,6 +2370,7 @@ class HostApp:
         raise last_err if last_err else RuntimeError("无法连上音箱后台服务")
 
     def disconnect(self) -> None:
+        self._connect_cancelled = True
         self._stop_xiaoai_watch()
         self._session = False
         self.connected = False
@@ -2391,6 +2421,7 @@ class HostApp:
             self._hide_to_tray()
             return
         self._closing = True
+        self._connect_cancelled = True
         self._stop_xiaoai_watch()
         self._session = False
         self.connected = False
