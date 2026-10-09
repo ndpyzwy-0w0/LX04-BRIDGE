@@ -138,6 +138,7 @@ ApplicationWindow {
 
     component PageScroll: ScrollView {
         clip: true
+        rightPadding: 16
         Layout.minimumWidth: 0
         contentWidth: availableWidth
         visible: StackLayout.isCurrentItem
@@ -391,9 +392,11 @@ ApplicationWindow {
                 ColumnLayout {
                     anchors.fill: parent
                     anchors.margins: 20
+                    anchors.rightMargin: 4
                     spacing: 14
 
                     PageHead {
+                        Layout.rightMargin: 16
                         title: win.navPages[pages.currentIndex].title
                         subtitle: win.navPages[pages.currentIndex].sub
                     }
