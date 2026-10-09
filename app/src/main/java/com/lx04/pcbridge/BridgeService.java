@@ -109,16 +109,7 @@ public class BridgeService extends Service {
 
             @Override
             public boolean authorize(Socket socket, InputStream in, OutputStream out) {
-                String token = WifiPairServer.INSTANCE.authorize(socket, in, out);
-                if (token == null) {
-                    STATE.clientIsLan = false;
-                    refreshWifiState();
-                    return false;
-                }
-                STATE.clientIsLan = true;
-                STATE.wifiPaired = true;
-                refreshWifiState();
-                return true;
+                return WifiPairServer.INSTANCE.authorize(socket, in, out) != null;
             }
 
             @Override

@@ -149,7 +149,7 @@ final class WifiPairServer {
 
     // ---- 开关 -------------------------------------------------------------
 
-    void setPairing(boolean on) {
+    synchronized void setPairing(boolean on) {
         if (context == null) {
             return;
         }
@@ -157,15 +157,18 @@ final class WifiPairServer {
         if (on) {
             rotatePin();
             start();
+        } else {
+            pin = "";
         }
         notifyChanged();
     }
 
-    void forget() {
+    synchronized void forget() {
         if (context == null) {
             return;
         }
         DisplayPrefs.clearWifiPairing(context);
+        pin = "";
         authorizedIp = "";
         notifyChanged();
     }
@@ -193,7 +196,7 @@ final class WifiPairServer {
         if (running || context == null || !lanEnabled()) {
             return;
         }
-        if (pin.isEmpty()) {
+        if (pairing() && pin.isEmpty()) {
             rotatePin();
         }
         synchronized (lock) {
@@ -298,7 +301,7 @@ final class WifiPairServer {
         }
     }
 
-    private void handlePair(DatagramSocket sock, DatagramPacket packet, JSONObject json, String nonce) {
+    private synchronized void handlePair(DatagramSocket sock, DatagramPacket packet, JSONObject json, String nonce) {
         String replyCmd;
         int left = 0;
         String token = "";
@@ -308,16 +311,9 @@ final class WifiPairServer {
             replyCmd = "pair_deny";
         } else if (!pairing()) {
             replyCmd = "pair_deny";
-        } else if (checkCode(json.optString("code", ""))) {
+        } else if ((token = pairWithCode(json.optString("code", ""), packet.getAddress(),
+                json.optString("name", ""))) != null) {
             replyCmd = "pair_ok";
-            token = newToken();
-            DisplayPrefs.setWifiToken(context, token);
-            DisplayPrefs.setWifiPairedIp(context, packet.getAddress().getHostAddress());
-            DisplayPrefs.setWifiPairedName(context, json.optString("name", ""));
-            // 配对成功后关掉配对码窗口，避免长时间暴露。
-            DisplayPrefs.setWifiPairing(context, false);
-            attempts = 0;
-            notifyChanged();
         } else {
             replyCmd = "pair_deny";
             left = Math.max(0, MAX_ATTEMPTS - attempts);
@@ -354,7 +350,8 @@ final class WifiPairServer {
 
     /** 配对码校验与失败计数；UDP 线程和 TCP 鉴权线程都会调，必须串行化。 */
     private synchronized boolean checkCode(String code) {
-        if (pin.isEmpty() || code == null) {
+        if (!pairing() || pin.isEmpty() || code == null
+                || System.currentTimeMillis() < cooldownUntil) {
             return false;
         }
         if (System.currentTimeMillis() - pinAt > 30 * 60_000L) {
@@ -440,17 +437,9 @@ final class WifiPairServer {
                     replyAuth(out, true, "");
                     return token;
                 }
-                if (!code.isEmpty() && checkCode(code)) {
-                    String fresh = newToken();
-                    DisplayPrefs.setWifiToken(context, fresh);
-                    if (address != null) {
-                        DisplayPrefs.setWifiPairedIp(context, address.getHostAddress());
-                    }
-                    DisplayPrefs.setWifiPairedName(context, json.optString("name", ""));
-                    DisplayPrefs.setWifiPairing(context, false);
+                String fresh = pairWithCode(code, address, json.optString("name", ""));
+                if (fresh != null) {
                     authorizedIp = address == null ? "" : address.getHostAddress();
-                    attempts = 0;
-                    notifyChanged();
                     replyAuth(out, true, fresh);
                     return fresh;
                 }
@@ -465,6 +454,23 @@ final class WifiPairServer {
             }
         }
         return null;
+    }
+
+    private synchronized String pairWithCode(String code, InetAddress address, String name) {
+        if (code.isEmpty() || !checkCode(code)) {
+            return null;
+        }
+        String fresh = newToken();
+        DisplayPrefs.setWifiToken(context, fresh);
+        if (address != null) {
+            DisplayPrefs.setWifiPairedIp(context, address.getHostAddress());
+        }
+        DisplayPrefs.setWifiPairedName(context, name);
+        DisplayPrefs.setWifiPairing(context, false);
+        pin = "";
+        attempts = 0;
+        notifyChanged();
+        return fresh;
     }
 
     private void replyAuth(OutputStream out, boolean ok, String token) {

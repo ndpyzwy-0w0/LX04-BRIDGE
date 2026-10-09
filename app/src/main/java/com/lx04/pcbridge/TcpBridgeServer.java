@@ -40,6 +40,7 @@ final class TcpBridgeServer {
     private ServerSocket server;
     private Thread acceptThread;
     private volatile Socket client;
+    private final Object clientLock = new Object();
     private volatile long dropped;
     private final AtomicInteger lanClients = new AtomicInteger();
     /** 局域网鉴权线程上限，避免被同网段的连接把线程数撑爆。 */
@@ -66,8 +67,10 @@ final class TcpBridgeServer {
 
     synchronized void stop() {
         running = false;
-        closeQuietly(client);
-        client = null;
+        synchronized (clientLock) {
+            closeQuietly(client);
+            client = null;
+        }
         if (server != null) {
             try {
                 server.close();
@@ -184,10 +187,6 @@ final class TcpBridgeServer {
                     // 本连接，就会把正在服务的 socket 自己关掉（表现为只收到
                     // HELLO、之后 STATUS 与控制全断）。
                     handleClient(socket);
-                    if (client == socket) {
-                        client = null;
-                    }
-                    callbacks.onClient(false, "");
                     continue;
                 }
                 // 局域网：鉴权最多可能耗掉几秒，放到独立线程去做，
@@ -200,10 +199,6 @@ final class TcpBridgeServer {
                 Thread worker = new Thread(() -> {
                     try {
                         handleClient(socket);
-                        if (client == socket) {
-                            client = null;
-                        }
-                        callbacks.onClient(false, "");
                     } finally {
                         lanClients.decrementAndGet();
                     }
@@ -241,9 +236,15 @@ final class TcpBridgeServer {
                 closeQuietly(socket);
                 return;
             }
-            closeQuietly(client);
-            client = socket;
-            callbacks.onClient(true, "");
+            synchronized (clientLock) {
+                if (!running) {
+                    return;
+                }
+                closeQuietly(client);
+                client = socket;
+                state.clientIsLan = !socket.getInetAddress().isLoopbackAddress();
+                callbacks.onClient(true, "");
+            }
             Thread reader = new Thread(() -> readLoop(socket, in), "lx04-tcp-in");
             reader.start();
             long lastStatus = 0;
@@ -277,6 +278,7 @@ final class TcpBridgeServer {
         } catch (Exception ignored) {
         } finally {
             closeQuietly(socket);
+            disconnectClient(socket);
         }
     }
 
@@ -295,12 +297,22 @@ final class TcpBridgeServer {
                 if (frame == null) {
                     break;
                 }
-                dispatch(frame);
+                synchronized (clientLock) {
+                    if (client == socket) {
+                        dispatch(frame);
+                    }
+                }
             }
         } catch (Exception ignored) {
         } finally {
             // 读线程死了必须收尾：以前只退出循环，socket 不关、client 不清，
             // 音箱侧还以为"已连接"，实际已经收不到任何控制指令。
+            disconnectClient(socket);
+        }
+    }
+
+    private void disconnectClient(Socket socket) {
+        synchronized (clientLock) {
             if (client == socket) {
                 closeQuietly(socket);
                 client = null;
